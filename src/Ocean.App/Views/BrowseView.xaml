@@ -1,0 +1,615 @@
+<UserControl x:Class="Ocean.App.Views.BrowseView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:Ocean.App.Controls">
+    <UserControl.Resources>
+        <!-- share chip -->
+        <Style x:Key="ChipBtn" TargetType="Button" BasedOn="{StaticResource BtnGhost}">
+            <Setter Property="Padding" Value="12,5"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="Transparent" BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="14" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Hover}"/>
+                                <Setter Property="Foreground" Value="{StaticResource Text}"/>
+                            </Trigger>
+                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource AccentSoft}"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                <Setter Property="Foreground" Value="{StaticResource Accent}"/>
+                            </DataTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- segmented / toggle buttons driven by VM state -->
+        <Style x:Key="SegBtn" TargetType="Button" BasedOn="{StaticResource BtnIcon}">
+            <Setter Property="Width" Value="30"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="5">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Hover}"/>
+                                <Setter Property="Foreground" Value="{StaticResource Text}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- context menu for a video (DataContext = ItemVm, PlacementTarget.Tag = BrowseViewModel) -->
+        <ContextMenu x:Key="ItemMenu">
+            <MenuItem Header="Play" Command="{Binding PlacementTarget.Tag.PlayCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}">
+                <MenuItem.Icon><TextBlock Text="&#xE768;" Style="{StaticResource Icon}"/></MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="Open in external player" Command="{Binding PlacementTarget.Tag.OpenExternalCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}">
+                <MenuItem.Icon><TextBlock Text="&#xE8A7;" Style="{StaticResource Icon}"/></MenuItem.Icon>
+            </MenuItem>
+            <Separator/>
+            <MenuItem Header="Download" Command="{Binding PlacementTarget.Tag.DownloadCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}">
+                <MenuItem.Icon><TextBlock Text="&#xE896;" Style="{StaticResource Icon}"/></MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="Copy stream link" Command="{Binding PlacementTarget.Tag.CopyLinkCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}">
+                <MenuItem.Icon><TextBlock Text="&#xE71B;" Style="{StaticResource Icon}"/></MenuItem.Icon>
+            </MenuItem>
+        </ContextMenu>
+
+        <!-- context menu for a folder (DataContext = FolderVm, PlacementTarget.Tag = BrowseViewModel) -->
+        <ContextMenu x:Key="FolderMenu">
+            <MenuItem Header="Open" Command="{Binding PlacementTarget.Tag.OpenFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}">
+                <MenuItem.Icon><TextBlock Text="&#xE838;" Style="{StaticResource Icon}"/></MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="Download folder" Command="{Binding PlacementTarget.Tag.DownloadFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}">
+                <MenuItem.Icon><TextBlock Text="&#xE896;" Style="{StaticResource Icon}"/></MenuItem.Icon>
+            </MenuItem>
+        </ContextMenu>
+
+        <!-- folder cover: newest video dimmed behind a folder badge -->
+        <DataTemplate x:Key="FolderThumb">
+            <Grid>
+                <Rectangle RadiusX="8" RadiusY="8" Fill="{StaticResource Bg3}"/>
+                <Rectangle RadiusX="8" RadiusY="8" Opacity="0.45" Visibility="{Binding HasThumb, Converter={StaticResource BoolToVis}}">
+                    <Rectangle.Fill><ImageBrush ImageSource="{Binding Thumb}" Stretch="UniformToFill"/></Rectangle.Fill>
+                </Rectangle>
+                <Border CornerRadius="8">
+                    <Border.Background>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                            <GradientStop Color="#00000000" Offset="0.3"/>
+                            <GradientStop Color="#B30A1120" Offset="1"/>
+                        </LinearGradientBrush>
+                    </Border.Background>
+                </Border>
+                <Border Width="44" Height="44" CornerRadius="22" Background="#CC0F192B" BorderBrush="{StaticResource Accent}" BorderThickness="1.5"
+                        HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock Text="&#xE8B7;" Style="{StaticResource Icon}" FontSize="20" Foreground="{StaticResource Accent}"/>
+                </Border>
+                <Border Style="{StaticResource Badge}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="6" Visibility="{Binding NewCount, Converter={StaticResource CountToVis}}">
+                    <TextBlock FontSize="10" FontWeight="Bold" Foreground="#042F2E"><Run Text="{Binding NewCount, Mode=OneWay}"/><Run Text=" NEW"/></TextBlock>
+                </Border>
+                <Border Width="22" Height="22" CornerRadius="11" Background="{StaticResource Accent}" BorderBrush="{StaticResource Bg0}" BorderThickness="2"
+                        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="5" Visibility="{Binding IsSelected, Converter={StaticResource BoolToVis}}">
+                    <TextBlock Text="&#xE73E;" Style="{StaticResource Icon}" FontSize="11" FontWeight="Bold" Foreground="{StaticResource AccentText}"/>
+                </Border>
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate x:Key="GridFolder">
+            <Border x:Name="Tile" Margin="7" CornerRadius="10" Background="{StaticResource Bg2}" BorderBrush="{StaticResource Border}" BorderThickness="1" Padding="7"
+                    Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}" ContextMenu="{StaticResource FolderMenu}" ToolTip="{Binding Tooltip}" Cursor="Hand">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="118"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource FolderThumb}"/>
+                    <StackPanel Grid.Row="1" Margin="2,8,2,0">
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" MaxHeight="36" LineHeight="18" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Style="{StaticResource Dim}" Text="{Binding Summary}" Margin="0,3,0,0"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                    <Setter TargetName="Tile" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                    <Setter TargetName="Tile" Property="BorderThickness" Value="2"/>
+                    <Setter TargetName="Tile" Property="Background" Value="{StaticResource Bg3}"/>
+                </DataTrigger>
+                <Trigger SourceName="Tile" Property="IsMouseOver" Value="True"><Setter TargetName="Tile" Property="Background" Value="{StaticResource Bg3}"/></Trigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <DataTemplate x:Key="SmallFolder">
+            <Border x:Name="Tile" Margin="5" CornerRadius="8" Background="{StaticResource Bg2}" BorderBrush="{StaticResource Border}" BorderThickness="1" Padding="5"
+                    Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}" ContextMenu="{StaticResource FolderMenu}" ToolTip="{Binding Tooltip}" Cursor="Hand">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="84"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource FolderThumb}"/>
+                    <StackPanel Grid.Row="1" Margin="1,6,1,0">
+                        <TextBlock Text="{Binding Name}" FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" MaxHeight="32" LineHeight="16" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Style="{StaticResource Dim}" Text="{Binding Summary}" Margin="0,2,0,0"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                    <Setter TargetName="Tile" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                    <Setter TargetName="Tile" Property="BorderThickness" Value="2"/>
+                    <Setter TargetName="Tile" Property="Background" Value="{StaticResource Bg3}"/>
+                </DataTrigger>
+                <Trigger SourceName="Tile" Property="IsMouseOver" Value="True"><Setter TargetName="Tile" Property="Background" Value="{StaticResource Bg3}"/></Trigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <DataTemplate x:Key="ListFolder">
+            <Border x:Name="Row" Margin="16,1" CornerRadius="8" Background="Transparent" BorderThickness="1" BorderBrush="Transparent" Padding="8,5"
+                    Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}" ContextMenu="{StaticResource FolderMenu}" ToolTip="{Binding Tooltip}" Cursor="Hand">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="96"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid Width="96" Height="54">
+                        <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource FolderThumb}"/>
+                    </Grid>
+                    <StackPanel Grid.Column="1" Margin="12,0" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                        <TextBlock Style="{StaticResource Dim}" Text="{Binding Summary}"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button Style="{StaticResource BtnIcon}" Content="&#xE838;" ToolTip="Open folder" Command="{Binding DataContext.OpenFolderCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
+                        <Button Style="{StaticResource BtnIcon}" Content="&#xE896;" ToolTip="Download folder" Command="{Binding DataContext.DownloadFolderCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                    <Setter TargetName="Row" Property="Background" Value="{StaticResource Bg3}"/>
+                    <Setter TargetName="Row" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                    <Setter TargetName="Row" Property="BorderThickness" Value="2"/>
+                </DataTrigger>
+                <Trigger SourceName="Row" Property="IsMouseOver" Value="True"><Setter TargetName="Row" Property="Background" Value="{StaticResource Bg2}"/></Trigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <!-- thumbnail block shared by grid & tiles -->
+        <DataTemplate x:Key="ThumbBlock">
+            <Grid>
+                <Rectangle RadiusX="8" RadiusY="8" Fill="{StaticResource Bg3}"/>
+                <Rectangle RadiusX="8" RadiusY="8" Visibility="{Binding HasThumb, Converter={StaticResource BoolToVis}}">
+                    <Rectangle.Fill><ImageBrush ImageSource="{Binding Thumb}" Stretch="UniformToFill"/></Rectangle.Fill>
+                </Rectangle>
+                <TextBlock Text="&#xE714;" Style="{StaticResource Icon}" FontSize="26" Foreground="{StaticResource TextDim}" Visibility="{Binding HasThumb, Converter={StaticResource InvBoolToVis}}"/>
+                <!-- locked overlay -->
+                <Border CornerRadius="8" Background="#99000000" Visibility="{Binding IsLocked, Converter={StaticResource BoolToVis}}">
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                        <TextBlock Text="&#xE72E;" Style="{StaticResource Icon}" FontSize="22" Foreground="{StaticResource Warn}"/>
+                        <TextBlock Text="{Binding LockText}" Style="{StaticResource Dim}" Foreground="{StaticResource Warn}" Margin="0,4,0,0" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                </Border>
+                <!-- NEW ribbon -->
+                <Border Style="{StaticResource Badge}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="6" Visibility="{Binding IsNew, Converter={StaticResource BoolToVis}}">
+                    <TextBlock Text="NEW" FontSize="10" FontWeight="Bold" Foreground="#042F2E"/>
+                </Border>
+                <!-- the same video is in my own shares (it came back through this PC) -->
+                <Border Style="{StaticResource Badge}" Background="{StaticResource Blue}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="6"
+                        Visibility="{Binding IsMine, Converter={StaticResource BoolToVis}}" ToolTip="You share this video too">
+                    <TextBlock Text="YOURS" FontSize="10" FontWeight="Bold" Foreground="#0A1120"/>
+                </Border>
+                <!-- selected: check mark (the "new" state is only the NEW badge, never an outline) -->
+                <Border Width="22" Height="22" CornerRadius="11" Background="{StaticResource Accent}" BorderBrush="{StaticResource Bg0}" BorderThickness="2"
+                        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="5" Visibility="{Binding IsSelected, Converter={StaticResource BoolToVis}}">
+                    <TextBlock Text="&#xE73E;" Style="{StaticResource Icon}" FontSize="11" FontWeight="Bold" Foreground="{StaticResource AccentText}"/>
+                </Border>
+                <!-- duration / resolution -->
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="6">
+                    <Border Background="#CC0A1120" CornerRadius="4" Padding="5,1" Margin="4,0,0,0" Visibility="{Binding ResolutionText, Converter={StaticResource NullToVis}}">
+                        <TextBlock Text="{Binding ResolutionText}" FontSize="10" FontWeight="SemiBold"/>
+                    </Border>
+                    <Border Background="#CC0A1120" CornerRadius="4" Padding="5,1" Margin="4,0,0,0" Visibility="{Binding DurationText, Converter={StaticResource NullToVis}}">
+                        <TextBlock Text="{Binding DurationText}" FontSize="10" FontWeight="SemiBold"/>
+                    </Border>
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate x:Key="GridTile">
+            <Border x:Name="Tile" Margin="7" CornerRadius="10" Background="{StaticResource Bg2}" BorderBrush="{StaticResource Border}" BorderThickness="1" Padding="7"
+                    Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}" ContextMenu="{StaticResource ItemMenu}" ToolTip="{Binding Tooltip}" Cursor="Hand">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="118"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource ThumbBlock}"/>
+                    <StackPanel Grid.Row="1" Margin="2,8,2,0">
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" MaxHeight="36" LineHeight="18" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Style="{StaticResource Dim}" Margin="0,3,0,0">
+                            <Run Text="{Binding SizeText, Mode=OneWay}"/><Run Text="  ·  "/><Run Text="{Binding AddedText, Mode=OneWay}"/>
+                        </TextBlock>
+                        <TextBlock Style="{StaticResource Dim}" Text="{Binding Folder}" Visibility="{Binding Folder, Converter={StaticResource NullToVis}}" Margin="0,1,0,0"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                    <Setter TargetName="Tile" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                    <Setter TargetName="Tile" Property="BorderThickness" Value="2"/>
+                    <Setter TargetName="Tile" Property="Background" Value="{StaticResource Bg3}"/>
+                </DataTrigger>
+                <Trigger SourceName="Tile" Property="IsMouseOver" Value="True">
+                    <Setter TargetName="Tile" Property="Background" Value="{StaticResource Bg3}"/>
+                </Trigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <DataTemplate x:Key="SmallTile">
+            <Border x:Name="Tile" Margin="5" CornerRadius="8" Background="{StaticResource Bg2}" BorderBrush="{StaticResource Border}" BorderThickness="1" Padding="5"
+                    Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}" ContextMenu="{StaticResource ItemMenu}" ToolTip="{Binding Tooltip}" Cursor="Hand">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="84"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource ThumbBlock}"/>
+                    <StackPanel Grid.Row="1" Margin="1,6,1,0">
+                        <TextBlock Text="{Binding Name}" FontSize="12" TextWrapping="Wrap" MaxHeight="32" LineHeight="16" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Style="{StaticResource Dim}" Text="{Binding SizeText}" Margin="0,2,0,0"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                    <Setter TargetName="Tile" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                    <Setter TargetName="Tile" Property="BorderThickness" Value="2"/>
+                    <Setter TargetName="Tile" Property="Background" Value="{StaticResource Bg3}"/>
+                </DataTrigger>
+                <Trigger SourceName="Tile" Property="IsMouseOver" Value="True"><Setter TargetName="Tile" Property="Background" Value="{StaticResource Bg3}"/></Trigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <DataTemplate x:Key="ListRow">
+            <Border x:Name="Row" Margin="16,1" CornerRadius="8" Background="Transparent" BorderThickness="1" BorderBrush="Transparent" Padding="8,5"
+                    Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}" ContextMenu="{StaticResource ItemMenu}" ToolTip="{Binding Tooltip}" Cursor="Hand">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="96"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="80"/>
+                        <ColumnDefinition Width="70"/>
+                        <ColumnDefinition Width="110"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid Width="96" Height="54">
+                        <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource ThumbBlock}"/>
+                    </Grid>
+                    <StackPanel Grid.Column="1" Margin="12,0" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                        <TextBlock Style="{StaticResource Dim}" Text="{Binding Location}"/>
+                    </StackPanel>
+                    <TextBlock Grid.Column="2" Text="{Binding SizeText}" Style="{StaticResource Muted}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="3" Text="{Binding DurationText}" Style="{StaticResource Muted}" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="4" Text="{Binding AddedText}" Style="{StaticResource Muted}" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="5" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button Style="{StaticResource BtnIcon}" Content="&#xE768;" ToolTip="Play" Command="{Binding DataContext.PlayCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
+                        <Button Style="{StaticResource BtnIcon}" Content="&#xE896;" ToolTip="Download" Command="{Binding DataContext.DownloadCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                    <Setter TargetName="Row" Property="Background" Value="{StaticResource Bg3}"/>
+                    <Setter TargetName="Row" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                    <Setter TargetName="Row" Property="BorderThickness" Value="2"/>
+                </DataTrigger>
+                <Trigger SourceName="Row" Property="IsMouseOver" Value="True"><Setter TargetName="Row" Property="Background" Value="{StaticResource Bg2}"/></Trigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <!-- folder + video lists: one selector per view mode -->
+        <c:EntryTemplateSelector x:Key="GridSelector" Item="{StaticResource GridTile}" Folder="{StaticResource GridFolder}"/>
+        <c:EntryTemplateSelector x:Key="TilesSelector" Item="{StaticResource SmallTile}" Folder="{StaticResource SmallFolder}"/>
+        <c:EntryTemplateSelector x:Key="ListSelector" Item="{StaticResource ListRow}" Folder="{StaticResource ListFolder}"/>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- header -->
+        <Grid Margin="24,18,24,6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Border Width="46" Height="46" CornerRadius="23" Background="{Binding Peer.Id, Converter={StaticResource InitialsBrush}}">
+                <TextBlock Text="{Binding Peer.Initials}" FontWeight="Bold" FontSize="15" Foreground="#0A1120" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <StackPanel Grid.Column="1" Margin="14,0,0,0" VerticalAlignment="Center">
+                <TextBlock Text="{Binding Peer.Label}" Style="{StaticResource H1}"/>
+                <TextBlock Style="{StaticResource Muted}" Text="{Binding HeaderText}"/>
+            </StackPanel>
+            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                <Border Style="{StaticResource Badge}" Padding="8,2" Margin="0,0,8,0" Visibility="{Binding NewCount, Converter={StaticResource CountToVis}}">
+                    <TextBlock FontSize="11" FontWeight="SemiBold" Foreground="#042F2E"><Run Text="{Binding NewCount, Mode=OneWay}"/><Run Text=" new"/></TextBlock>
+                </Border>
+                <Button Content="Mark all seen" Style="{StaticResource BtnGhost}" Command="{Binding MarkSeenCommand}" Visibility="{Binding NewCount, Converter={StaticResource CountToVis}}"/>
+                <Button Style="{StaticResource BtnIcon}" Content="&#xE72C;" ToolTip="Refresh" Command="{Binding RefreshCommand}" Margin="4,0,0,0"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- share chips -->
+        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled" Margin="24,6,24,0" PreviewMouseWheel="Chips_MouseWheel">
+            <ItemsControl ItemsSource="{Binding Shares}">
+                <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Button Style="{StaticResource ChipBtn}" Command="{Binding DataContext.SelectShareCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">
+                            <Button.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Download all videos" Click="ChipDownload_Click"/>
+                                    <MenuItem Header="Unlock" Click="ChipUnlock_Click"/>
+                                </ContextMenu>
+                            </Button.ContextMenu>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding LockGlyph}" Style="{StaticResource Icon}" FontSize="11" Margin="0,0,6,0" Visibility="{Binding IsLocked, Converter={StaticResource BoolToVis}}" Foreground="{StaticResource Warn}"/>
+                                <TextBlock Text="{Binding Name}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" MaxWidth="220"/>
+                                <TextBlock Text="{Binding Count}" Style="{StaticResource Dim}" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                                <Border Style="{StaticResource Badge}" Margin="6,0,0,0" Padding="5,0" Visibility="{Binding NewCount, Converter={StaticResource CountToVis}}">
+                                    <TextBlock Text="{Binding NewCount}" FontSize="10" FontWeight="Bold" Foreground="#042F2E"/>
+                                </Border>
+                            </StackPanel>
+                        </Button>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <!-- toolbar -->
+        <Grid Grid.Row="2" Margin="24,10,24,6">
+            <StackPanel Orientation="Horizontal">
+                <Border Background="{StaticResource Bg1}" CornerRadius="7" Padding="2" BorderBrush="{StaticResource Border}" BorderThickness="1">
+                    <StackPanel Orientation="Horizontal">
+                        <Button Content="&#xE80A;" ToolTip="Large tiles" Command="{Binding SetViewCommand}" CommandParameter="Grid">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource SegBtn}">
+                                    <Style.Triggers><DataTrigger Binding="{Binding ViewMode}" Value="Grid"><Setter Property="Background" Value="{StaticResource Bg3}"/><Setter Property="Foreground" Value="{StaticResource Accent}"/></DataTrigger></Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button Content="&#xF0E2;" ToolTip="Small tiles" Command="{Binding SetViewCommand}" CommandParameter="Tiles">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource SegBtn}">
+                                    <Style.Triggers><DataTrigger Binding="{Binding ViewMode}" Value="Tiles"><Setter Property="Background" Value="{StaticResource Bg3}"/><Setter Property="Foreground" Value="{StaticResource Accent}"/></DataTrigger></Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button Content="&#xE8FD;" ToolTip="List" Command="{Binding SetViewCommand}" CommandParameter="List">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource SegBtn}">
+                                    <Style.Triggers><DataTrigger Binding="{Binding ViewMode}" Value="List"><Setter Property="Background" Value="{StaticResource Bg3}"/><Setter Property="Foreground" Value="{StaticResource Accent}"/></DataTrigger></Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                    </StackPanel>
+                </Border>
+
+                <Button x:Name="SortButton" Style="{StaticResource BtnGhost}" Margin="10,0,0,0" Click="Sort_Click">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE8CB;" Style="{StaticResource Icon}" Margin="0,0,8,0"/>
+                        <TextBlock Text="{Binding SortLabel}"/>
+                        <TextBlock Text="&#xE70D;" Style="{StaticResource Icon}" FontSize="9" Margin="8,1,0,0"/>
+                    </StackPanel>
+                    <Button.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="Newest first" Command="{Binding PlacementTarget.DataContext.SetSortCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Newest"/>
+                            <MenuItem Header="Name" Command="{Binding PlacementTarget.DataContext.SetSortCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Name"/>
+                            <MenuItem Header="Largest first" Command="{Binding PlacementTarget.DataContext.SetSortCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Size"/>
+                            <MenuItem Header="Longest first" Command="{Binding PlacementTarget.DataContext.SetSortCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Duration"/>
+                            <MenuItem Header="Folder" Command="{Binding PlacementTarget.DataContext.SetSortCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Folder"/>
+                        </ContextMenu>
+                    </Button.ContextMenu>
+                </Button>
+
+                <Button Margin="4,0,0,0" Command="{Binding ToggleNewOnlyCommand}">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource BtnGhost}">
+                            <Style.Triggers><DataTrigger Binding="{Binding NewOnly}" Value="True"><Setter Property="Foreground" Value="{StaticResource New}"/><Setter Property="Background" Value="{StaticResource NewSoft}"/></DataTrigger></Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE734;" Style="{StaticResource Icon}" Margin="0,0,8,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                        <TextBlock Text="New only" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Style="{StaticResource BtnPrimary}" Command="{Binding DownloadSelectedCommand}" Visibility="{Binding SelectedCount, Converter={StaticResource CountToVis}}" Margin="0,0,8,0">
+                    <TextBlock Foreground="{StaticResource AccentText}"><Run Text="Download "/><Run Text="{Binding SelectedCount, Mode=OneWay}"/><Run Text=" selected"/></TextBlock>
+                </Button>
+                <Button Style="{StaticResource BtnGhost}" Command="{Binding DownloadShareCommand}" CommandParameter="{Binding SelectedShare}" ToolTip="Download every video shown in this share to your PC">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="&#xE896;" Style="{StaticResource Icon}" Margin="0,0,8,0"/>
+                        <TextBlock Text="{Binding DownloadAllLabel}"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <StackPanel Grid.Row="3">
+            <!-- offline node: last known shares -->
+            <Border Margin="24,2,24,8" Background="#1F9CA3AF" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" CornerRadius="8" Padding="12,8"
+                    Visibility="{Binding IsOffline, Converter={StaticResource BoolToVis}}">
+                <DockPanel>
+                    <Ellipse Width="9" Height="9" Fill="{StaticResource TextDim}" Margin="2,0,12,0" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding OfflineBanner}" TextWrapping="Wrap" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center"/>
+                </DockPanel>
+            </Border>
+
+            <!-- breadcrumb: where am I inside the share -->
+            <Border Margin="24,2,24,4" Visibility="{Binding FolderMode, Converter={StaticResource BoolToVis}}">
+                <StackPanel Orientation="Horizontal">
+                    <Button Style="{StaticResource BtnIcon}" Width="28" Height="28" FontSize="12" Content="&#xE74A;" ToolTip="Up one folder (Backspace)" Command="{Binding UpCommand}" Margin="0,0,6,0"
+                            Visibility="{Binding CurrentFolder, Converter={StaticResource NullToVis}}" AutomationProperties.Name="Up one folder"/>
+                    <TextBlock Text="&#xE8B7;" Style="{StaticResource Icon}" Foreground="{StaticResource TextMuted}" Margin="2,0,8,0"/>
+                    <ItemsControl ItemsSource="{Binding Crumbs}" VerticalAlignment="Center">
+                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <Button x:Name="Seg" Style="{StaticResource BtnGhost}" Padding="6,3" Content="{Binding Name}" MaxWidth="220" ToolTip="{Binding Name}"
+                                            Command="{Binding DataContext.GoToFolderCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding Path}"/>
+                                    <TextBlock x:Name="Sep" Text="&#xE76C;" Style="{StaticResource Icon}" FontSize="9" Foreground="{StaticResource TextDim}" Margin="2,0"/>
+                                </StackPanel>
+                                <DataTemplate.Triggers>
+                                    <DataTrigger Binding="{Binding IsLast}" Value="True">
+                                        <Setter TargetName="Sep" Property="Visibility" Value="Collapsed"/>
+                                        <Setter TargetName="Seg" Property="Foreground" Value="{StaticResource Text}"/>
+                                        <Setter TargetName="Seg" Property="FontWeight" Value="SemiBold"/>
+                                    </DataTrigger>
+                                </DataTemplate.Triggers>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <!-- waiting for approval -->
+            <Border Margin="24,2,24,6" Background="{StaticResource AccentSoft}" BorderBrush="{StaticResource Accent}" BorderThickness="1" CornerRadius="8" Padding="12,8"
+                    Visibility="{Binding PendingText, Converter={StaticResource NullToVis}}">
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="Cancel" Style="{StaticResource BtnGhost}" Command="{Binding CancelPendingCommand}"/>
+                    <ProgressBar DockPanel.Dock="Left" IsIndeterminate="True" Width="60" Height="4" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding PendingText}" VerticalAlignment="Center"/>
+                </DockPanel>
+            </Border>
+        </StackPanel>
+
+        <!-- content -->
+        <Grid Grid.Row="4">
+            <ProgressBar IsIndeterminate="True" Height="3" VerticalAlignment="Top" Margin="24,0" Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}}"/>
+
+            <ListBox x:Name="List" ItemsSource="{Binding Entries}" SelectionMode="Extended" Margin="18,4,18,0"
+                     MouseDoubleClick="List_MouseDoubleClick" SelectionChanged="List_SelectionChanged" KeyDown="List_KeyDown">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+                        <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem"><ContentPresenter/></ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.Style>
+                    <Style TargetType="ListBox" BasedOn="{StaticResource PlainList}">
+                        <Setter Property="ItemTemplateSelector" Value="{StaticResource GridSelector}"/>
+                        <Setter Property="ItemsPanel">
+                            <Setter.Value>
+                                <ItemsPanelTemplate><c:VirtualizingWrapPanel ItemWidth="236" ItemHeight="236"/></ItemsPanelTemplate>
+                            </Setter.Value>
+                        </Setter>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding ViewMode}" Value="Tiles">
+                                <Setter Property="ItemTemplateSelector" Value="{StaticResource TilesSelector}"/>
+                                <Setter Property="ItemsPanel">
+                                    <Setter.Value>
+                                        <ItemsPanelTemplate><c:VirtualizingWrapPanel ItemWidth="166" ItemHeight="166"/></ItemsPanelTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding ViewMode}" Value="List">
+                                <Setter Property="ItemTemplateSelector" Value="{StaticResource ListSelector}"/>
+                                <Setter Property="ItemsPanel">
+                                    <Setter.Value>
+                                        <ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding SelectedShare.IsLocked}" Value="True">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                            <!-- offline: a dimmed "skeleton" of the last known list (still browsable) -->
+                            <DataTrigger Binding="{Binding IsOffline}" Value="True">
+                                <Setter Property="Opacity" Value="0.5"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ListBox.Style>
+            </ListBox>
+
+            <!-- locked share -->
+            <Border Style="{StaticResource Card}" Width="380" VerticalAlignment="Center" HorizontalAlignment="Center" Padding="28"
+                    Visibility="{Binding SelectedShare.IsLocked, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}">
+                <StackPanel>
+                    <TextBlock Text="&#xE72E;" Style="{StaticResource Icon}" FontSize="36" Foreground="{StaticResource Warn}"/>
+                    <TextBlock Style="{StaticResource H2}" HorizontalAlignment="Center" Margin="0,14,0,4" TextAlignment="Center" TextWrapping="Wrap">
+                        <Run Text="“"/><Run Text="{Binding SelectedShare.Name, Mode=OneWay}"/><Run Text="” is locked"/>
+                    </TextBlock>
+                    <TextBlock Style="{StaticResource Muted}" TextAlignment="Center" TextWrapping="Wrap">
+                        <TextBlock.Text>
+                            <MultiBinding StringFormat="{}{0}  ·  {1}">
+                                <Binding Path="SelectedShare.CountText"/>
+                                <Binding Path="SelectedShare.SizeText"/>
+                            </MultiBinding>
+                        </TextBlock.Text>
+                    </TextBlock>
+                    <TextBlock TextAlignment="Center" TextWrapping="Wrap" Margin="0,8,0,0">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock" BasedOn="{StaticResource Muted}">
+                                <Setter Property="Text" Value="The owner protected this share with a password."/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SelectedShare.Mode}" Value="Ask"><Setter Property="Text" Value="The owner approves each request personally."/></DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <Button Style="{StaticResource BtnPrimary}" Margin="0,18,0,0" HorizontalAlignment="Center" Padding="22,8" Command="{Binding UnlockCommand}" CommandParameter="{Binding SelectedShare}"
+                            Visibility="{Binding SelectedShare.IsPending, Converter={StaticResource InvBoolToVis}, FallbackValue=Visible}">
+                        <TextBlock Foreground="{StaticResource AccentText}">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Text" Value="Enter password"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedShare.Mode}" Value="Ask"><Setter Property="Text" Value="Ask for access"/></DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </Button>
+                </StackPanel>
+            </Border>
+
+            <!-- empty -->
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="{Binding EmptyText, Converter={StaticResource NullToVis}}">
+                <TextBlock Text="&#xE8B2;" Style="{StaticResource Icon}" FontSize="36" Foreground="{StaticResource TextDim}"/>
+                <TextBlock Text="{Binding EmptyText}" Style="{StaticResource Muted}" Margin="0,12,0,0" TextAlignment="Center"/>
+            </StackPanel>
+            <TextBlock Text="{Binding Error}" Foreground="{StaticResource Danger}" Margin="24" VerticalAlignment="Top" TextWrapping="Wrap" Visibility="{Binding Error, Converter={StaticResource NullToVis}}"/>
+        </Grid>
+    </Grid>
+</UserControl>

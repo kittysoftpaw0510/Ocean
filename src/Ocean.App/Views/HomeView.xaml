@@ -1,0 +1,31 @@
+<UserControl x:Class="Ocean.App.Views.HomeView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="560" Margin="40">
+            <TextBlock Text="&#xE8B7;" Style="{StaticResource Icon}" FontSize="44" Foreground="{StaticResource Accent}" Margin="0,0,0,18"/>
+            <TextBlock Style="{StaticResource H1}" HorizontalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap">
+                <Run Text="Welcome, "/><Run Text="{Binding MyName}"/>
+            </TextBlock>
+            <TextBlock Style="{StaticResource Muted}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="14"
+                       Text="Pick a node on the left to browse and watch what it shares. Add your own videos under My shares — everyone on this network will see them."/>
+
+            <Border Style="{StaticResource Card}" Margin="0,28,0,0" Visibility="{Binding PeerCount, Converter={StaticResource ZeroToVis}}">
+                <StackPanel>
+                    <TextBlock Text="No other nodes found yet" Style="{StaticResource H2}"/>
+                    <TextBlock Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,6,0,0"
+                               Text="Install Ocean on another PC on the same local network. Nodes find each other automatically within a few seconds."/>
+                    <TextBlock Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,6,0,0" Visibility="{Binding RealmSet, Converter={StaticResource BoolToVis}}"
+                               Text="You have set a shared secret: only nodes that entered the same secret are visible to you."/>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}" Margin="0,28,0,0" Visibility="{Binding TotalNew, Converter={StaticResource CountToVis}}">
+                <StackPanel Orientation="Horizontal">
+                    <Border Style="{StaticResource Badge}" Margin="0,0,10,0"><TextBlock Text="{Binding TotalNew}" FontWeight="SemiBold" Foreground="#042F2E"/></Border>
+                    <TextBlock Text="new videos since your last visits — highlighted in the node list." Style="{StaticResource Muted}" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </Grid>
+</UserControl>

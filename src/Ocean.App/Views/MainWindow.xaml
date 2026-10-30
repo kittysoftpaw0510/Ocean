@@ -1,0 +1,345 @@
+<Window x:Class="Ocean.App.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:Ocean.App.ViewModels"
+        xmlns:v="clr-namespace:Ocean.App.Views"
+        Title="Ocean" Width="1240" Height="790" MinWidth="900" MinHeight="580"
+        Background="{StaticResource Bg0}" WindowStartupLocation="CenterScreen"
+        FontFamily="{StaticResource UiFont}" FontSize="13" Foreground="{StaticResource Text}"
+        TextOptions.TextFormattingMode="Display" UseLayoutRounding="True" SnapsToDevicePixels="True"
+        AllowDrop="True">
+    <Window.Resources>
+        <DataTemplate DataType="{x:Type vm:HomeViewModel}"><v:HomeView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:BrowseViewModel}"><v:BrowseView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:SharesViewModel}"><v:SharesView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:DownloadsViewModel}"><v:DownloadsView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:SettingsViewModel}"><v:SettingsView/></DataTemplate>
+
+        <Style x:Key="NavBtn" TargetType="Button" BasedOn="{StaticResource BtnGhost}">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="Margin" Value="8,1"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="7" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter VerticalAlignment="Center" HorizontalAlignment="Stretch"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Hover}"/>
+                                <Setter Property="Foreground" Value="{StaticResource Text}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="PeerItem" TargetType="ListBoxItem">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Margin" Value="8,1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="7" Padding="8,6">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Hover}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Bg3}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="256"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- ================= sidebar ================= -->
+        <Border Background="{StaticResource Bg1}" BorderBrush="{StaticResource Border}" BorderThickness="0,0,1,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- brand -->
+                <Button Grid.Row="0" Style="{StaticResource NavBtn}" Command="{Binding ShowHomeCommand}" Margin="8,12,8,4" Padding="8,6">
+                    <StackPanel Orientation="Horizontal">
+                        <Image x:Name="Logo" Width="30" Height="30" VerticalAlignment="Center"/>
+                        <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                            <TextBlock Text="Ocean" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+                            <TextBlock Style="{StaticResource Dim}" Text="{Binding IdentityText}" MaxWidth="180" ToolTip="{Binding IdentityText}"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Button>
+
+                <!-- search -->
+                <Grid Grid.Row="1" Margin="14,8,14,10">
+                    <TextBox x:Name="SearchBox" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Padding="30,6,28,6"/>
+                    <TextBlock Text="&#xE721;" Style="{StaticResource Icon}" Foreground="{StaticResource TextDim}" HorizontalAlignment="Left" Margin="10,0,0,0" IsHitTestVisible="False"/>
+                    <TextBlock Text="Search videos   (Ctrl+F)" Foreground="{StaticResource TextDim}" Margin="31,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"
+                               Visibility="{Binding Text.Length, ElementName=SearchBox, Converter={StaticResource ZeroToVis}}"/>
+                    <Button Style="{StaticResource BtnIcon}" Width="24" Height="24" Content="&#xE711;" FontSize="10" HorizontalAlignment="Right" Margin="0,0,4,0"
+                            Command="{Binding ClearSearchCommand}" Visibility="{Binding Text.Length, ElementName=SearchBox, Converter={StaticResource CountToVis}}"/>
+                </Grid>
+
+                <!-- network header -->
+                <Grid Grid.Row="2" Margin="18,6,14,4">
+                    <TextBlock Text="NETWORK" Style="{StaticResource Dim}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                    <Button Style="{StaticResource BtnIcon}" Width="24" Height="24" Content="&#xE72C;" FontSize="11" HorizontalAlignment="Right" ToolTip="Refresh" Command="{Binding RefreshPeersCommand}"/>
+                </Grid>
+
+                <!-- peers -->
+                <Grid Grid.Row="3">
+                    <ListBox ItemsSource="{Binding Peers}" SelectedItem="{Binding SelectedPeer, Mode=TwoWay}" ItemContainerStyle="{StaticResource PeerItem}"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid>
+                                        <Border x:Name="Avatar" Width="34" Height="34" CornerRadius="17" Background="{Binding Id, Converter={StaticResource InitialsBrush}}">
+                                            <TextBlock Text="{Binding Initials}" FontWeight="SemiBold" FontSize="12" Foreground="#0A1120" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                        <!-- presence dot -->
+                                        <Ellipse x:Name="Presence" Width="11" Height="11" Fill="{StaticResource New}" Stroke="{StaticResource Bg1}" StrokeThickness="2"
+                                                 HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-2,-2"/>
+                                    </Grid>
+                                    <StackPanel x:Name="Texts" Grid.Column="1" Margin="10,0,6,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
+                                        <TextBlock x:Name="Sub" Style="{StaticResource Dim}" Text="{Binding Subtitle}"/>
+                                    </StackPanel>
+                                    <Border Grid.Column="2" Style="{StaticResource Badge}" Visibility="{Binding NewCount, Converter={StaticResource CountToVis}}" ToolTip="New videos since your last visit">
+                                        <TextBlock Text="{Binding NewCount}" FontSize="11" FontWeight="SemiBold" Foreground="#042F2E"/>
+                                    </Border>
+                                </Grid>
+                                <DataTemplate.Triggers>
+                                    <!-- offline: dimmed, gray dot, "last seen" instead of the host -->
+                                    <DataTrigger Binding="{Binding Online}" Value="False">
+                                        <Setter TargetName="Avatar" Property="Opacity" Value="0.4"/>
+                                        <Setter TargetName="Texts" Property="Opacity" Value="0.6"/>
+                                        <Setter TargetName="Presence" Property="Fill" Value="{StaticResource TextDim}"/>
+                                        <Setter TargetName="Sub" Property="Text" Value="{Binding OfflineText}"/>
+                                    </DataTrigger>
+                                </DataTemplate.Triggers>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    <StackPanel Margin="18,8" Visibility="{Binding Peers.Count, Converter={StaticResource ZeroToVis}}">
+                        <TextBlock Text="Looking for other Ocean nodes…" Style="{StaticResource Muted}" TextWrapping="Wrap"/>
+                        <TextBlock Text="Nodes on the same network (and with the same secret) appear here automatically." Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                    </StackPanel>
+                </Grid>
+
+                <!-- library -->
+                <StackPanel Grid.Row="4" Margin="0,6,0,6">
+                    <TextBlock Text="LIBRARY" Style="{StaticResource Dim}" FontWeight="SemiBold" Margin="18,6,14,4"/>
+                    <Button Command="{Binding ShowSharesCommand}">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource NavBtn}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Nav}" Value="shares">
+                                        <Setter Property="Background" Value="{StaticResource Bg3}"/>
+                                        <Setter Property="Foreground" Value="{StaticResource Text}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                        <DockPanel>
+                            <TextBlock Text="&#xE8B7;" Style="{StaticResource Icon}" Width="24" HorizontalAlignment="Left"/>
+                            <TextBlock Text="My shares" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                        </DockPanel>
+                    </Button>
+                    <Button Command="{Binding ShowDownloadsCommand}">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource NavBtn}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Nav}" Value="downloads">
+                                        <Setter Property="Background" Value="{StaticResource Bg3}"/>
+                                        <Setter Property="Foreground" Value="{StaticResource Text}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                        <DockPanel>
+                            <TextBlock Text="&#xE896;" Style="{StaticResource Icon}" Width="24" HorizontalAlignment="Left"/>
+                            <Border DockPanel.Dock="Right" Style="{StaticResource Badge}" Background="{StaticResource Blue}" Visibility="{Binding ActiveDownloads, Converter={StaticResource CountToVis}}">
+                                <TextBlock Text="{Binding ActiveDownloads}" FontSize="11" FontWeight="SemiBold" Foreground="#0A1120"/>
+                            </Border>
+                            <TextBlock Text="Downloads" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                        </DockPanel>
+                    </Button>
+                    <Button Command="{Binding ShowSettingsCommand}">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource NavBtn}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Nav}" Value="settings">
+                                        <Setter Property="Background" Value="{StaticResource Bg3}"/>
+                                        <Setter Property="Foreground" Value="{StaticResource Text}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                        <DockPanel>
+                            <TextBlock Text="&#xE713;" Style="{StaticResource Icon}" Width="24" HorizontalAlignment="Left"/>
+                            <TextBlock Text="Settings" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                        </DockPanel>
+                    </Button>
+                </StackPanel>
+
+                <!-- footer -->
+                <Border Grid.Row="5" BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="16,10">
+                    <Grid>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Ellipse Width="8" Height="8" Margin="0,0,8,0">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Fill" Value="{StaticResource New}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Connected}" Value="False"><Setter Property="Fill" Value="{StaticResource Danger}"/></DataTrigger>
+                                            <DataTrigger Binding="{Binding SharingPaused}" Value="True"><Setter Property="Fill" Value="{StaticResource Warn}"/></DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock Text="{Binding StatusText}" Style="{StaticResource Dim}" MaxWidth="150"/>
+                        </StackPanel>
+                        <Button Style="{StaticResource BtnIcon}" HorizontalAlignment="Right" Command="{Binding TogglePauseCommand}" Width="28" Height="28" FontSize="13">
+                            <Button.Content>
+                                <TextBlock>
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock" BasedOn="{StaticResource Icon}">
+                                            <Setter Property="Text" Value="&#xE769;"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding SharingPaused}" Value="True">
+                                                    <Setter Property="Text" Value="&#xE768;"/>
+                                                    <Setter Property="Foreground" Value="{StaticResource Warn}"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Button.Content>
+                            <Button.ToolTip>
+                                <TextBlock>
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Text" Value="Pause sharing (hide my shares)"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding SharingPaused}" Value="True"><Setter Property="Text" Value="Resume sharing"/></DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Button.ToolTip>
+                        </Button>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- ================= content ================= -->
+        <Grid Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- pending access requests banner -->
+            <ItemsControl ItemsSource="{Binding Pending}" Margin="24,12,24,0">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Background="#2A2B1E0A" BorderBrush="{StaticResource Warn}" BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,0,0,8">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="&#xE8D7;" Style="{StaticResource Icon}" Foreground="{StaticResource Warn}" FontSize="18" Margin="0,0,12,0"/>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                    <TextBlock Style="{StaticResource Dim}"><Run Text="{Binding Dto.ClientHost, Mode=OneWay}"/><Run Text="  ·  "/><Run Text="{Binding Since, Mode=OneWay}"/></TextBlock>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" IsEnabled="{Binding Busy, Converter={StaticResource Equals}, ConverterParameter=False}">
+                                    <Button Content="Allow once" Margin="6,0,0,0" Command="{Binding DataContext.AllowOnceCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                    <Button Content="Always allow" Style="{StaticResource BtnPrimary}" Margin="6,0,0,0" Command="{Binding DataContext.AllowAlwaysCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                    <Button Content="Deny" Style="{StaticResource BtnDanger}" Margin="6,0,0,0" Command="{Binding DataContext.DenyCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <ContentControl Grid.Row="1" Content="{Binding Page}" Focusable="False"/>
+        </Grid>
+
+        <!-- ================= overlays ================= -->
+        <v:PlayerView x:Name="Player" Grid.ColumnSpan="2" DataContext="{Binding Player}" Visibility="{Binding IsOpen, Converter={StaticResource BoolToVis}}"/>
+
+        <ItemsControl Grid.ColumnSpan="2" ItemsSource="{Binding Toasts}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,20,18">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <Button Command="{Binding DataContext.ToastClickCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Margin="0,8,0,0" Padding="0" Cursor="Hand">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border Background="{StaticResource Bg2}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" CornerRadius="10" Padding="14,12" Width="360">
+                                    <Border.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="3" Opacity="0.55"/></Border.Effect>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Glyph}" FontSize="18" Margin="0,2,12,0" VerticalAlignment="Top">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock" BasedOn="{StaticResource Icon}">
+                                                    <Setter Property="Foreground" Value="{StaticResource Blue}"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Kind}" Value="success"><Setter Property="Foreground" Value="{StaticResource New}"/></DataTrigger>
+                                                        <DataTrigger Binding="{Binding Kind}" Value="warn"><Setter Property="Foreground" Value="{StaticResource Warn}"/></DataTrigger>
+                                                        <DataTrigger Binding="{Binding Kind}" Value="error"><Setter Property="Foreground" Value="{StaticResource Danger}"/></DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
+                                            <TextBlock Text="{Binding Message}" Style="{StaticResource Muted}" TextWrapping="Wrap" MaxHeight="60"/>
+                                        </StackPanel>
+                                        <Button Grid.Column="2" Style="{StaticResource BtnIcon}" Width="22" Height="22" FontSize="9" Content="&#xE711;" VerticalAlignment="Top"
+                                                Command="{Binding DataContext.DismissToastCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                    </Grid>
+                                </Border>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+    </Grid>
+</Window>

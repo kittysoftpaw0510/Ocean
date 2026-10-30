@@ -1,0 +1,22 @@
+<Window x:Class="Ocean.App.Views.AccessRequestWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Access request — Ocean" Width="460" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterScreen" Topmost="True"
+        Background="{StaticResource Bg1}" Foreground="{StaticResource Text}" FontFamily="{StaticResource UiFont}">
+    <StackPanel Margin="24,20,24,20">
+        <StackPanel Orientation="Horizontal">
+            <TextBlock Text="&#xE8D7;" Style="{StaticResource Icon}" FontSize="26" Foreground="{StaticResource Warn}" Margin="0,0,14,0"/>
+            <TextBlock Text="Someone wants to watch your videos" Style="{StaticResource H2}" VerticalAlignment="Center"/>
+        </StackPanel>
+        <TextBlock Text="{Binding Title}" TextWrapping="Wrap" Margin="0,14,0,0" FontSize="14"/>
+        <TextBlock Style="{StaticResource Muted}" Margin="0,4,0,0">
+            <Run Text="{Binding Dto.ClientHost, Mode=OneWay}"/><Run Text="  ·  "/><Run Text="{Binding Since, Mode=OneWay}"/>
+        </TextBlock>
+        <TextBlock Text="“Allow once” lasts 8 hours. “Always allow” can be revoked later under My shares." Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,12,0,0"/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0" IsEnabled="{Binding Busy, Converter={StaticResource Equals}, ConverterParameter=False}">
+            <Button Content="Deny" Style="{StaticResource BtnDanger}" Click="Deny_Click"/>
+            <Button Content="Allow once" Margin="8,0,0,0" Click="Once_Click"/>
+            <Button Content="Always allow" Style="{StaticResource BtnPrimary}" Margin="8,0,0,0" Click="Always_Click" IsDefault="True"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

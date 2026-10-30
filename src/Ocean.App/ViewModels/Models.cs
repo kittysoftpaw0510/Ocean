@@ -1,0 +1,225 @@
+using System.Windows.Media.Imaging;
+using CommunityToolkit.Mvvm.ComponentModel;
+using Ocean.Core;
+using Ocean.Core.Protocol;
+
+namespace Ocean.App.ViewModels;
+
+public enum ViewMode { Grid, Tiles, List }
+public enum SortMode { Newest, Name, Size, Duration, Folder }
+
+/// <summary>Dialogs the view layer provides to view models.</summary>
+public interface IDialogs
+{
+    Task<string?> AskPasswordAsync(string title, string subtitle);
+    Task<bool> ConfirmAsync(string title, string message, string okLabel = "OK", bool danger = false);
+    Task<ShareUpsertDto?> EditShareAsync(ShareEditorViewModel editor);
+    Task<string?> PromptAsync(string title, string message, string initial, string okLabel);
+    /// <summary>Lets the user pick a folder of a share ("" = its root), optionally creating a new one. Null = cancelled.</summary>
+    Task<string?> PickShareFolderAsync(string title, string shareName, IReadOnlyList<string> folders, string current);
+    string? PickFolder(string title);
+    string[]? PickFiles(string title);
+    void ShowError(string title, string message);
+}
+
+public partial class PeerVm : ObservableObject
+{
+    public string Id { get; }
+    [ObservableProperty] private string _name = "";
+    [ObservableProperty] private string _user = "";
+    [ObservableProperty] private string _host = "";
+    [ObservableProperty] private string _address = "";
+    [ObservableProperty] private int _newCount;
+    [ObservableProperty] private int _itemCount;
+    [ObservableProperty] private int _shareCount;
+    [ObservableProperty] private bool _catalogLoaded;
+    [ObservableProperty] private DateTimeOffset _firstSeen;
+    [ObservableProperty] private bool _online = true;
+    [ObservableProperty] private DateTimeOffset? _offlineSince;
+
+    public PeerVm(PeerDto d) { Id = d.Id; Update(d); }
+
+    /// <summary>"Offline · last seen 5 min ago" (refreshes whenever the list is updated).</summary>
+    public string OfflineText => OfflineSince is { } t ? $"Offline  ·  last seen {Format.Ago(t)}" : "Offline";
+
+    public string Initials
+    {
+        get
+        {
+            var src = string.IsNullOrWhiteSpace(User) ? Name : User;
+            var parts = src.Split(new[] { ' ', '.', '_', '-' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 2) return (parts[0][..1] + parts[1][..1]).ToUpperInvariant();
+            return src.Length >= 2 ? src[..2].ToUpperInvariant() : src.ToUpperInvariant();
+        }
+    }
+
+    public string Subtitle => string.IsNullOrEmpty(User) || User == Name ? Host : $"{User} @ {Host}";
+    public string Label => string.IsNullOrEmpty(User) ? Name : User;
+
+    public void Update(PeerDto d)
+    {
+        Name = d.Name; User = d.User; Host = d.Host; Address = d.Address;
+        NewCount = d.NewCount; ItemCount = d.ItemCount; ShareCount = d.ShareCount; CatalogLoaded = d.CatalogLoaded; FirstSeen = d.FirstSeen;
+        Online = d.Online; OfflineSince = d.OfflineSince;
+        OnPropertyChanged(nameof(Initials)); OnPropertyChanged(nameof(Subtitle)); OnPropertyChanged(nameof(Label)); OnPropertyChanged(nameof(OfflineText));
+    }
+}
+
+public partial class ItemVm : ObservableObject
+{
+    private readonly Func<ItemVm, Task<BitmapImage?>>? _thumbLoader;
+    private BitmapImage? _thumb;
+    private bool _loading;
+
+    public ItemDto Dto { get; private set; }
+    public string PeerId { get; }
+    public string ShareName { get; }
+
+    public ItemVm(ItemDto dto, string peerId, string shareName, Func<ItemVm, Task<BitmapImage?>>? thumbLoader)
+    {
+        Dto = dto; PeerId = peerId; ShareName = shareName; _thumbLoader = thumbLoader;
+    }
+
+    public string Id => Dto.Id;
+    public string Name => Dto.Name;
+    public string Stem => Path.GetFileNameWithoutExtension(Dto.Name);
+    public string Ext => Path.GetExtension(Dto.Name).TrimStart('.').ToUpperInvariant();
+    public string Folder => Core.Naming.FolderPath.Display(Dto.Folder);
+    public string Location => Folder.Length > 0 ? $"{ShareName}  ›  {Folder}" : ShareName;
+    public string SizeText => Format.Bytes(Dto.Size);
+    public string DurationText => Format.Duration(Dto.DurationMs);
+    public string ResolutionText => Format.Resolution(Dto.Width, Dto.Height);
+    public string AddedText => Format.Ago(Dto.AddedAt);
+    public string AddedFull => Dto.AddedAt.LocalDateTime.ToString("f");
+    public DateTimeOffset AddedAt => Dto.AddedAt;
+    public long Size => Dto.Size;
+    public long DurationMs => Dto.DurationMs ?? 0;
+    public bool IsLocked => Dto.Lock is not null && !Dto.Unlocked;
+    public bool IsNew => Dto.IsNew;
+    public bool IsMine => Dto.IsMine;
+    public string LockText => Dto.Lock?.Mode == AccessMode.Password ? "Password protected" : Dto.Lock?.Mode == AccessMode.Ask ? "Owner approval required" : "";
+    public string Tooltip => $"{Dto.Name}\n{ShareName}{(Folder.Length > 0 ? "  ›  " + Folder : "")}\n{SizeText}{(DurationText.Length > 0 ? "  ·  " + DurationText : "")}{(ResolutionText.Length > 0 ? "  ·  " + ResolutionText : "")}\nAdded {AddedFull}";
+
+    [ObservableProperty] private bool _isSelected;
+
+    /// <summary>Lazily loads the thumbnail the first time a realized tile binds to it.</summary>
+    public BitmapImage? Thumb
+    {
+        get
+        {
+            if (_thumb is null && !_loading && !IsLocked && _thumbLoader is not null)
+            {
+                _loading = true;
+                _ = LoadThumbAsync();
+            }
+            return _thumb;
+        }
+    }
+
+    public bool HasThumb => _thumb is not null;
+
+    private async Task LoadThumbAsync()
+    {
+        try
+        {
+            var img = await _thumbLoader!(this);
+            if (img is not null)
+            {
+                _thumb = img;
+                OnPropertyChanged(nameof(Thumb));
+                OnPropertyChanged(nameof(HasThumb));
+            }
+            else
+            {
+                await Task.Delay(TimeSpan.FromSeconds(25));
+                _loading = false; // allow a retry later (thumbnail may be generated by then)
+            }
+        }
+        catch { _loading = false; }
+    }
+
+    public void Update(ItemDto dto)
+    {
+        var wasLocked = IsLocked;
+        Dto = dto;
+        OnPropertyChanged(string.Empty);
+        if (wasLocked && !IsLocked) { _loading = false; OnPropertyChanged(nameof(Thumb)); }
+    }
+}
+
+/// <summary>A folder shown while browsing a share (sub-folder of the current folder).</summary>
+public partial class FolderVm : ObservableObject
+{
+    public string Path { get; }
+    public string Name => Core.Naming.FolderPath.Name(Path);
+    public int Count { get; }
+    public int NewCount { get; }
+    public long TotalBytes { get; }
+    public DateTimeOffset Newest { get; }
+    /// <summary>Most recent video inside, used as the folder's cover image.</summary>
+    public ItemVm? Cover { get; }
+    [ObservableProperty] private bool _isSelected;
+    [ObservableProperty] private bool _isDropTarget;
+
+    public FolderVm(string path, IReadOnlyCollection<ItemVm> contents)
+    {
+        Path = path;
+        Count = contents.Count;
+        NewCount = contents.Count(i => i.IsNew);
+        TotalBytes = contents.Sum(i => i.Size);
+        Newest = contents.Count == 0 ? DateTimeOffset.MinValue : contents.Max(i => i.AddedAt);
+        Cover = contents.Where(i => !i.IsLocked).OrderByDescending(i => i.AddedAt).FirstOrDefault();
+        if (Cover is not null)
+            Cover.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(ItemVm.Thumb) or nameof(ItemVm.HasThumb) or "") { OnPropertyChanged(nameof(Thumb)); OnPropertyChanged(nameof(HasThumb)); } };
+    }
+
+    public BitmapImage? Thumb => Cover?.Thumb;
+    public bool HasThumb => Cover?.HasThumb == true;
+    public string Summary => Count == 0 ? "Empty folder" : $"{Count} video{(Count == 1 ? "" : "s")}  ·  {Format.Bytes(TotalBytes)}";
+    public string Tooltip => $"{Name}\n{Summary}";
+}
+
+/// <summary>One step of a breadcrumb trail ("Family" › "2024" › "Beach").</summary>
+public sealed record Crumb(string Name, string Path, bool IsLast);
+
+public partial class ShareChipVm : ObservableObject
+{
+    public string? Id { get; }
+    public string LockId => "s:" + Id;
+    [ObservableProperty] private string _name = "";
+    [ObservableProperty] private int _count;
+    [ObservableProperty] private int _newCount;
+    [ObservableProperty] private long _totalBytes;
+    [ObservableProperty] private bool _isLocked;
+    [ObservableProperty] private AccessMode _mode;
+    [ObservableProperty] private bool _isSelected;
+    [ObservableProperty] private bool _isPending;
+
+    public ShareChipVm(string? id) { Id = id; }
+    public string SizeText => Format.Bytes(TotalBytes);
+    public string CountText => Count == 1 ? "1 video" : $"{Count} videos";
+    partial void OnCountChanged(int value) => OnPropertyChanged(nameof(CountText));
+    public string LockGlyph => Mode == AccessMode.Password ? "" : Mode == AccessMode.Ask ? "" : "";
+}
+
+public partial class ToastVm : ObservableObject
+{
+    public string Title { get; init; } = "";
+    public string Message { get; init; } = "";
+    public string Kind { get; init; } = "info"; // info | success | warn | error
+    public Action? OnClick { get; init; }
+    public string? ActionLabel { get; init; }
+    public string Glyph => Kind switch { "success" => "", "warn" => "", "error" => "", _ => "" };
+}
+
+public partial class PendingAccessVm : ObservableObject
+{
+    public PendingAccessDto Dto { get; }
+    public PendingAccessVm(PendingAccessDto d) { Dto = d; }
+    public string RequestId => Dto.RequestId;
+    public string Who => string.IsNullOrEmpty(Dto.ClientUser) ? Dto.ClientName : $"{Dto.ClientUser} ({Dto.ClientName})";
+    public string What => Dto.ItemName is null ? $"share “{Dto.ShareName}”" : $"“{Dto.ItemName}” in “{Dto.ShareName}”";
+    public string Title => $"{Who} wants to access {What}";
+    public string Since => Format.Ago(Dto.CreatedAt);
+    [ObservableProperty] private bool _busy;
+}

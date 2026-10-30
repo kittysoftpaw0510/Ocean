@@ -1,0 +1,73 @@
+<Window x:Class="Ocean.App.Views.ShareEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="{Binding Title}" Width="560" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner"
+        Background="{StaticResource Bg1}" Foreground="{StaticResource Text}" FontFamily="{StaticResource UiFont}" ShowInTaskbar="False" AllowDrop="True">
+    <StackPanel Margin="24,20,24,20">
+        <TextBlock Text="{Binding Title}" Style="{StaticResource H2}"/>
+
+        <TextBlock Text="Name of this group" Style="{StaticResource Muted}" Margin="0,16,0,4" FontSize="12"/>
+        <TextBox x:Name="NameBox" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}"/>
+
+        <TextBlock Text="What is shared" Style="{StaticResource Muted}" Margin="0,14,0,4" FontSize="12"/>
+        <Border Background="{StaticResource Bg0}" BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="6" Padding="4" MinHeight="60" MaxHeight="160">
+            <Grid>
+                <ItemsControl ItemsSource="{Binding Roots}">
+                    <ItemsControl.Template>
+                        <ControlTemplate TargetType="ItemsControl">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto"><ItemsPresenter/></ScrollViewer>
+                        </ControlTemplate>
+                    </ItemsControl.Template>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <DockPanel Margin="4,2">
+                                <Button DockPanel.Dock="Right" Style="{StaticResource BtnIcon}" Width="24" Height="24" FontSize="10" Content="&#xE711;" ToolTip="Remove" Click="RemoveRoot_Click"/>
+                                <TextBlock Text="&#xE8B7;" Style="{StaticResource Icon}" Margin="4,0,8,0" Foreground="{StaticResource TextMuted}"/>
+                                <TextBlock Text="{Binding}" VerticalAlignment="Center" ToolTip="{Binding}"/>
+                            </DockPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Text="Drop folders or video files here" Style="{StaticResource Dim}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding Roots.Count, Converter={StaticResource ZeroToVis}}"/>
+            </Grid>
+        </Border>
+        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+            <Button Style="{StaticResource BtnGhost}" Content="+ Add folder" Click="AddFolder_Click"/>
+            <Button Style="{StaticResource BtnGhost}" Content="+ Add files" Click="AddFiles_Click" Margin="4,0,0,0"/>
+        </StackPanel>
+
+        <TextBlock Text="Who can watch" Style="{StaticResource Muted}" Margin="0,14,0,6" FontSize="12"/>
+        <StackPanel>
+            <RadioButton Content="Everyone on the network" IsChecked="{Binding Mode, Converter={StaticResource Equals}, ConverterParameter=Public}" Margin="0,2"/>
+            <RadioButton Content="People who know a password" IsChecked="{Binding Mode, Converter={StaticResource Equals}, ConverterParameter=Password}" Margin="0,2"/>
+            <RadioButton Content="Only people I approve (ask me each time)" IsChecked="{Binding Mode, Converter={StaticResource Equals}, ConverterParameter=Ask}" Margin="0,2"/>
+        </StackPanel>
+        <StackPanel Visibility="{Binding IsPasswordMode, Converter={StaticResource BoolToVis}}" Margin="0,8,0,0">
+            <TextBlock FontSize="12" Margin="0,0,0,4">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock" BasedOn="{StaticResource Muted}">
+                        <Setter Property="Text" Value="Password"/>
+                        <Style.Triggers><DataTrigger Binding="{Binding HasExistingPassword}" Value="True"><Setter Property="Text" Value="New password (leave empty to keep the current one)"/></DataTrigger></Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+            <PasswordBox x:Name="PasswordBox" PasswordChanged="Password_Changed"/>
+        </StackPanel>
+
+        <TextBlock Text="{Binding Error}" Foreground="{StaticResource Danger}" Margin="0,10,0,0" TextWrapping="Wrap" Visibility="{Binding Error, Converter={StaticResource NullToVis}}"/>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+            <Button Content="Cancel" Style="{StaticResource BtnGhost}" Click="Cancel_Click" IsCancel="True"/>
+            <Button Style="{StaticResource BtnPrimary}" Click="Save_Click" Margin="8,0,0,0" IsDefault="True" MinWidth="110">
+                <TextBlock Foreground="{StaticResource AccentText}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Text" Value="Save"/>
+                            <Style.Triggers><DataTrigger Binding="{Binding IsNew}" Value="True"><Setter Property="Text" Value="Start sharing"/></DataTrigger></Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </Button>
+        </StackPanel>
+    </StackPanel>
+</Window>
