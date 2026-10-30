@@ -243,7 +243,7 @@ public static class LocalApi
         g.MapDelete("/downloads/{id}", (string id, DownloadManager dl) => dl.Remove(id) ? Results.Ok() : Results.NotFound());
 
         // ---------------------------------------------------------------- settings
-        g.MapGet("/settings", (ConfigStore config) =>
+        g.MapGet("/settings", (ConfigStore config, FirewallRules firewall) =>
         {
             var c = config.Current;
             return Results.Json(new SettingsDto
@@ -251,6 +251,7 @@ public static class LocalApi
                 NodeName = c.NodeName, UserName = c.UserName, Secret = c.Secret, DownloadDir = c.DownloadDir,
                 UploadLimitKBps = c.UploadLimitKBps, SharingPaused = c.SharingPaused, NewDays = c.NewDays,
                 MaxConcurrentDownloads = c.MaxConcurrentDownloads, NotifyNewVideos = c.NotifyNewVideos, OfflineKeepHours = c.OfflineKeepHours,
+                AllowPublicNetworks = c.AllowPublicNetworks, FirewallManaged = firewall.CanManage,
             }, Json.Options);
         });
 
@@ -270,6 +271,7 @@ public static class LocalApi
                 c.MaxConcurrentDownloads = Math.Clamp(dto.MaxConcurrentDownloads, 1, 8);
                 c.NotifyNewVideos = dto.NotifyNewVideos;
                 c.OfflineKeepHours = Math.Clamp(dto.OfflineKeepHours, 1, 24 * 30);
+                c.AllowPublicNetworks = dto.AllowPublicNetworks;
             });
             limiter.BytesPerSecond = config.Current.UploadLimitKBps * 1024L;
             events.Publish("settings");

@@ -4,7 +4,9 @@
 ; What the setup does
 ;   - installs Ocean.exe (tray app) and Ocean.Service.exe (+ bundled .NET runtime) to Program Files
 ;   - registers "OceanService" (automatic start, restarts on failure, signed-in users may start it)
-;   - adds Windows Firewall rules for the service (private/domain networks; public optional)
+;   - adds Windows Firewall rules for the service: private/domain networks, plus public networks (Windows marks
+;     many home/office LANs Public). The service keeps the public rule in line with its "Allow connections on
+;     Public networks" setting.
 ;   - Start menu shortcut, optional desktop shortcut, optional "open in tray at sign-in"
 ;   - upgrades in place (stops the service and app first, keeps settings)
 ;   - uninstall removes the service, firewall rules and shortcuts, and offers to remove settings/caches
@@ -55,12 +57,11 @@ SetupLogging=yes
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Messages]
-FinishedLabel=Ocean is installed and already sharing in the background.%n%nInstall Ocean on the other PCs too; they find each other automatically. If they don't, make sure Windows treats your network as Private (Settings > Network & internet > your connection > Private network).
+FinishedLabel=Ocean is installed and already sharing in the background.%n%nInstall Ocean on the other PCs too; they find each other automatically. If they don't, check that no other firewall or antivirus program blocks Ocean.Service.exe.
 
 [Tasks]
 Name: "service"; Description: "Run Ocean as a Windows service (recommended: shares at startup, even when nobody is signed in)"
-Name: "firewall"; Description: "Allow Ocean through Windows Firewall on private networks"
-Name: "firewall\public"; Description: "Also allow on public networks (not recommended)"; Flags: unchecked
+Name: "firewall"; Description: "Allow Ocean through Windows Firewall (also on networks Windows marks as Public; you can change this later in Ocean's settings)"
 Name: "autostart"; Description: "Open Ocean in the system tray when I sign in"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
@@ -81,10 +82,6 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Root: HKCU; Subkey: "Software\Ocean"; Flags: uninsdeletekey dontcreatekey
 
 [Run]
-; Firewall: drop any older/auto-created rule for our program, then add ours.
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=all program=""{app}\Ocean.Service.exe"""; Flags: runhidden; StatusMsg: "Configuring Windows Firewall..."
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Ocean"" description=""Ocean LAN video sharing (discovery + encrypted transfers)"" dir=in action=allow program=""{app}\Ocean.Service.exe"" enable=yes profile=private,domain"; Flags: runhidden; Tasks: firewall
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Ocean (public networks)"" dir=in action=allow program=""{app}\Ocean.Service.exe"" enable=yes profile=public"; Flags: runhidden; Tasks: firewall\public
 Filename: "{app}\Ocean.exe"; Description: "Open Ocean now"; Flags: postinstall nowait skipifsilent runasoriginaluser
 
 [UninstallRun]
@@ -153,6 +150,23 @@ begin
     Log('Service did not start immediately; Ocean will start it on first launch.');
 end;
 
+procedure ConfigureFirewall;
+var
+  Netsh, Exe: String;
+begin
+  // Drop any older or Windows-created rule for our program (including "block" rules left by a cancelled firewall
+  // prompt), then add ours. Runs before the service starts, because the service then keeps the public-network
+  // rule in line with its settings (and removes it if the user turned that setting off).
+  Netsh := ExpandConstant('{sys}\netsh.exe');
+  Exe := ExpandConstant('{app}\Ocean.Service.exe');
+  Run(Netsh, 'advfirewall firewall delete rule name=all program="' + Exe + '"');
+  if WizardIsTaskSelected('firewall') then
+  begin
+    Run(Netsh, 'advfirewall firewall add rule name="Ocean" description="Ocean LAN video sharing (discovery + encrypted transfers)" dir=in action=allow program="' + Exe + '" enable=yes profile=private,domain');
+    Run(Netsh, 'advfirewall firewall add rule name="Ocean (public networks)" description="Ocean LAN video sharing on networks Windows marks as Public (Ocean settings: Network)" dir=in action=allow program="' + Exe + '" enable=yes profile=public');
+  end;
+end;
+
 procedure RemoveService;
 begin
   if ServiceExists then
@@ -172,6 +186,8 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
+    WizardForm.StatusLabel.Caption := 'Configuring Windows Firewall...';
+    ConfigureFirewall;
     WizardForm.StatusLabel.Caption := 'Starting the Ocean service...';
     if WizardIsTaskSelected('service') then
       InstallOrUpdateService

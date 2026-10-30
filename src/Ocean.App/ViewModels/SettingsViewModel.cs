@@ -24,6 +24,8 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private int _maxConcurrentDownloads = 2;
     [ObservableProperty] private int _offlineKeepHours = 24;
     [ObservableProperty] private bool _notifyNewVideos = true;
+    [ObservableProperty] private bool _allowPublicNetworks = true;
+    [ObservableProperty] private bool _firewallManaged = true;
     [ObservableProperty] private bool _runAtStartup;
     [ObservableProperty] private bool _dirty;
     [ObservableProperty] private string? _savedMessage;
@@ -46,6 +48,7 @@ public partial class SettingsViewModel : ObservableObject
     partial void OnMaxConcurrentDownloadsChanged(int value) => MarkDirty();
     partial void OnOfflineKeepHoursChanged(int value) => MarkDirty();
     partial void OnNotifyNewVideosChanged(bool value) => MarkDirty();
+    partial void OnAllowPublicNetworksChanged(bool value) => MarkDirty();
     partial void OnRunAtStartupChanged(bool value) { if (!_loading) ApplyRunAtStartup(value); }
     private void MarkDirty() { if (!_loading) { Dirty = true; SavedMessage = null; } }
 
@@ -59,6 +62,7 @@ public partial class SettingsViewModel : ObservableObject
             {
                 NodeName = s.NodeName; UserName = s.UserName; Secret = s.Secret ?? ""; DownloadDir = s.DownloadDir;
                 UploadLimitKBps = s.UploadLimitKBps; NewDays = s.NewDays; MaxConcurrentDownloads = s.MaxConcurrentDownloads; NotifyNewVideos = s.NotifyNewVideos; OfflineKeepHours = s.OfflineKeepHours;
+                AllowPublicNetworks = s.AllowPublicNetworks; FirewallManaged = s.FirewallManaged;
                 _main.DownloadsVm.DownloadDir = s.DownloadDir;
             }
             var st = _main.Status;
@@ -83,7 +87,7 @@ public partial class SettingsViewModel : ObservableObject
             await _main.Api.PutAsync("/api/settings", new SettingsDto
             {
                 NodeName = NodeName.Trim(), UserName = UserName.Trim(), Secret = Secret, DownloadDir = DownloadDir.Trim(),
-                UploadLimitKBps = UploadLimitKBps, NewDays = NewDays, MaxConcurrentDownloads = MaxConcurrentDownloads, OfflineKeepHours = OfflineKeepHours,
+                UploadLimitKBps = UploadLimitKBps, NewDays = NewDays, MaxConcurrentDownloads = MaxConcurrentDownloads, OfflineKeepHours = OfflineKeepHours, AllowPublicNetworks = AllowPublicNetworks,
                 NotifyNewVideos = NotifyNewVideos, SharingPaused = _main.SharingPaused,
             });
             Dirty = false;

@@ -118,6 +118,18 @@
                                     <TextBlock Text="hours" Style="{StaticResource Muted}" VerticalAlignment="Center" Margin="10,0,0,0"/>
                                 </StackPanel>
                             </Grid>
+                            <Border Style="{StaticResource Divider}"/>
+                            <Grid Style="{StaticResource Row}">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                    <TextBlock Text="Allow connections on Public networks" Style="{StaticResource RowTitle}"/>
+                                    <TextBlock Style="{StaticResource RowHint}"
+                                               Text="Windows marks many home and office networks as Public, and its firewall then stops other PCs from opening your shares. Turn this off on networks you don't trust, like a coffee shop's Wi-Fi."/>
+                                    <TextBlock Style="{StaticResource RowHint}" Margin="0,4,0,0" Visibility="{Binding FirewallManaged, Converter={StaticResource InvBoolToVis}}"
+                                               Text="Ocean isn't running as a Windows service on this PC, so it can't change Windows Firewall itself. Reinstall Ocean with the service option to let it."/>
+                                </StackPanel>
+                                <CheckBox Grid.Column="1" Style="{StaticResource Switch}" IsChecked="{Binding AllowPublicNetworks}" AutomationProperties.Name="Allow connections on Public networks"/>
+                            </Grid>
                         </StackPanel>
                     </Border>
 

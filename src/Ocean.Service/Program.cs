@@ -67,6 +67,7 @@ builder.Services.AddSingleton<PeerRegistry>();
 builder.Services.AddSingleton<AccessService>();
 builder.Services.AddSingleton<RelayHub>();
 builder.Services.AddSingleton<RelayWorker>();
+builder.Services.AddSingleton<FirewallRules>();
 builder.Services.AddSingleton<PeerClient>();
 builder.Services.AddSingleton<PeerService>();
 builder.Services.AddSingleton<DownloadManager>();
@@ -74,6 +75,7 @@ builder.Services.AddSingleton(new BandwidthLimiter { BytesPerSecond = cfg.Upload
 builder.Services.AddHostedService<DiscoveryService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DownloadManager>());
 builder.Services.AddHostedService<CatalogMaintenance>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<FirewallRules>());
 
 builder.Services.ConfigureHttpJsonOptions(o =>
 {

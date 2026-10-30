@@ -279,6 +279,9 @@ public sealed class SettingsDto
     public int MaxConcurrentDownloads { get; set; }
     public bool NotifyNewVideos { get; set; }
     public int OfflineKeepHours { get; set; } = 24;
+    public bool AllowPublicNetworks { get; set; } = true;
+    /// <summary>Read-only: false when Ocean runs without administrator rights and can't change Windows Firewall itself.</summary>
+    public bool FirewallManaged { get; set; }
 }
 
 public sealed class UnlockRequestDto

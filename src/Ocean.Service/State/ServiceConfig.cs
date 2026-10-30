@@ -45,6 +45,8 @@ public sealed class ServiceConfig
     public bool NotifyNewVideos { get; set; } = true;
     /// <summary>How long a node that went offline stays listed (with its last known shares).</summary>
     public int OfflineKeepHours { get; set; } = 24;
+    /// <summary>Let other PCs connect on networks Windows marks as Public (the service manages the firewall rule).</summary>
+    public bool AllowPublicNetworks { get; set; } = true;
     public List<ShareDefinition> Shares { get; set; } = new();
 
     private static string DefaultUser()
