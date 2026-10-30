@@ -36,7 +36,9 @@ The setup:
 - installs Ocean to `C:\Program Files\Ocean` with a Start menu shortcut (desktop shortcut optional);
 - registers and starts the **Ocean LAN Video Sharing** Windows service (starts with Windows, restarts on failure,
   shares even when nobody is signed in; signed-in users may start it, only admins may stop it);
-- allows Ocean through Windows Firewall on private networks (public networks optional, off by default);
+- allows Ocean through Windows Firewall, including on networks Windows marks as Public (Windows labels many home
+  and office networks Public; the service keeps that rule in line with **Settings > Network > Allow connections on
+  Public networks**);
 - optionally opens Ocean in the tray at sign-in;
 - upgrades in place (run a newer setup over an older one; settings and shares are kept).
 
@@ -72,11 +74,13 @@ cd dist\Ocean
 
 The first time the service listens, Windows Firewall may ask to allow `Ocean.Service` on private networks:
 allow it, or other PCs will not be able to connect. (`install-service.ps1` adds the rules itself.)
+When Ocean runs as the Windows service it also allows itself on Public networks, unless you turn that off in Settings.
 
 ## Using Ocean
 
 | Where | What |
 |---|---|
+| **Home** | *Continue watching* shows the last video you played and where you stopped: *Resume* picks up from there (or *Play again* if you watched it to the end). Kept per Windows user. |
 | **Network** (left) | Nodes currently online. A green badge counts videos added since you last visited that node. |
 | Node page | Share chips at the top filter the videos. Double-click to play, right-click for *Download*, *Open in external player*, *Copy stream link*. Multi-select and *Download n selected*. *Download all* for the chip you're on. |
 | **My shares** | *Share a folder* / *Files* / *New folder* (an empty folder you fill later; rename or remove any time), or drop folders anywhere in the window. Pick who can watch: everyone, password, or ask-me. Right-click a video to give it its own rule. *Who has access* lists issued grants (revoke any time). |

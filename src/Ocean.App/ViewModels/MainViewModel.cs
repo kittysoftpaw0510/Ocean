@@ -15,6 +15,8 @@ public partial class HomeViewModel : ObservableObject
     [ObservableProperty] private string _myName = "";
     [ObservableProperty] private int _shareCount;
     [ObservableProperty] private int _totalNew;
+    /// <summary>"Continue watching": the last video played (null until something was played).</summary>
+    [ObservableProperty] private ResumeVm? _resume;
 }
 
 /// <summary>Application shell: navigation, peers, live events from the service, toasts and access requests.</summary>
@@ -66,6 +68,7 @@ public partial class MainViewModel : ObservableObject
         SettingsVm = new SettingsViewModel(this);
         Player = new PlayerViewModel(this);
         Page = Home;
+        if (LastPlayedStore.Load() is { } last) ShowResumeCard(last);
     }
 
     // ------------------------------------------------------------------ lifecycle
@@ -77,6 +80,7 @@ public partial class MainViewModel : ObservableObject
         await ClaimUserNameAsync(status);
         await RefreshPeersAsync();
         _initialPeersLoaded = true;
+        RefreshResumeCard();
         await SharesVm.LoadAsync();
         await DownloadsVm.LoadAsync();
         await SettingsVm.LoadAsync();
@@ -219,6 +223,7 @@ public partial class MainViewModel : ObservableObject
                             if (SelectedPeer == p) ShowHome();
                         }
                         Home.PeerCount = Peers.Count(x => x.Online);
+                        RefreshResumeCard();
                         UpdateStatusText();
                     }
                     else SchedulePeersRefresh();
@@ -378,6 +383,7 @@ public partial class MainViewModel : ObservableObject
             var sorted = Peers.OrderByDescending(p => p.Online).ThenBy(p => p.Label, StringComparer.CurrentCultureIgnoreCase).ToList();
             for (var i = 0; i < sorted.Count; i++) { var idx = Peers.IndexOf(sorted[i]); if (idx != i) Peers.Move(idx, i); }
             Home.PeerCount = Peers.Count(p => p.Online);
+            RefreshResumeCard();
             RecountNew();
             UpdateStatusText();
         }
@@ -433,7 +439,95 @@ public partial class MainViewModel : ObservableObject
         else if (Page is SharesViewModel s) s.ItemFilter = value;
     }
 
-    [RelayCommand] public void ShowHome() { SelectedPeer = null; Nav = "home"; Page = Home; }
+    [RelayCommand] public void ShowHome() { SelectedPeer = null; Nav = "home"; Page = Home; RefreshResumeCard(); }
+
+    // ------------------------------------------------------------------ continue watching
+
+    /// <summary>
+    /// Called by the player while a video plays and when it stops. <paramref name="persist"/> writes it to disk
+    /// (the player does that every few seconds and on stop, not on every tick).
+    /// </summary>
+    public void RememberPlayback(ItemVm item, PeerVm peer, double position, double duration, bool finished, bool persist)
+    {
+        var last = new LastPlayed
+        {
+            PeerId = peer.Id, PeerName = peer.Label, ItemId = item.Id, Name = item.Name, ShareName = item.ShareName,
+            Folder = item.Dto.Folder ?? "", DurationSeconds = duration > 0 ? duration : item.DurationMs / 1000.0,
+            // Stopped in the last few seconds: treat as watched, so the card offers "Play again" instead of the credits.
+            Finished = finished || (duration > 30 && duration - position < 5),
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        last.PositionSeconds = last.Finished ? 0 : Math.Max(0, position);
+        ShowResumeCard(last);
+        if (persist) LastPlayedStore.Save(last);
+    }
+
+    private void ShowResumeCard(LastPlayed last)
+    {
+        if (Home.Resume is { } card && card.Same(last)) card.Update(last);
+        else Home.Resume = new ResumeVm(last);
+        RefreshResumeCard();
+    }
+
+    /// <summary>Online state of the card's node, and its thumbnail once it can be fetched.</summary>
+    private void RefreshResumeCard()
+    {
+        if (Home.Resume is not { } card) return;
+        if (!_initialPeersLoaded) return; // the node list isn't loaded yet: don't call it offline
+        var peer = Peers.FirstOrDefault(p => p.Id == card.Data.PeerId);
+        card.Online = peer?.Online ?? false;
+        if (card.Thumb is null && card.Online) _ = LoadResumeThumbAsync(card);
+    }
+
+    private async Task LoadResumeThumbAsync(ResumeVm card)
+    {
+        try
+        {
+            var img = await Thumbs.GetAsync(Api.PeerThumbPath(card.Data.PeerId, card.Data.ItemId));
+            if (img is not null && Home.Resume == card) card.Thumb = img;
+        }
+        catch { }
+    }
+
+    [RelayCommand]
+    private async Task ResumeLast()
+    {
+        if (Home.Resume is not { } card) return;
+        var last = card.Data;
+        var peer = Peers.FirstOrDefault(p => p.Id == last.PeerId);
+        if (peer is null || !peer.Online)
+        {
+            Toast($"{last.PeerName} is offline right now", "You can continue as soon as it's back online.", "warn");
+            return;
+        }
+        CatalogDto? cat;
+        try { cat = await Api.GetAsync<CatalogDto>($"/api/peers/{peer.Id}/catalog"); }
+        catch (Exception ex) { Toast("Couldn't connect to this PC", $"{peer.Label}: {ex.Message}", "error"); return; }
+
+        var share = cat?.Shares.FirstOrDefault(s => s.Items.Any(i => i.Id == last.ItemId));
+        var dto = share?.Items.First(i => i.Id == last.ItemId);
+        if (share is null || dto is null)
+        {
+            Toast("This video isn't shared anymore", $"{last.Name} is no longer in {last.PeerName}'s shares.", "warn", () => SelectPeer(peer));
+            return;
+        }
+        if (dto.Lock is not null && !dto.Unlocked)
+        {
+            // Unlocking (password / owner approval) lives on the node's page.
+            SelectPeer(peer);
+            Toast("Unlock to keep watching", $"{last.Name} is protected. Unlock it here, then press Play.", "info");
+            return;
+        }
+        var item = new ItemVm(dto, peer.Id, share.Name, null);
+        Player.Open(item, Api.StreamUrl(peer.Id, item.Id, item.Name), peer, card.CanResumeMidway ? last.PositionSeconds : 0);
+    }
+
+    [RelayCommand]
+    private void ForgetLast()
+    {
+        Home.Resume = null;
+        LastPlayedStore.Save(null);
+    }
     [RelayCommand] public void ShowShares() { SelectedPeer = null; Nav = "shares"; SharesVm.ItemFilter = SearchText; Page = SharesVm; }
     [RelayCommand] public void ShowDownloads() { SelectedPeer = null; Nav = "downloads"; Page = DownloadsVm; }
     [RelayCommand] public void ShowSettings() { SelectedPeer = null; Nav = "settings"; _ = SettingsVm.LoadAsync(); Page = SettingsVm; }

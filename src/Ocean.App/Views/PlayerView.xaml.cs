@@ -15,6 +15,8 @@ public partial class PlayerView : UserControl
     private readonly DispatcherTimer _osd = new() { Interval = TimeSpan.FromSeconds(1.1) };
     private PlayerViewModel? _vm;
     private bool _dragging;
+    private bool _opened;   // the current video opened (a resume point read before that would be 0)
+    private bool _ended;    // reached the end and rewound: keep "watched" instead of recording 0
 
     public PlayerView()
     {
@@ -80,6 +82,7 @@ public partial class PlayerView : UserControl
         if (_vm?.Url is null) return;
         try
         {
+            _opened = false; _ended = false;
             Media.Stop();
             Media.Close();
             Media.Volume = _vm.Volume;
@@ -98,6 +101,8 @@ public partial class PlayerView : UserControl
 
     private void Stop()
     {
+        RememberNow();
+        _opened = false;
         _tick.Stop();
         _idle.Stop();
         try { Media.Stop(); Media.Close(); Media.Source = null; } catch { }
@@ -127,8 +132,16 @@ public partial class PlayerView : UserControl
                 pos = a;
             }
             _vm.PositionSeconds = pos;
+            if (_opened && _vm.IsPlaying) _vm.Remember(pos);
         }
         catch { }
+    }
+
+    /// <summary>Saves where the current video stands (on stop, close, or switching to another video).</summary>
+    private void RememberNow()
+    {
+        if (_vm is null || !_opened || _ended) return;
+        _vm.Remember(CurrentSeconds(), force: true);
     }
 
     // ---- A-B repeat ------------------------------------------------------------------
@@ -181,6 +194,7 @@ public partial class PlayerView : UserControl
         {
             if (Media.Source is null && _vm.Url is not null) { Start(); return; }
             Media.Play(); _vm.IsPlaying = true;
+            _ended = false;
             ApplySpeed(); // MediaElement may reset the rate when playback restarts
         }
     }
@@ -237,6 +251,15 @@ public partial class PlayerView : UserControl
         _vm.IsBuffering = false;
         if (Media.NaturalDuration.HasTimeSpan) _vm.DurationSeconds = Media.NaturalDuration.TimeSpan.TotalSeconds;
         ApplySpeed();
+        // Continue watching: jump to where the user stopped last time.
+        var start = _vm.StartAt;
+        _vm.StartAt = 0;
+        if (start > 0 && (_vm.DurationSeconds <= 0 || start < _vm.DurationSeconds - 1))
+        {
+            try { Media.Position = TimeSpan.FromSeconds(start); _vm.PositionSeconds = start; } catch { }
+            ShowOsd("Resumed at " + Core.Format.Duration(TimeSpan.FromSeconds(start)));
+        }
+        _opened = true;
     }
 
     /// <summary>At the end: rewind to the start and wait (first frame shown, slider at 0, Play starts over).</summary>
@@ -256,6 +279,8 @@ public partial class PlayerView : UserControl
             Media.Position = TimeSpan.Zero; // ScrubbingEnabled renders the first frame while paused
         }
         catch { }
+        _vm.Remember(_vm.DurationSeconds, finished: true, force: true);
+        _ended = true;
         _vm.IsPlaying = false;
         _vm.PositionSeconds = 0;
         SetChrome(true);

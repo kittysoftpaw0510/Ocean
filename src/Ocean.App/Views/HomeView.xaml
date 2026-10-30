@@ -10,6 +10,75 @@
             <TextBlock Style="{StaticResource Muted}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="14"
                        Text="Pick a node on the left to browse and watch what it shares. Add your own videos under My shares — everyone on this network will see them."/>
 
+            <!-- Continue watching: the last video played and where it stopped -->
+            <Border Style="{StaticResource Card}" Margin="0,28,0,0" Padding="12" DataContext="{Binding Resume}"
+                    Visibility="{Binding Converter={StaticResource NullToVis}}"
+                    AutomationProperties.Name="Continue watching">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- thumbnail with the watched part underneath; clicking it resumes too -->
+                    <Button Command="{Binding DataContext.ResumeLastCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            Cursor="Hand" Focusable="False" ToolTip="{Binding ActionText}">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Grid Width="160" Height="90">
+                                    <Border CornerRadius="6" Background="{StaticResource Bg3}" ClipToBounds="True">
+                                        <Grid>
+                                            <TextBlock Text="&#xE714;" Style="{StaticResource Icon}" FontSize="26" Foreground="{StaticResource TextDim}"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            <Image Source="{Binding Thumb}" Stretch="UniformToFill"/>
+                                        </Grid>
+                                    </Border>
+                                    <Border x:Name="PlayBadge" Width="40" Height="40" CornerRadius="20" Background="#B0000000"
+                                            HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.85">
+                                        <TextBlock Text="&#xE768;" Style="{StaticResource Icon}" FontSize="16" Foreground="White"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center" Margin="2,0,0,0"/>
+                                    </Border>
+                                    <Border Height="4" VerticalAlignment="Bottom" Background="#80000000" CornerRadius="0,0,6,6">
+                                        <Border Background="{StaticResource Accent}" HorizontalAlignment="Stretch" RenderTransformOrigin="0,0.5">
+                                            <Border.RenderTransform>
+                                                <ScaleTransform ScaleX="{Binding Progress}"/>
+                                            </Border.RenderTransform>
+                                        </Border>
+                                    </Border>
+                                </Grid>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="PlayBadge" Property="Opacity" Value="1"/>
+                                        <Setter TargetName="PlayBadge" Property="Background" Value="{StaticResource Accent}"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+
+                    <StackPanel Grid.Column="1" Margin="14,2,12,0" VerticalAlignment="Center">
+                        <TextBlock Text="CONTINUE WATCHING" Style="{StaticResource Dim}" FontSize="11" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding Title}" Style="{StaticResource H2}" TextTrimming="CharacterEllipsis" Margin="0,4,0,0" ToolTip="{Binding Data.Name}"/>
+                        <TextBlock Text="{Binding Where}" Style="{StaticResource Muted}" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
+                        <TextBlock Text="{Binding ProgressText}" Style="{StaticResource Dim}" FontSize="12" Margin="0,3,0,0"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2" VerticalAlignment="Center" Orientation="Horizontal">
+                        <Button Style="{StaticResource BtnPrimary}" Command="{Binding DataContext.ResumeLastCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                AutomationProperties.Name="{Binding ActionText}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE768;" Style="{StaticResource Icon}" FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <TextBlock Text="{Binding ActionText}" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+                        <Button Style="{StaticResource BtnIcon}" Content="&#xE711;" Margin="6,0,0,0" ToolTip="Remove from Continue watching"
+                                AutomationProperties.Name="Remove from Continue watching"
+                                Command="{Binding DataContext.ForgetLastCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
             <Border Style="{StaticResource Card}" Margin="0,28,0,0" Visibility="{Binding PeerCount, Converter={StaticResource ZeroToVis}}">
                 <StackPanel>
                     <TextBlock Text="No other nodes found yet" Style="{StaticResource H2}"/>

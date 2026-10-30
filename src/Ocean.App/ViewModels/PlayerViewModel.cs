@@ -116,9 +116,30 @@ public partial class PlayerViewModel : ObservableObject
     partial void OnPositionSecondsChanged(double value) => OnPropertyChanged(nameof(TimeText));
     partial void OnDurationSecondsChanged(double value) => OnPropertyChanged(nameof(TimeText));
 
-    public void Open(ItemVm item, string url, PeerVm peer)
+    /// <summary>Where the next video starts (seconds), applied once it has opened; 0 = from the beginning.</summary>
+    public double StartAt { get; set; }
+
+    // The video being watched, kept for the resume point even while Item is being cleared on close.
+    private ItemVm? _playing;
+    private PeerVm? _playingPeer;
+    private DateTime _lastSaved;
+
+    /// <summary>
+    /// Records the resume point for the home page. <paramref name="force"/> writes it to disk now (stop, close,
+    /// end); otherwise at most every few seconds.
+    /// </summary>
+    public void Remember(double position, bool finished = false, bool force = false)
+    {
+        if (_playing is null || _playingPeer is null) return;
+        var persist = force || DateTime.UtcNow - _lastSaved > TimeSpan.FromSeconds(5);
+        if (persist) _lastSaved = DateTime.UtcNow;
+        _main.RememberPlayback(_playing, _playingPeer, position, DurationSeconds, finished, persist);
+    }
+
+    public void Open(ItemVm item, string url, PeerVm peer, double startAt = 0)
     {
         Item = item; Peer = peer; Url = url; Error = null;
+        _playing = item; _playingPeer = peer; StartAt = Math.Max(0, startAt);
         Title = item.Name;
         Subtitle = $"{peer.Label}  ·  {item.ShareName}{(item.Folder.Length > 0 ? "  ›  " + item.Folder : "")}{(item.ResolutionText.Length > 0 ? "  ·  " + item.ResolutionText : "")}";
         PositionSeconds = 0;
