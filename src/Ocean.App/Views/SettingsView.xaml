@@ -187,6 +187,23 @@
                                     <TextBlock Text="{Binding MaxConcurrentDownloads}" Width="28" TextAlignment="Right" VerticalAlignment="Center"/>
                                 </StackPanel>
                             </Grid>
+                            <Border Style="{StaticResource Divider}"/>
+                            <Grid Style="{StaticResource Row}">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                    <TextBlock Text="Video cache" Style="{StaticResource RowTitle}"/>
+                                    <TextBlock Style="{StaticResource RowHint}"
+                                               Text="Keeps what you watched from other PCs, so watching again, seeking back, or downloading it afterwards doesn't use the network again. The oldest videos make room. 0 turns it off."/>
+                                    <TextBlock Text="{Binding StreamCacheUsedText}" Style="{StaticResource RowHint}" Margin="0,4,0,0"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBox Text="{Binding StreamCacheGB, UpdateSourceTrigger=PropertyChanged}" Width="56" HorizontalContentAlignment="Center"
+                                             AutomationProperties.Name="Video cache size in GB"/>
+                                    <TextBlock Text="GB" Style="{StaticResource Muted}" VerticalAlignment="Center" Margin="10,0,12,0"/>
+                                    <Button Style="{StaticResource BtnGhost}" Content="Clear" Padding="8,6" Command="{Binding ClearStreamCacheCommand}"
+                                            ToolTip="Delete the cached video bytes now"/>
+                                </StackPanel>
+                            </Grid>
                         </StackPanel>
                     </Border>
 

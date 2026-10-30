@@ -28,6 +28,9 @@ internal sealed class DownloadJob
 
     [System.Text.Json.Serialization.JsonIgnore] public double SpeedBps { get; set; }
     [System.Text.Json.Serialization.JsonIgnore] public CancellationTokenSource? Cts { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public long WindowStart { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public long WindowBytes { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public long LastNotify { get; set; }
 
     public DownloadJobDto ToDto() => new()
     {
@@ -51,9 +54,11 @@ public sealed class DownloadManager : BackgroundService
     private readonly SemaphoreSlim _wake = new(0, 1);
     private readonly Dictionary<string, Task> _running = new();
 
-    public DownloadManager(PeerService peers, ConfigStore config, EventHub events, ILogger<DownloadManager> log)
+    private readonly StreamCache _cache;
+
+    public DownloadManager(PeerService peers, StreamCache cache, ConfigStore config, EventHub events, ILogger<DownloadManager> log)
     {
-        _peers = peers; _config = config; _events = events; _log = log;
+        _peers = peers; _cache = cache; _config = config; _events = events; _log = log;
         _path = Path.Combine(OceanDefaults.DataDir, "downloads.json");
         try
         {
@@ -245,6 +250,7 @@ public sealed class DownloadManager : BackgroundService
     {
         var token = job.Cts!.Token;
         var sw = Stopwatch.StartNew();
+        job.WindowStart = 0; job.WindowBytes = 0; job.LastNotify = 0;
         Notify(job);
         try
         {
@@ -255,48 +261,42 @@ public sealed class DownloadManager : BackgroundService
             if (File.Exists(part)) received = new FileInfo(part).Length;
             if (job.Size > 0 && received > job.Size) { File.Delete(part); received = 0; }
 
-            using var resp = await _peers.OpenStreamAsync(job.PeerId, job.ItemId, received > 0 ? $"bytes={received}-" : null, token);
-            if (resp.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable && job.Size > 0 && received == job.Size)
+            var item = _peers.FindItem(job.PeerId, job.ItemId);
+            if (item is { Size: > 0 } && (job.Size <= 0 || job.Size == item.Size))
             {
-                Finish(job, part); return;
+                // Known size: whatever was already watched (stream cache) is copied from disk, only the rest comes
+                // over the network, marked as a download so the owner lets people who are watching go first.
+                job.Size = item.Size;
+                if (received == job.Size) { Finish(job, part); return; }
+                job.Received = received;
+                await using (var fs = new FileStream(part, received > 0 ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, 1 << 18, FileOptions.Asynchronous | FileOptions.SequentialScan))
+                await using (var progress = new ProgressStream(fs, n => Progress(job, n)))
+                    await _cache.CopyAsync(job.PeerId, item, received, job.Size - 1, progress, fill: false, download: true, token);
             }
-            if (resp.StatusCode == HttpStatusCode.Forbidden) throw new InvalidOperationException("Access denied (the item is locked)");
-            if (resp.StatusCode == HttpStatusCode.NotFound) throw new InvalidOperationException("The file is no longer shared");
-            if (!resp.IsSuccessStatusCode) throw new HttpRequestException($"Peer answered {(int)resp.StatusCode}");
-
-            var append = resp.StatusCode == HttpStatusCode.PartialContent && received > 0;
-            if (!append) received = 0;
-            if (resp.Content.Headers.ContentRange?.Length is { } total) job.Size = total;
-            else if (!append && resp.Content.Headers.ContentLength is { } len) job.Size = len;
-            job.Received = received;
-
-            await using (var fs = new FileStream(part, append ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, 1 << 18, FileOptions.Asynchronous | FileOptions.SequentialScan))
-            await using (var src = await resp.Content.ReadAsStreamAsync(token))
+            else
             {
-                var buffer = new byte[1 << 18];
-                var lastNotify = Stopwatch.GetTimestamp();
-                var windowStart = Stopwatch.GetTimestamp();
-                long windowBytes = 0;
-                int n;
-                while ((n = await src.ReadAsync(buffer, token)) > 0)
+                using var resp = await _peers.OpenStreamAsync(job.PeerId, job.ItemId, received > 0 ? $"bytes={received}-" : null, token, download: true);
+                if (resp.StatusCode == HttpStatusCode.RequestedRangeNotSatisfiable && job.Size > 0 && received == job.Size)
                 {
-                    await fs.WriteAsync(buffer.AsMemory(0, n), token);
-                    job.Received += n;
-                    windowBytes += n;
-                    var now = Stopwatch.GetTimestamp();
-                    var winSec = (now - windowStart) / (double)Stopwatch.Frequency;
-                    if (winSec >= 1)
-                    {
-                        var inst = windowBytes / winSec;
-                        job.SpeedBps = job.SpeedBps <= 0 ? inst : job.SpeedBps * 0.6 + inst * 0.4;
-                        windowStart = now; windowBytes = 0;
-                    }
-                    if ((now - lastNotify) / (double)Stopwatch.Frequency >= 0.5) { lastNotify = now; Notify(job); }
+                    Finish(job, part); return;
                 }
+                if (!resp.IsSuccessStatusCode) throw await PeerStatusException.FromAsync(resp);
+
+                var append = resp.StatusCode == HttpStatusCode.PartialContent && received > 0;
+                if (!append) received = 0;
+                if (resp.Content.Headers.ContentRange?.Length is { } total) job.Size = total;
+                else if (!append && resp.Content.Headers.ContentLength is { } len) job.Size = len;
+                job.Received = received;
+
+                await using (var fs = new FileStream(part, append ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, 1 << 18, FileOptions.Asynchronous | FileOptions.SequentialScan))
+                await using (var progress = new ProgressStream(fs, n => Progress(job, n)))
+                await using (var src = await resp.Content.ReadAsStreamAsync(token))
+                    await src.CopyToAsync(progress, 1 << 18, token);
             }
             if (job.Size > 0 && job.Received != job.Size)
                 throw new IOException($"Transfer ended early ({Format.Bytes(job.Received)} of {Format.Bytes(job.Size)})");
             Finish(job, part);
+            _cache.Forget(job.PeerId, job.ItemId); // the downloaded file replaces the cached bytes (and plays from disk)
             _log.LogInformation("downloaded '{Name}' from {Peer} ({Size}) in {Sec:0.0}s", job.Name, job.PeerName, Format.Bytes(job.Size), sw.Elapsed.TotalSeconds);
         }
         catch (OperationCanceledException) when (serviceCt.IsCancellationRequested)
@@ -308,10 +308,24 @@ public sealed class DownloadManager : BackgroundService
             job.Status = DownloadStatus.Canceled;
             DeletePart(job);
         }
+        catch (PeerStatusException ex) when (ex.Status == HttpStatusCode.ServiceUnavailable && ex.Error == PeerHeaders.Busy)
+        {
+            // The owner is already sending enough downloads: wait our turn (doesn't count as a failed attempt).
+            job.Status = DownloadStatus.Queued;
+            job.NotBefore = DateTimeOffset.UtcNow + (ex.RetryAfter ?? TimeSpan.FromSeconds(15));
+            job.Error = $"Waiting: {job.PeerName} is busy sending other downloads";
+        }
+        catch (PeerStatusException ex) when (ex.Status is HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
+        {
+            job.Status = DownloadStatus.Failed;
+            job.Error = ex.Status == HttpStatusCode.Forbidden ? "Access denied (the item is locked)" : "The file is no longer shared";
+            _log.LogWarning("download failed '{Name}': {Msg}", job.Name, job.Error);
+        }
         catch (Exception ex)
         {
             job.Attempts++;
-            var transient = ex is HttpRequestException or IOException or PeerUnavailableException;
+            var transient = ex is HttpRequestException or IOException or PeerUnavailableException
+                            or PeerStatusException { Status: >= HttpStatusCode.InternalServerError };
             if (transient && job.Attempts < 4)
             {
                 job.Status = DownloadStatus.Queued;
@@ -335,6 +349,33 @@ public sealed class DownloadManager : BackgroundService
         }
     }
 
+    /// <summary>Bytes written to the partial file: received total, smoothed speed, a UI update twice a second.</summary>
+    private void Progress(DownloadJob job, int n)
+    {
+        job.Received += n;
+        job.WindowBytes += n;
+        var now = Stopwatch.GetTimestamp();
+        if (job.WindowStart == 0) job.WindowStart = now;
+        var winSec = (now - job.WindowStart) / (double)Stopwatch.Frequency;
+        if (winSec >= 1)
+        {
+            var inst = job.WindowBytes / winSec;
+            job.SpeedBps = job.SpeedBps <= 0 ? inst : job.SpeedBps * 0.6 + inst * 0.4;
+            job.WindowStart = now; job.WindowBytes = 0;
+        }
+        if ((now - job.LastNotify) / (double)Stopwatch.Frequency >= 0.5) { job.LastNotify = now; Notify(job); }
+    }
+
+    /// <summary>The finished download of this video, if it is still on disk unchanged: played from there instead of the network.</summary>
+    public string? CompletedCopy(string peerId, string itemId, long size)
+    {
+        string? path;
+        lock (_lock) path = _jobs.LastOrDefault(j => j.Status == DownloadStatus.Done && j.PeerId == peerId && j.ItemId == itemId)?.Destination;
+        if (path is null) return null;
+        try { return new FileInfo(path) is { Exists: true } f && f.Length == size ? path : null; }
+        catch { return null; }
+    }
+
     private static void Finish(DownloadJob job, string part)
     {
         var final = SafeNames.Unique(job.Destination);
@@ -344,4 +385,30 @@ public sealed class DownloadManager : BackgroundService
         job.CompletedAt = DateTimeOffset.UtcNow;
         job.Error = null;
     }
+}
+
+/// <summary>Write-through stream that reports how many bytes went through.</summary>
+internal sealed class ProgressStream : Stream
+{
+    private readonly Stream _inner;
+    private readonly Action<int> _progress;
+    public ProgressStream(Stream inner, Action<int> progress) { _inner = inner; _progress = progress; }
+    public override bool CanRead => false;
+    public override bool CanSeek => false;
+    public override bool CanWrite => true;
+    public override long Length => _inner.Length;
+    public override long Position { get => _inner.Position; set => throw new NotSupportedException(); }
+    public override void Flush() => _inner.Flush();
+    public override Task FlushAsync(CancellationToken ct) => _inner.FlushAsync(ct);
+    public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) { _inner.Write(buffer, offset, count); _progress(count); }
+    public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
+    {
+        await _inner.WriteAsync(buffer, ct);
+        _progress(buffer.Length);
+    }
+    public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken ct) => WriteAsync(buffer.AsMemory(offset, count), ct).AsTask();
+    // the wrapped file stream is owned (and disposed) by the caller
 }

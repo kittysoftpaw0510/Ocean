@@ -44,6 +44,8 @@ public sealed class PeerClient : IDisposable
             AllowAutoRedirect = false,
             UseCookies = false,
             UseProxy = false,
+            // catalogs come compressed (videos never are)
+            AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Brotli,
             SslOptions = new SslClientAuthenticationOptions
             {
                 ClientCertificates = new X509CertificateCollection { _identity.Certificate },

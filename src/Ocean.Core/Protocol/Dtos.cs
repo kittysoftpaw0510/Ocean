@@ -26,6 +26,12 @@ public sealed class CatalogDto
     public long Version { get; set; }
     public DateTimeOffset GeneratedAt { get; set; }
     public List<ShareDto> Shares { get; set; } = new();
+    /// <summary>
+    /// Set on a delta answer: only items changed since this version are listed (share headers are complete),
+    /// and <see cref="RemovedItems"/> lists what disappeared. Null on a full catalog.
+    /// </summary>
+    public long? DeltaFrom { get; set; }
+    public List<string>? RemovedItems { get; set; }
 }
 
 public sealed class ShareDto
@@ -282,6 +288,10 @@ public sealed class SettingsDto
     public bool AllowPublicNetworks { get; set; } = true;
     /// <summary>Read-only: false when Ocean runs without administrator rights and can't change Windows Firewall itself.</summary>
     public bool FirewallManaged { get; set; }
+    /// <summary>Disk space for watched video bytes from other PCs (GB, 0 = off).</summary>
+    public int StreamCacheGB { get; set; } = 5;
+    /// <summary>Read-only: how much of it is used now.</summary>
+    public long StreamCacheUsedBytes { get; set; }
 }
 
 public sealed class UnlockRequestDto

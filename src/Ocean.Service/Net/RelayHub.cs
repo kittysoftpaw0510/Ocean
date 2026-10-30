@@ -115,12 +115,19 @@ public sealed class RelayHub
     public async Task<bool> CompleteAsync(string peerId, string jobId, int status, Dictionary<string, string> headers, Stream body, CancellationToken ct)
     {
         if (!_jobs.TryRemove(jobId, out var job) || job.PeerId != peerId) return false;
-        var resp = new HttpResponseMessage((HttpStatusCode)status)
+        // A compressed answer (catalogs) is unpacked here, as the HTTP client would do on a direct connection.
+        headers.TryGetValue("Content-Encoding", out var encoding);
+        Stream content = new NotifyOnDisposeStream(body, () => job.Consumed.TrySetResult());
+        var unpack = encoding?.Trim().ToLowerInvariant() switch
         {
-            Content = new StreamContent(new NotifyOnDisposeStream(body, () => job.Consumed.TrySetResult())),
+            "br" => (Stream)new System.IO.Compression.BrotliStream(content, System.IO.Compression.CompressionMode.Decompress),
+            "gzip" => new System.IO.Compression.GZipStream(content, System.IO.Compression.CompressionMode.Decompress),
+            _ => null,
         };
+        var resp = new HttpResponseMessage((HttpStatusCode)status) { Content = new StreamContent(unpack ?? content) };
         foreach (var (k, v) in headers)
         {
+            if (unpack is not null && (k.Equals("Content-Encoding", StringComparison.OrdinalIgnoreCase) || k.Equals("Content-Length", StringComparison.OrdinalIgnoreCase))) continue;
             if (!resp.Headers.TryAddWithoutValidation(k, v)) resp.Content.Headers.TryAddWithoutValidation(k, v);
         }
         if (!job.Response.TrySetResult(resp)) { resp.Dispose(); return false; }

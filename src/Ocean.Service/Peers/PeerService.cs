@@ -42,6 +42,8 @@ public sealed class PeerService : IDisposable
     private readonly string _statePath;
     private readonly string _thumbDir;
     private readonly ConcurrentDictionary<string, CatalogDto> _catalogs = new();
+    /// <summary>ETag of the catalog we hold per node (sent back so the owner can answer 304 or a delta).</summary>
+    private readonly ConcurrentDictionary<string, string> _etags = new();
     private readonly ConcurrentDictionary<string, PeerLocalState> _state = new();
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _debounce = new();
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _fetchLocks = new();
@@ -79,6 +81,7 @@ public sealed class PeerService : IDisposable
                 case PeerChange.Removed:
                     // forgotten (offline too long, or a different shared secret now): drop its snapshot
                     _catalogs.TryRemove(p.Id, out _);
+                    _etags.TryRemove(p.Id, out _);
                     try { File.Delete(SnapshotPath(p.Id)); } catch { }
                     break;
             }
@@ -102,6 +105,7 @@ public sealed class PeerService : IDisposable
         public DateTimeOffset LastSeen { get; set; }
         public List<string> Addresses { get; set; } = new();
         public CatalogDto? Catalog { get; set; }
+        public string? ETag { get; set; }
     }
 
     private readonly string _snapshotDir;
@@ -116,7 +120,7 @@ public sealed class PeerService : IDisposable
             {
                 Id = p.Id, PublicKey = p.PublicKey, Name = p.Name, User = p.User, Host = p.Host, Port = p.Port, Realm = p.Realm,
                 CatalogVersion = cat.Version, FirstSeen = p.FirstSeen, LastSeen = p.LastSeen,
-                Addresses = p.Candidates().Select(a => a.ToString()).ToList(), Catalog = cat,
+                Addresses = p.Candidates().Select(a => a.ToString()).ToList(), Catalog = cat, ETag = _etags.TryGetValue(p.Id, out var etag) ? etag : null,
             };
             AtomicFile.Write(SnapshotPath(p.Id), Json.Serialize(snap));
         }
@@ -146,6 +150,7 @@ public sealed class PeerService : IDisposable
                 foreach (var a in s.Addresses) if (IPAddress.TryParse(a, out var ip)) peer.Seen(ip, s.LastSeen);
                 Annotate(s.Id, s.Catalog);
                 _catalogs[s.Id] = s.Catalog;
+                if (s.ETag is not null) _etags[s.Id] = s.ETag;
                 _registry.AddKnownOffline(peer);
             }
             catch (Exception ex) { _log.LogDebug(ex, "snapshot restore failed: {File}", file); }
@@ -240,7 +245,7 @@ public sealed class PeerService : IDisposable
         return await FetchCatalogAsync(peerId, ct) ?? Cached(peerId);
     }
 
-    private async Task<CatalogDto?> FetchCatalogAsync(string peerId, CancellationToken ct)
+    private async Task<CatalogDto?> FetchCatalogAsync(string peerId, CancellationToken ct, bool fullOnly = false)
     {
         if (!_registry.TryGetOnline(peerId, out var peer)) return null;
         // Its announcements say it shares nothing: no need to connect (and nothing can go wrong).
@@ -253,28 +258,59 @@ public sealed class PeerService : IDisposable
             };
             var hadItems = Cached(peerId)?.Shares.Count > 0;
             _catalogs[peerId] = empty;
+            _etags.TryRemove(peerId, out _);
             if (hadItems) _events.Publish("peerCatalog", new { peerId, version = empty.Version, newCount = 0, itemCount = 0 });
             return empty;
         }
         var gate = _fetchLocks.GetOrAdd(peerId, _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync(ct);
+        var released = false;
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(20));
+            var previous = Cached(peerId);
             var req = _client.Build(peer, HttpMethod.Get, "/p/catalog", GrantsFor(peerId));
+            // Tell the owner which version we hold: it answers 304 (unchanged), only the changes, or everything.
+            if (!fullOnly && previous is not null && _etags.TryGetValue(peerId, out var held)
+                && CatalogTags.TryParse(held, out var heldVersion, out _) && heldVersion == previous.Version)
+            {
+                req.Headers.TryAddWithoutValidation("If-None-Match", held);
+                req.Headers.TryAddWithoutValidation(CatalogTags.BaseHeader, held);
+            }
             using var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token);
             if (resp.StatusCode == HttpStatusCode.Forbidden)
             {
                 _log.LogInformation("catalog refused by {Peer} (realm mismatch?)", peer.Name);
                 return null;
             }
+            if (resp.StatusCode == HttpStatusCode.NotModified && previous is not null)
+            {
+                _log.LogDebug("catalog v{Version} from {Peer}: unchanged", previous.Version, peer.Name);
+                return previous;
+            }
             if (!resp.IsSuccessStatusCode) { _log.LogDebug("catalog {Status} from {Peer}", resp.StatusCode, peer.Name); return null; }
             var cat = await resp.Content.ReadFromJsonAsync<CatalogDto>(Json.Options, cts.Token);
             if (cat is null) return null;
+            var tag = resp.Headers.ETag?.ToString();
+
+            if (cat.DeltaFrom is { } from)
+            {
+                if (previous is null || previous.Version != from)
+                {
+                    // Our copy changed meanwhile (or is gone): ask for the whole catalog instead.
+                    gate.Release(); released = true;
+                    return await FetchCatalogAsync(peerId, ct, fullOnly: true);
+                }
+                var changedItems = cat.Shares.Sum(s => s.Items.Count);
+                cat = MergeDelta(previous, cat);
+                _log.LogDebug("catalog v{Version} from {Peer}: {Changed} changed, {Removed} removed since v{From}",
+                    cat.Version, peer.Name, changedItems, cat.RemovedItems?.Count ?? 0, from);
+                cat.RemovedItems = null;
+            }
+            if (tag is not null) _etags[peerId] = tag; else _etags.TryRemove(peerId, out _);
 
             Annotate(peerId, cat);
-            var previous = Cached(peerId);
             _catalogs[peerId] = cat;
             SaveSnapshot(peer, cat);
             var itemCount = cat.Shares.Sum(s => s.ItemCount);
@@ -306,7 +342,30 @@ public sealed class PeerService : IDisposable
             _log.LogWarning("catalog fetch failed for {Peer} at {Url}: {Msg}", peer.Name, peer.BaseUrl, ex.InnerException?.Message ?? ex.Message);
             return null;
         }
-        finally { gate.Release(); }
+        finally { if (!released) gate.Release(); }
+    }
+
+    /// <summary>
+    /// Applies a delta to the catalog we hold. Share headers in the delta are complete; its items are the ones that
+    /// changed. The result is a new catalog object (the previous one is still used to spot newly added videos).
+    /// </summary>
+    private static CatalogDto MergeDelta(CatalogDto previous, CatalogDto delta)
+    {
+        var removed = new HashSet<string>(delta.RemovedItems ?? new(), StringComparer.Ordinal);
+        var changed = new HashSet<string>(delta.Shares.SelectMany(s => s.Items).Select(i => i.Id), StringComparer.Ordinal);
+        var old = previous.Shares.ToDictionary(s => s.Id);
+        foreach (var share in delta.Shares)
+        {
+            var visible = share.Lock is null || share.Unlocked;
+            if (!visible) { share.Items = new(); continue; }
+            if (old.TryGetValue(share.Id, out var before) && (before.Lock is null || before.Unlocked))
+            {
+                var kept = before.Items.Where(i => !removed.Contains(i.Id) && !changed.Contains(i.Id));
+                share.Items = kept.Concat(share.Items).ToList();
+            }
+        }
+        delta.DeltaFrom = null;
+        return delta;
     }
 
     private void Annotate(string peerId, CatalogDto cat)
@@ -332,6 +391,30 @@ public sealed class PeerService : IDisposable
                 item.IsNew = !item.IsMine && item.AddedAt > threshold;
             }
         }
+    }
+
+    private Dictionary<string, string>? _ownCopies;
+    private long _ownCopiesVersion = -1;
+
+    /// <summary>
+    /// My own shared file that is the same video (same name + size, see <see cref="EchoKey"/>), if any: playing it
+    /// from disk costs no network at all.
+    /// </summary>
+    public string? OwnCopyPath(ItemDto item)
+    {
+        var version = _catalog.Version;
+        var index = _ownCopies;
+        if (index is null || _ownCopiesVersion != version)
+        {
+            index = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in _catalog.Shares)
+                foreach (var i in _catalog.Items(s.Id))
+                    index.TryAdd(EchoKey(i.Name, i.Size), _catalog.FullPath(s, i));
+            _ownCopies = index; _ownCopiesVersion = version;
+        }
+        if (!index.TryGetValue(EchoKey(item.Name, item.Size), out var path)) return null;
+        try { return new FileInfo(path) is { Exists: true } f && f.Length == item.Size ? path : null; }
+        catch { return null; }
     }
 
     /// <summary>
@@ -414,10 +497,11 @@ public sealed class PeerService : IDisposable
     // ------------------------------------------------------------------ media
 
     /// <summary>Opens a (range) stream from the peer. Caller disposes the response.</summary>
-    public async Task<HttpResponseMessage> OpenStreamAsync(string peerId, string itemId, string? range, CancellationToken ct)
+    public async Task<HttpResponseMessage> OpenStreamAsync(string peerId, string itemId, string? range, CancellationToken ct, bool download = false)
     {
         var peer = OnlinePeer(peerId);
         var req = _client.Build(peer, HttpMethod.Get, "/p/stream/" + Uri.EscapeDataString(itemId), GrantsFor(peerId));
+        if (download) req.Headers.TryAddWithoutValidation(PeerHeaders.Purpose, PeerHeaders.Download); // the owner lets viewers go first
         if (!string.IsNullOrEmpty(range)) req.Headers.TryAddWithoutValidation("Range", range);
         var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
         if (resp.StatusCode == HttpStatusCode.Forbidden) await HandleLockedAsync(peerId, resp);

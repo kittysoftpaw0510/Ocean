@@ -30,7 +30,7 @@ and every byte between them travels over mutually authenticated, end-to-end encr
 
 ## Install (end users)
 
-Run **`Ocean-Setup-1.0.0.exe`** and click through. Nothing else is needed: the .NET runtime is bundled.
+Run **`Ocean-Setup-1.0.2.exe`** and click through. Nothing else is needed: the .NET runtime is bundled.
 The setup:
 
 - installs Ocean to `C:\Program Files\Ocean` with a Start menu shortcut (desktop shortcut optional);
@@ -45,7 +45,7 @@ The setup:
 Uninstall from *Settings > Apps* (or the Start menu). It removes the service, firewall rules and shortcuts and
 asks whether to also delete settings and caches (`%ProgramData%\Ocean`). Videos and downloads are never touched.
 
-Silent install for many PCs: `Ocean-Setup-1.0.0.exe /VERYSILENT /SUPPRESSMSGBOXES /TASKS="service,firewall,autostart"`.
+Silent install for many PCs: `Ocean-Setup-1.0.2.exe /VERYSILENT /SUPPRESSMSGBOXES /TASKS="service,firewall,autostart"`.
 
 ## Build
 
@@ -85,7 +85,7 @@ When Ocean runs as the Windows service it also allows itself on Public networks,
 | Node page | Share chips at the top filter the videos. Double-click to play, right-click for *Download*, *Open in external player*, *Copy stream link*. Multi-select and *Download n selected*. *Download all* for the chip you're on. |
 | **My shares** | *Share a folder* / *Files* / *New folder* (an empty folder you fill later; rename or remove any time), or drop folders anywhere in the window. Pick who can watch: everyone, password, or ask-me. Right-click a video to give it its own rule. *Who has access* lists issued grants (revoke any time). |
 | **Downloads** | Progress, speed, ETA; cancel, retry, open, show in folder. Partial files resume after restarts. |
-| **Settings** | Your name, shared secret, upload speed cap, how long videos count as "new", download folder, start with Windows. |
+| **Settings** | Your name, shared secret, upload speed cap, how long videos count as "new", download folder, video cache size (what you watched from other PCs is kept so replays cost no network), start with Windows. |
 | Tray icon | Open, pause sharing, exit (keeps sharing) or exit and stop sharing. Balloon tips for access requests and new videos. |
 
 Keyboard: `Ctrl+F` search · `Enter` play · `Ctrl+A` select all · in the player `Space` play/pause, `Shift+>` / `Shift+<` speed, `[` / `]` set A / B (A-B repeat), `\` clear repeat,

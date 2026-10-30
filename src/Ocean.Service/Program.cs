@@ -70,12 +70,25 @@ builder.Services.AddSingleton<RelayWorker>();
 builder.Services.AddSingleton<FirewallRules>();
 builder.Services.AddSingleton<PeerClient>();
 builder.Services.AddSingleton<PeerService>();
+builder.Services.AddSingleton<StreamCache>();
+builder.Services.AddSingleton<PeerMedia>();
 builder.Services.AddSingleton<DownloadManager>();
-builder.Services.AddSingleton(new BandwidthLimiter { BytesPerSecond = cfg.UploadLimitKBps * 1024L });
+builder.Services.AddSingleton(new UploadScheduler { BytesPerSecond = cfg.UploadLimitKBps * 1024L });
 builder.Services.AddHostedService<DiscoveryService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DownloadManager>());
 builder.Services.AddHostedService<CatalogMaintenance>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<FirewallRules>());
+
+// Catalogs and other JSON answers between nodes are compressed (videos and JPEG thumbnails are not: their types
+// are not in the list, and they would not shrink). SSE to the UI stays uncompressed (not in the list either).
+builder.Services.AddResponseCompression(o =>
+{
+    o.EnableForHttps = true; // only our own JSON, no secrets echoed from requests (no BREACH-style exposure)
+    o.Providers.Add<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProvider>();
+    o.Providers.Add<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProvider>();
+});
+builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProviderOptions>(o => o.Level = System.IO.Compression.CompressionLevel.Fastest);
+builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProviderOptions>(o => o.Level = System.IO.Compression.CompressionLevel.Fastest);
 
 builder.Services.ConfigureHttpJsonOptions(o =>
 {
@@ -105,6 +118,7 @@ builder.WebHost.ConfigureKestrel(k =>
 
 var app = builder.Build();
 var log = app.Services.GetRequiredService<ILogger<Program>>();
+app.UseResponseCompression();
 
 // Gate: which listener + which credential each route family requires.
 app.Use(async (ctx, next) =>

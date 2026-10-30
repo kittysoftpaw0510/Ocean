@@ -60,12 +60,48 @@ public static class PeerApi
             var check = access.Checker(pc.ClientId, pc.Grants);
             var cfg = config.Current;
             var cat = catalog.BuildCatalog(id.NodeId, cfg.NodeName, cfg.UserName, cfg.SharingPaused, check);
-            // ETag depends on the version and on which locks this caller has open.
+            // ETag = version + what this caller can see (which locks it has open). Stable across restarts.
             var open = string.Join(',', cat.Shares.Where(s => s.Unlocked).Select(s => s.Id).Concat(cat.Shares.SelectMany(s => s.Items).Where(i => i.Lock is not null && i.Unlocked).Select(i => i.Id)).Order());
-            var etag = $"\"{cat.Version}-{open.GetHashCode():x}\"";
-            if (ctx.Request.Headers.IfNoneMatch.ToString() == etag) return Results.StatusCode(StatusCodes.Status304NotModified);
-            ctx.Response.Headers.ETag = etag;
+            var view = Fnv.Hash(open + (cfg.SharingPaused ? "|paused" : ""));
+            var etag = CatalogTags.Make(cat.Version, view);
             ctx.Response.Headers.CacheControl = "no-cache";
+            if (ctx.Request.Headers.IfNoneMatch.ToString() == etag)
+            {
+                ctx.Response.Headers.ETag = etag;
+                return Results.StatusCode(StatusCodes.Status304NotModified);
+            }
+
+            // Delta: the caller holds an older version with the same view, so send only what changed since then.
+            if (CatalogTags.TryParse(ctx.Request.Headers[CatalogTags.BaseHeader].ToString(), out var baseVersion, out var baseView)
+                && baseView == view && catalog.ChangesSince(baseVersion) is { } changes)
+            {
+                if (changes.Version == baseVersion)
+                {
+                    ctx.Response.Headers.ETag = CatalogTags.Make(baseVersion, view);
+                    return Results.StatusCode(StatusCodes.Status304NotModified);
+                }
+                var total = cat.Shares.Sum(s => s.Items.Count);
+                var delta = new CatalogDto
+                {
+                    NodeId = cat.NodeId, NodeName = cat.NodeName, UserName = cat.UserName, Host = cat.Host,
+                    Version = changes.Version, GeneratedAt = cat.GeneratedAt, DeltaFrom = baseVersion,
+                    RemovedItems = changes.Removed.ToList(),
+                };
+                foreach (var s in cat.Shares)
+                    delta.Shares.Add(new ShareDto
+                    {
+                        Id = s.Id, Name = s.Name, Mode = s.Mode, Lock = s.Lock, Unlocked = s.Unlocked, ItemCount = s.ItemCount,
+                        TotalBytes = s.TotalBytes, CreatedAt = s.CreatedAt, UpdatedAt = s.UpdatedAt, NewestItemAt = s.NewestItemAt,
+                        Folders = s.Folders, Items = s.Items.Where(i => changes.Changed.Contains(i.Id)).ToList(),
+                    });
+                // A delta carrying most of the catalog anyway is no better than the catalog itself.
+                if (delta.Shares.Sum(s => s.Items.Count) <= total / 2 + 16)
+                {
+                    ctx.Response.Headers.ETag = CatalogTags.Make(changes.Version, view);
+                    return Results.Json(delta, Json.Options);
+                }
+            }
+            ctx.Response.Headers.ETag = etag;
             return Results.Json(cat, Json.Options);
         });
 
@@ -112,23 +148,38 @@ public static class PeerApi
             return Results.File(path, "image/jpeg", lastModified: item.ModifiedAt, entityTag: new EntityTagHeaderValue($"\"{item.Id}-{item.ModifiedAt.UtcTicks}\""));
         });
 
-        g.MapMethods("/stream/{itemId}", new[] { "GET", "HEAD" }, (HttpContext ctx, string itemId, CatalogService catalog, AccessService access, BandwidthLimiter limiter, ConfigStore config) =>
+        g.MapMethods("/stream/{itemId}", new[] { "GET", "HEAD" }, (HttpContext ctx, string itemId, CatalogService catalog, AccessService access, UploadScheduler uploads, ConfigStore config) =>
         {
             if (config.Current.SharingPaused) return Results.StatusCode(503);
             if (!catalog.TryGetItem(itemId, out var share, out var item)) return Results.NotFound();
             var pc = PeerContext.Get(ctx);
             if (!catalog.IsItemAccessible(share, item, access.Checker(pc.ClientId, pc.Grants))) return Locked(share, item);
             var full = catalog.FullPath(share, item);
+            // Saving a copy can wait; watching can't. Downloads beyond a few at once are asked to come back shortly.
+            var kind = string.Equals(ctx.Request.Headers[PeerHeaders.Purpose], PeerHeaders.Download, StringComparison.OrdinalIgnoreCase)
+                ? UploadKind.Download : UploadKind.Stream;
+            IDisposable? slot = null;
+            if (kind == UploadKind.Download && HttpMethods.IsGet(ctx.Request.Method))
+            {
+                slot = uploads.TryStartDownload(pc.ClientId);
+                if (slot is null)
+                {
+                    ctx.Response.Headers.RetryAfter = "15";
+                    return Results.Json(new ErrorDto { Error = PeerHeaders.Busy, Message = "Busy sending other downloads; try again shortly." }, Json.Options, statusCode: 503);
+                }
+            }
             FileStream fs;
             try
             {
                 fs = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1 << 16,
                     FileOptions.Asynchronous | FileOptions.SequentialScan);
             }
-            catch (FileNotFoundException) { return Results.NotFound(); }
-            catch (DirectoryNotFoundException) { return Results.NotFound(); }
-            catch (UnauthorizedAccessException) { return Results.StatusCode(403); }
-            Stream body = limiter.Enabled ? new ThrottledStream(fs, limiter) : fs;
+            catch (FileNotFoundException) { slot?.Dispose(); return Results.NotFound(); }
+            catch (DirectoryNotFoundException) { slot?.Dispose(); return Results.NotFound(); }
+            catch (UnauthorizedAccessException) { slot?.Dispose(); return Results.StatusCode(403); }
+            catch { slot?.Dispose(); throw; }
+            // always paced and metered: tells the scheduler who is watching and how fast this PC uploads
+            var body = new ThrottledStream(fs, uploads, kind, slot);
             ctx.Response.Headers.CacheControl = "private, no-transform";
             return Results.Stream(body, VideoTypes.ContentType(full), lastModified: item.ModifiedAt,
                 entityTag: new EntityTagHeaderValue($"\"{item.Id}-{item.ModifiedAt.UtcTicks}\""), enableRangeProcessing: true);

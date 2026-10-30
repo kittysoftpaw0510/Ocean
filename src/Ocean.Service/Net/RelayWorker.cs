@@ -114,6 +114,8 @@ public sealed class RelayWorker : IDisposable
                 if (k.StartsWith("X-Ocean-", StringComparison.OrdinalIgnoreCase) || k.Equals("Range", StringComparison.OrdinalIgnoreCase)
                     || k.Equals("If-None-Match", StringComparison.OrdinalIgnoreCase))
                     local.Headers.TryAddWithoutValidation(k, v);
+            // Catalogs travel compressed over the reverse link too (the requesting side unpacks them).
+            if (job.Path.StartsWith("/p/catalog", StringComparison.Ordinal)) local.Headers.TryAddWithoutValidation("Accept-Encoding", "br, gzip");
             local.Headers.Remove("X-Ocean-OnBehalf");
             local.Headers.TryAddWithoutValidation("X-Ocean-OnBehalf", peer.Id); // honoured only for our own key over loopback
             if (job.Body is not null)

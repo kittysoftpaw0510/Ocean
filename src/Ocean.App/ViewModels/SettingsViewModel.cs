@@ -26,6 +26,8 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _notifyNewVideos = true;
     [ObservableProperty] private bool _allowPublicNetworks = true;
     [ObservableProperty] private bool _firewallManaged = true;
+    [ObservableProperty] private int _streamCacheGB = 5;
+    [ObservableProperty] private string _streamCacheUsedText = "";
     [ObservableProperty] private bool _runAtStartup;
     [ObservableProperty] private bool _dirty;
     [ObservableProperty] private string? _savedMessage;
@@ -49,6 +51,21 @@ public partial class SettingsViewModel : ObservableObject
     partial void OnOfflineKeepHoursChanged(int value) => MarkDirty();
     partial void OnNotifyNewVideosChanged(bool value) => MarkDirty();
     partial void OnAllowPublicNetworksChanged(bool value) => MarkDirty();
+    partial void OnStreamCacheGBChanged(int value) => MarkDirty();
+
+    private static string CacheUsed(long bytes) => bytes <= 0 ? "Empty right now." : $"Using {Core.Format.Bytes(bytes)} right now.";
+
+    [RelayCommand]
+    private async Task ClearStreamCache()
+    {
+        try
+        {
+            await _main.Api.PostAsync("/api/cache/clear");
+            StreamCacheUsedText = CacheUsed(0);
+            _main.Toast("Video cache cleared", "Videos you watch next are fetched again.", "success");
+        }
+        catch (Exception ex) { _main.Toast("Could not clear the cache", ex.Message, "error"); }
+    }
     partial void OnRunAtStartupChanged(bool value) { if (!_loading) ApplyRunAtStartup(value); }
     private void MarkDirty() { if (!_loading) { Dirty = true; SavedMessage = null; } }
 
@@ -63,6 +80,7 @@ public partial class SettingsViewModel : ObservableObject
                 NodeName = s.NodeName; UserName = s.UserName; Secret = s.Secret ?? ""; DownloadDir = s.DownloadDir;
                 UploadLimitKBps = s.UploadLimitKBps; NewDays = s.NewDays; MaxConcurrentDownloads = s.MaxConcurrentDownloads; NotifyNewVideos = s.NotifyNewVideos; OfflineKeepHours = s.OfflineKeepHours;
                 AllowPublicNetworks = s.AllowPublicNetworks; FirewallManaged = s.FirewallManaged;
+                StreamCacheGB = s.StreamCacheGB; StreamCacheUsedText = CacheUsed(s.StreamCacheUsedBytes);
                 _main.DownloadsVm.DownloadDir = s.DownloadDir;
             }
             var st = _main.Status;
@@ -87,7 +105,7 @@ public partial class SettingsViewModel : ObservableObject
             await _main.Api.PutAsync("/api/settings", new SettingsDto
             {
                 NodeName = NodeName.Trim(), UserName = UserName.Trim(), Secret = Secret, DownloadDir = DownloadDir.Trim(),
-                UploadLimitKBps = UploadLimitKBps, NewDays = NewDays, MaxConcurrentDownloads = MaxConcurrentDownloads, OfflineKeepHours = OfflineKeepHours, AllowPublicNetworks = AllowPublicNetworks,
+                UploadLimitKBps = UploadLimitKBps, NewDays = NewDays, MaxConcurrentDownloads = MaxConcurrentDownloads, OfflineKeepHours = OfflineKeepHours, AllowPublicNetworks = AllowPublicNetworks, StreamCacheGB = StreamCacheGB,
                 NotifyNewVideos = NotifyNewVideos, SharingPaused = _main.SharingPaused,
             });
             Dirty = false;

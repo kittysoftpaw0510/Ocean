@@ -82,6 +82,8 @@ public sealed class CatalogService : IDisposable
         try { if (File.Exists(_versionPath) && long.TryParse(File.ReadAllText(_versionPath), out var v)) _version = v; } catch { }
 
         foreach (var share in config.Current.Shares) LoadRuntime(share);
+        // Baseline for catalog deltas: what nodes holding the current version already have.
+        try { lock (_logLock) ResetChangeLog(_version); } catch (Exception ex) { _log.LogWarning(ex, "change log init failed"); }
     }
 
     public long Version => Interlocked.Read(ref _version);
@@ -317,11 +319,95 @@ public sealed class CatalogService : IDisposable
     public static string ShareLock(string shareId) => "s:" + shareId;
     public static string ItemLock(string itemId) => "i:" + itemId;
 
+    // ------------------------------------------------------------------ change log (catalog deltas)
+    //
+    // Every version records which items changed or disappeared, by comparing a fingerprint of each item as other
+    // nodes see it (name, folder, size, dates, media info, lock). A node that already holds version B then gets
+    // only what changed since B instead of the whole catalog. The log lives in memory: after a restart, nodes
+    // with an older version get one full catalog and deltas again from then on.
+
+    public sealed record ChangeSet(long Version, HashSet<string> Changed, HashSet<string> Removed);
+
+    private const int MaxLogEntries = 512;
+    private readonly object _logLock = new();
+    private Dictionary<string, ulong> _fingerprints = new();
+    private readonly List<(long Version, string[] Changed, string[] Removed)> _changeLog = new();
+    private long _logFloor = -1; // deltas can be built from this version onwards
+    private long _loggedVersion;
+
+    private Dictionary<string, ulong> Fingerprints()
+    {
+        var map = new Dictionary<string, ulong>(StringComparer.Ordinal);
+        var dto = new ItemDto();
+        foreach (var share in Shares)
+            foreach (var i in Items(share.Id))
+            {
+                Fill(dto, share, i, _ => false);
+                var h = Fnv.Add(Fnv.Seed, dto.ShareId);
+                h = Fnv.Add(h, dto.Name); h = Fnv.Add(h, dto.RelPath); h = Fnv.Add(h, dto.Folder);
+                h = Fnv.Add(h, dto.Size); h = Fnv.Add(h, dto.ModifiedAt.UtcTicks); h = Fnv.Add(h, dto.AddedAt.UtcTicks);
+                h = Fnv.Add(h, dto.DurationMs ?? -1); h = Fnv.Add(h, dto.Width ?? -1); h = Fnv.Add(h, dto.Height ?? -1);
+                h = Fnv.Add(h, dto.Lock?.Id); h = Fnv.Add(h, (long)(dto.Lock?.Mode ?? AccessMode.Public));
+                map[i.Id] = h;
+            }
+        return map;
+    }
+
+    private void ResetChangeLog(long version)
+    {
+        _fingerprints = Fingerprints();
+        _changeLog.Clear();
+        _logFloor = _loggedVersion = version;
+    }
+
+    private void RecordChanges(long version)
+    {
+        if (_logFloor < 0) { ResetChangeLog(version); return; } // no baseline: deltas start from here
+        var now = Fingerprints();
+        var changed = now.Where(kv => !_fingerprints.TryGetValue(kv.Key, out var old) || old != kv.Value).Select(kv => kv.Key).ToArray();
+        var removed = _fingerprints.Keys.Where(k => !now.ContainsKey(k)).ToArray();
+        _fingerprints = now;
+        _changeLog.Add((version, changed, removed));
+        _loggedVersion = version;
+        while (_changeLog.Count > MaxLogEntries)
+        {
+            _logFloor = _changeLog[0].Version;
+            _changeLog.RemoveAt(0);
+        }
+    }
+
+    /// <summary>
+    /// What changed after <paramref name="baseVersion"/>, or null when that version is too old (or from before a
+    /// restart) and only a full catalog will do.
+    /// </summary>
+    public ChangeSet? ChangesSince(long baseVersion)
+    {
+        lock (_logLock)
+        {
+            if (_logFloor < 0) ResetChangeLog(Version);
+            if (baseVersion < _logFloor || baseVersion > _loggedVersion) return null;
+            var changed = new HashSet<string>(StringComparer.Ordinal);
+            var removed = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var (v, c, r) in _changeLog)
+            {
+                if (v <= baseVersion) continue;
+                foreach (var id in r) { removed.Add(id); changed.Remove(id); }
+                foreach (var id in c) { changed.Add(id); removed.Remove(id); }
+            }
+            return new ChangeSet(_loggedVersion, changed, removed);
+        }
+    }
+
     // ------------------------------------------------------------------ versioning
 
     private void Bump(string reason)
     {
-        var v = Interlocked.Increment(ref _version);
+        long v;
+        lock (_logLock)
+        {
+            v = Interlocked.Increment(ref _version);
+            try { RecordChanges(v); } catch (Exception ex) { _log.LogWarning(ex, "change log failed"); ResetChangeLog(v); }
+        }
         try { AtomicFile.Write(_versionPath, v.ToString()); } catch (Exception ex) { _log.LogWarning(ex, "version persist failed"); }
         _log.LogDebug("catalog version {Version} ({Reason})", v, reason);
         _events.Publish("catalog", new { version = v, reason });

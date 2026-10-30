@@ -89,6 +89,13 @@ Beacon: `{v, t, id, pk, name, user, host, port, realm, cat, shares, ts, sig}`.
   thread, pre-generated in the background and cached as 320×180 JPEGs keyed by item id + mtime.
 - Catalog version is a persisted counter bumped on any change. Responses carry an ETag that depends on
   the version *and* on which locks the caller has open.
+- **Sync costs only what changed.** A node sends back the ETag of the catalog it holds: the owner answers
+  `304` when nothing changed, or a **delta** (`deltaFrom` + complete share headers + only the items whose
+  fingerprint changed + `removedItems`). The owner keeps an in-memory change log (last 512 versions, item
+  fingerprints = name, folder, size, dates, media info, lock); a version from before its last restart, a
+  different view (locks opened), or a delta bigger than half the catalog gets the full catalog instead.
+  JSON between nodes is Brotli/gzip compressed, also over the reverse connection. Catalogs are still
+  fetched in the background for every node (the "new" badges need them), but that now costs a few bytes.
 
 ## Folders
 
@@ -140,6 +147,21 @@ Jobs are persisted (`downloads.json`) and resumed with HTTP ranges from a `.ocea
 = `<download dir>\<peer name>\<relative path>` after sanitizing each segment (invalid characters,
 reserved device names, 200-char segment cap, unique suffix on collision); .NET handles paths beyond
 `MAX_PATH`. Up to N parallel jobs (setting), 3 automatic retries with back-off for transient errors.
+Downloads read through the stream cache (below), so whatever was already watched is copied from disk.
+
+## Bandwidth
+
+- **Viewer side.** The player's requests go to `PeerMedia`: the same video in my own shares (name + size)
+  or a finished download of it plays from disk; otherwise bytes come through the **stream cache**
+  (`cache/streams/`): one sparse file per video filled in 1 MB blocks + a block map, keyed by node, item,
+  size and mtime. Cached blocks are served from disk, missing runs are fetched from the owner and stored.
+  LRU eviction beyond the size in Settings (default 5 GB, 0 = off). A finished download drops the video's
+  cached blocks.
+- **Owner side.** `UploadScheduler` paces every outgoing video byte. Requests marked
+  `X-Ocean-Purpose: download` yield to streams: while anyone is watching, downloads together get a fifth
+  of the speed limit (or, without a limit, a quarter of the peak upload rate seen recently, at least
+  1 MB/s). Connections take turns in arrival order (fair per connection). At most 4 downloads are served
+  at once (2 per node); others get `503 busy` + `Retry-After` and wait without counting as a failure.
 
 ## UI
 
@@ -158,6 +180,8 @@ peers.json       last-visit times and grants we hold (browsing side)
 downloads.json   download jobs
 catalog/         per-share item index + version
 thumbs/          own thumbnails;  cache/thumbs/<peer>/  remote thumbnails
+cache/streams/   watched video bytes from other PCs (sparse files + block maps)
+cache/peers/     last known catalog of each node (offline view, delta base)
 logs/            service-YYYYMMDD.log (14 days), app-errors.log
 ```
 

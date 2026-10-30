@@ -108,34 +108,9 @@ public static class LocalApi
             return Results.File(path, "image/jpeg");
         });
 
-        g.MapMethods("/peers/{peerId}/stream/{itemId}/{name?}", new[] { "GET", "HEAD" }, async (string peerId, string itemId, HttpContext ctx, PeerService peers) =>
-        {
-            var range = ctx.Request.Headers.Range.ToString();
-            HttpResponseMessage resp;
-            try { resp = await peers.OpenStreamAsync(peerId, itemId, string.IsNullOrEmpty(range) ? null : range, ctx.RequestAborted); }
-            catch (PeerUnavailableException) { ctx.Response.StatusCode = 503; return; }
-            catch (HttpRequestException) { ctx.Response.StatusCode = 502; return; }
-            catch (OperationCanceledException) { return; }
-            using (resp)
-            {
-                ctx.Response.StatusCode = (int)resp.StatusCode;
-                if (resp.Content.Headers.ContentType is { } ctype) ctx.Response.ContentType = ctype.ToString();
-                if (resp.Content.Headers.ContentLength is { } len) ctx.Response.ContentLength = len;
-                if (resp.Content.Headers.ContentRange is { } cr) ctx.Response.Headers.ContentRange = cr.ToString();
-                if (resp.Headers.ETag is { } etag) ctx.Response.Headers.ETag = etag.ToString();
-                if (resp.Content.Headers.LastModified is { } lm) ctx.Response.Headers.LastModified = lm.ToString("R");
-                ctx.Response.Headers.AcceptRanges = "bytes";
-                ctx.Response.Headers.CacheControl = "no-store";
-                if (HttpMethods.IsHead(ctx.Request.Method)) return;
-                try
-                {
-                    await using var src = await resp.Content.ReadAsStreamAsync(ctx.RequestAborted);
-                    await src.CopyToAsync(ctx.Response.Body, 1 << 17, ctx.RequestAborted);
-                }
-                catch (OperationCanceledException) { }
-                catch (IOException) { }
-            }
-        });
+        // The player's requests: own copy or finished download from disk, otherwise through the stream cache.
+        g.MapMethods("/peers/{peerId}/stream/{itemId}/{name?}", new[] { "GET", "HEAD" }, (string peerId, string itemId, HttpContext ctx, PeerMedia media)
+            => media.ServeAsync(ctx, peerId, itemId));
 
         // ---------------------------------------------------------------- my shares
         g.MapGet("/shares", (CatalogService catalog) => Results.Json(catalog.Shares.Select(catalog.ToDto).ToList(), Json.Options));
@@ -243,7 +218,7 @@ public static class LocalApi
         g.MapDelete("/downloads/{id}", (string id, DownloadManager dl) => dl.Remove(id) ? Results.Ok() : Results.NotFound());
 
         // ---------------------------------------------------------------- settings
-        g.MapGet("/settings", (ConfigStore config, FirewallRules firewall) =>
+        g.MapGet("/settings", (ConfigStore config, FirewallRules firewall, StreamCache cache) =>
         {
             var c = config.Current;
             return Results.Json(new SettingsDto
@@ -252,10 +227,11 @@ public static class LocalApi
                 UploadLimitKBps = c.UploadLimitKBps, SharingPaused = c.SharingPaused, NewDays = c.NewDays,
                 MaxConcurrentDownloads = c.MaxConcurrentDownloads, NotifyNewVideos = c.NotifyNewVideos, OfflineKeepHours = c.OfflineKeepHours,
                 AllowPublicNetworks = c.AllowPublicNetworks, FirewallManaged = firewall.CanManage,
+                StreamCacheGB = c.StreamCacheGB, StreamCacheUsedBytes = cache.UsedBytes,
             }, Json.Options);
         });
 
-        g.MapPut("/settings", async (HttpContext ctx, ConfigStore config, BandwidthLimiter limiter, EventHub events) =>
+        g.MapPut("/settings", async (HttpContext ctx, ConfigStore config, UploadScheduler limiter, EventHub events) =>
         {
             var dto = await ctx.Request.ReadFromJsonAsync<SettingsDto>(Json.Options, ctx.RequestAborted);
             if (dto is null) return Results.BadRequest();
@@ -272,11 +248,14 @@ public static class LocalApi
                 c.NotifyNewVideos = dto.NotifyNewVideos;
                 c.OfflineKeepHours = Math.Clamp(dto.OfflineKeepHours, 1, 24 * 30);
                 c.AllowPublicNetworks = dto.AllowPublicNetworks;
+                c.StreamCacheGB = Math.Clamp(dto.StreamCacheGB, 0, 500);
             });
             limiter.BytesPerSecond = config.Current.UploadLimitKBps * 1024L;
             events.Publish("settings");
             return Results.Ok();
         });
+
+        g.MapPost("/cache/clear", (StreamCache cache) => { cache.Clear(); return Results.Json(new { used = cache.UsedBytes }); });
 
         g.MapPost("/sharing/pause", (bool paused, ConfigStore config, EventHub events) =>
         {
