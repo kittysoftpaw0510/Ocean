@@ -245,7 +245,14 @@
                 <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Top">
                     <Button Content="Edit" Command="{Binding EditCommand}" CommandParameter="{Binding Selected}" ToolTip="Who can watch, password, shared folders"/>
                     <Button Style="{StaticResource BtnGhost}" Content="Rename" Margin="6,0,0,0" Command="{Binding RenameShareCommand}" CommandParameter="{Binding Selected}"/>
-                    <Button Style="{StaticResource BtnGhost}" Content="Rescan" Margin="6,0,0,0" Command="{Binding RescanCommand}" CommandParameter="{Binding Selected}"/>
+                    <Button Style="{StaticResource BtnGhost}" Margin="6,0,0,0" Command="{Binding RescanCommand}" CommandParameter="{Binding Selected}"
+                            ToolTip="Look for added, changed or removed videos on disk" AutomationProperties.Name="Rescan">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE72C;" Style="{StaticResource Icon}" FontSize="12" Margin="0,0,8,0" c:Spin.IsSpinning="{Binding Selected.Scanning}"
+                                       Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                            <TextBlock Text="Rescan" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                        </StackPanel>
+                    </Button>
                     <Button Style="{StaticResource BtnGhost}" Content="Open folder" Margin="6,0,0,0" Command="{Binding OpenFolderCommand}" CommandParameter="{Binding Selected}"
                             Visibility="{Binding Selected.HasRoots, Converter={StaticResource BoolToVis}}"/>
                     <Button Style="{StaticResource BtnDanger}" Content="Remove" Margin="6,0,0,0" Command="{Binding RemoveCommand}" CommandParameter="{Binding Selected}"

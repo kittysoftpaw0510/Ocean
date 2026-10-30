@@ -65,6 +65,8 @@ builder.Services.AddSingleton<CatalogService>();
 builder.Services.AddSingleton<ThumbnailService>();
 builder.Services.AddSingleton<PeerRegistry>();
 builder.Services.AddSingleton<AccessService>();
+builder.Services.AddSingleton<RelayHub>();
+builder.Services.AddSingleton<RelayWorker>();
 builder.Services.AddSingleton<PeerClient>();
 builder.Services.AddSingleton<PeerService>();
 builder.Services.AddSingleton<DownloadManager>();
@@ -115,6 +117,18 @@ app.Use(async (ctx, next) =>
         if (port != current.PeerPort || clientId is null)
         {
             ctx.Response.StatusCode = 403; return;
+        }
+        // Reverse connection: our own relay worker replays a request of node X on X's behalf. Accepted only when
+        // the caller holds OUR key and calls over loopback; every other check (secret proof, grants) still applies to X.
+        var onBehalf = ctx.Request.Headers["X-Ocean-OnBehalf"].ToString();
+        if (onBehalf.Length > 0)
+        {
+            var remote = ctx.Connection.RemoteIpAddress;
+            if (clientId != identity.NodeId || remote is null || !IPAddress.IsLoopback(remote) || onBehalf.Length != 64)
+            {
+                ctx.Response.StatusCode = 403; return;
+            }
+            clientId = onBehalf.ToLowerInvariant();
         }
         if (!Realm.ProofMatches(current.Secret, clientId, identity.NodeId, ctx.Request.Headers["X-Ocean-Realm"]))
         {

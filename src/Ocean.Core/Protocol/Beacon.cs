@@ -21,10 +21,20 @@ public sealed class Beacon
     public long Cat { get; set; }
     public int Shares { get; set; }
     public long Ts { get; set; }
+    /// <summary>
+    /// Reverse-connection requests: ids of nodes this node cannot connect to directly (usually their firewall blocks
+    /// incoming connections). A listed node answers by connecting out to us and serving our requests over that link.
+    /// </summary>
+    public List<string>? Want { get; set; }
     public string Sig { get; set; } = "";
 
     public byte[] SignedPayload()
-        => Encoding.UTF8.GetBytes(string.Join('\n', V, T, Id, Pk, Name, User, Host, Port, Realm, Cat, Shares, Ts));
+    {
+        var core = string.Join('\n', V, T, Id, Pk, Name, User, Host, Port, Realm, Cat, Shares, Ts);
+        // Only appended when present, so plain beacons stay byte-for-byte compatible with older nodes.
+        if (Want is { Count: > 0 }) core += "\nwant:" + string.Join(',', Want);
+        return Encoding.UTF8.GetBytes(core);
+    }
 
     public void Sign(NodeIdentity identity)
     {

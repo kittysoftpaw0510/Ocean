@@ -325,6 +325,41 @@ public partial class MainViewModel : ObservableObject
         }, TaskScheduler.Default);
     }
 
+    [ObservableProperty] private bool _isRefreshingNetwork;
+
+    /// <summary>Removes an offline node (and its remembered shares) from the list. It reappears if it comes back online.</summary>
+    [RelayCommand]
+    public async Task RemovePeer(PeerVm? peer)
+    {
+        if (peer is null) return;
+        if (peer.Online) { Toast("Still online", $"{peer.Label} can be removed once it goes offline.", "info"); return; }
+        try
+        {
+            await Api.DeleteAsync($"/api/peers/{peer.Id}");
+            Peers.Remove(peer);
+            _browse.Remove(peer.Id);
+            if (SelectedPeer == peer || (Page is BrowseViewModel b && b.Peer == peer)) ShowHome();
+            Toast("Removed", $"{peer.Label} was removed from the list. It shows up again if it comes back online.", "success");
+        }
+        catch (ApiException ex) when (ex.StatusCode == 404) { Peers.Remove(peer); }
+        catch (Exception ex) { Toast("Could not remove", ex.Message, "error"); }
+    }
+
+    /// <summary>The Network ↻ button: announce ourselves now, re-check every online node, then reload the list.</summary>
+    [RelayCommand]
+    private async Task RefreshNetwork()
+    {
+        if (IsRefreshingNetwork) return;
+        IsRefreshingNetwork = true;
+        try
+        {
+            try { await Api.PostAsync("/api/peers/refresh"); } catch { /* older service: just reload the list */ }
+            await Task.Delay(900); // give answers and catalog checks a moment
+            await RefreshPeersAsync();
+        }
+        finally { IsRefreshingNetwork = false; }
+    }
+
     [RelayCommand]
     public async Task RefreshPeersAsync()
     {

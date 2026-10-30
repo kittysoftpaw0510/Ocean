@@ -80,6 +80,26 @@ public static class PeerApi
         g.MapGet("/access/{requestId}", (HttpContext ctx, string requestId, AccessService access) =>
             Results.Json(access.Poll(requestId, PeerContext.Get(ctx).ClientId), Json.Options));
 
+        // ---- reverse connection (the caller is a node we could not reach directly) ----
+        g.MapPost("/relay/poll", async (HttpContext ctx, RelayHub hub) =>
+        {
+            var job = await hub.PollAsync(PeerContext.Get(ctx).ClientId, ctx.RequestAborted);
+            return job is null ? Results.NoContent() : Results.Json(job, Json.Options);
+        });
+
+        g.MapPost("/relay/response/{jobId}", async (HttpContext ctx, string jobId, RelayHub hub) =>
+        {
+            // the answer's body can be a whole video: no request size limit for this upload
+            var size = ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
+            if (size is { IsReadOnly: false }) size.MaxRequestBodySize = null;
+            if (!int.TryParse(ctx.Request.Headers["X-Relay-Status"], out var status)) return Results.BadRequest();
+            Dictionary<string, string> headers;
+            try { headers = Json.Deserialize<Dictionary<string, string>>(System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(ctx.Request.Headers["X-Relay-Headers"].ToString()))) ?? new(); }
+            catch { headers = new(); }
+            var ok = await hub.CompleteAsync(PeerContext.Get(ctx).ClientId, jobId, status, headers, ctx.Request.Body, ctx.RequestAborted);
+            return ok ? Results.Ok() : Results.NotFound();
+        });
+
         g.MapGet("/thumb/{itemId}", async (HttpContext ctx, string itemId, CatalogService catalog, AccessService access, ThumbnailService thumbs, ConfigStore config) =>
         {
             if (config.Current.SharingPaused) return Results.StatusCode(503);

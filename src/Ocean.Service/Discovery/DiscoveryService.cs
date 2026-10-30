@@ -29,10 +29,21 @@ public sealed class DiscoveryService : BackgroundService
     private readonly SemaphoreSlim _announce = new(0);
     private long _seq;
 
+    private readonly Net.RelayHub _relay;
+    private readonly Net.RelayWorker _relayWorker;
+
     public DiscoveryService(ConfigStore config, NodeIdentity identity, PeerRegistry registry, CatalogService catalog,
-        EventHub events, ILogger<DiscoveryService> log)
+        EventHub events, Net.RelayHub relay, Net.RelayWorker relayWorker, ILogger<DiscoveryService> log)
     {
         _config = config; _identity = identity; _registry = registry; _catalog = catalog; _events = events; _log = log;
+        _relay = relay; _relayWorker = relayWorker;
+        _relay.WantChanged += AnnounceNow;
+        // Adapter changes (Wi-Fi switched, VPN connected, cable plugged): tell everyone right away.
+        Net.LocalNetworks.Changed += () =>
+        {
+            _log.LogInformation("network changed: {Nets}", Net.LocalNetworks.Describe());
+            AnnounceNow();
+        };
         _catalog.Changed += AnnounceNow;
         _config.Changed += cfg =>
         {
@@ -65,7 +76,7 @@ public sealed class DiscoveryService : BackgroundService
             _log.LogError(ex, "discovery bind failed on UDP {Port}", port);
             return;
         }
-        _log.LogInformation("discovery on UDP {Port}, node {Id}", port, NodeIdentity.ShortId(_identity.NodeId));
+        _log.LogInformation("discovery on UDP {Port}, node {Id}; networks: {Nets}", port, NodeIdentity.ShortId(_identity.NodeId), Net.LocalNetworks.Describe());
 
         var receive = ReceiveLoop(ct);
         var send = SendLoop(ct);
@@ -112,6 +123,18 @@ public sealed class DiscoveryService : BackgroundService
                     continue;
                 }
                 var change = _registry.Upsert(b, r.RemoteEndPoint.Address);
+
+                // Reverse connection, serving side: this node can't reach us and asks us to connect out to it.
+                if (b.Want is { Count: > 0 } && b.Want.Contains(_identity.NodeId)) _relayWorker.Wanted(b.Id);
+
+                // Reverse connection, requesting side: we can't reach this node. Answer its broadcast right away:
+                // Windows Firewall lets a unicast reply to a broadcast in (for ~3 s) even when it blocks everything
+                // else, so our request to connect back arrives even through a strict firewall.
+                if (_relay.IsWanted(b.Id))
+                {
+                    var reply = Build("hello");
+                    try { _udp!.Send(reply, reply.Length, new IPEndPoint(r.RemoteEndPoint.Address, r.RemoteEndPoint.Port)); } catch { }
+                }
                 if (change is PeerChange.Added or PeerChange.Online)
                 {
                     _log.LogInformation("peer {State}: {Name} ({User}@{Host}) {Addr}", change == PeerChange.Added ? "online" : "back online",
@@ -134,10 +157,13 @@ public sealed class DiscoveryService : BackgroundService
             Name = cfg.NodeName,
             User = cfg.UserName,
             Host = Environment.MachineName,
-            Port = cfg.PeerPort,
+            // OCEAN_TEST_ADVERTISE_PORT (developers only) announces a port nobody listens on, which looks exactly like
+            // a PC whose firewall blocks incoming connections: used to test the reverse connection on one machine.
+            Port = OceanDefaults.EnvPort("OCEAN_TEST_ADVERTISE_PORT", cfg.PeerPort),
             Realm = Realm.Tag(cfg.Secret),
             Cat = _catalog.Version,
             Shares = cfg.SharingPaused ? 0 : cfg.Shares.Count,
+            Want = _relay.WantedPeers() is { Count: > 0 } want ? want : null,
             Ts = Math.Max(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), Interlocked.Increment(ref _seq)),
         };
         _seq = b.Ts;

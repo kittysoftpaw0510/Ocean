@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:Ocean.App.ViewModels"
         xmlns:v="clr-namespace:Ocean.App.Views"
+        xmlns:c="clr-namespace:Ocean.App.Controls"
         Title="Ocean" Width="1240" Height="790" MinWidth="900" MinHeight="580"
         Background="{StaticResource Bg0}" WindowStartupLocation="CenterScreen"
         FontFamily="{StaticResource UiFont}" FontSize="13" Foreground="{StaticResource Text}"
@@ -36,10 +37,24 @@
             </Setter>
         </Style>
 
+        <!-- right-click menu of a node in the sidebar (PlacementTarget = the row, its Tag = MainViewModel) -->
+        <ContextMenu x:Key="PeerMenu" x:Shared="False">
+            <MenuItem Header="Open" Command="{Binding PlacementTarget.Tag.SelectPeerCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"/>
+            <MenuItem Header="Refresh" Command="{Binding PlacementTarget.Tag.RefreshNetworkCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                      Visibility="{Binding Online, Converter={StaticResource BoolToVis}}"/>
+            <MenuItem Header="Remove from the list" Command="{Binding PlacementTarget.Tag.RemovePeerCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"
+                      Visibility="{Binding Online, Converter={StaticResource InvBoolToVis}}">
+                <MenuItem.Icon><TextBlock Text="&#xE711;" Style="{StaticResource Icon}" FontSize="11"/></MenuItem.Icon>
+            </MenuItem>
+        </ContextMenu>
+
         <Style x:Key="PeerItem" TargetType="ListBoxItem">
             <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
             <Setter Property="Margin" Value="8,1"/>
             <Setter Property="Cursor" Value="Hand"/>
+            <!-- the whole row (not just its text) opens the menu -->
+            <Setter Property="ContextMenu" Value="{StaticResource PeerMenu}"/>
+            <Setter Property="Tag" Value="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
@@ -102,7 +117,10 @@
                 <!-- network header -->
                 <Grid Grid.Row="2" Margin="18,6,14,4">
                     <TextBlock Text="NETWORK" Style="{StaticResource Dim}" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                    <Button Style="{StaticResource BtnIcon}" Width="24" Height="24" Content="&#xE72C;" FontSize="11" HorizontalAlignment="Right" ToolTip="Refresh" Command="{Binding RefreshPeersCommand}"/>
+                    <Button Style="{StaticResource BtnIcon}" Width="24" Height="24" HorizontalAlignment="Right" ToolTip="Look for nodes and refresh their shares" Command="{Binding RefreshNetworkCommand}"
+                            AutomationProperties.Name="Refresh network">
+                        <TextBlock Text="&#xE72C;" Style="{StaticResource Icon}" FontSize="11" c:Spin.IsSpinning="{Binding IsRefreshingNetwork}"/>
+                    </Button>
                 </Grid>
 
                 <!-- peers -->
@@ -132,9 +150,13 @@
                                         <TextBlock Text="{Binding Label}" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
                                         <TextBlock x:Name="Sub" Style="{StaticResource Dim}" Text="{Binding Subtitle}"/>
                                     </StackPanel>
-                                    <Border Grid.Column="2" Style="{StaticResource Badge}" Visibility="{Binding NewCount, Converter={StaticResource CountToVis}}" ToolTip="New videos since your last visit">
+                                    <Border x:Name="NewBadge" Grid.Column="2" Style="{StaticResource Badge}" Visibility="{Binding NewCount, Converter={StaticResource CountToVis}}" ToolTip="New videos since your last visit">
                                         <TextBlock Text="{Binding NewCount}" FontSize="11" FontWeight="SemiBold" Foreground="#042F2E"/>
                                     </Border>
+                                    <!-- offline nodes can be removed from the list at any time -->
+                                    <Button x:Name="RemoveBtn" Grid.Column="2" Style="{StaticResource BtnIcon}" Width="24" Height="24" FontSize="10" Content="&#xE711;"
+                                            ToolTip="Remove from the list (it reappears if it comes back online)" AutomationProperties.Name="Remove from the list" Visibility="Collapsed"
+                                            Command="{Binding DataContext.RemovePeerCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                 </Grid>
                                 <DataTemplate.Triggers>
                                     <!-- offline: dimmed, gray dot, "last seen" instead of the host -->
@@ -143,6 +165,8 @@
                                         <Setter TargetName="Texts" Property="Opacity" Value="0.6"/>
                                         <Setter TargetName="Presence" Property="Fill" Value="{StaticResource TextDim}"/>
                                         <Setter TargetName="Sub" Property="Text" Value="{Binding OfflineText}"/>
+                                        <Setter TargetName="NewBadge" Property="Visibility" Value="Collapsed"/>
+                                        <Setter TargetName="RemoveBtn" Property="Visibility" Value="Visible"/>
                                     </DataTrigger>
                                 </DataTemplate.Triggers>
                             </DataTemplate>

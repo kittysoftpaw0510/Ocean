@@ -55,10 +55,28 @@ public static class LocalApi
         // ---------------------------------------------------------------- peers
         g.MapGet("/peers", (PeerService peers) => Results.Json(peers.Peers(), Json.Options));
 
+        // Forget an offline node now (its snapshot is deleted). An online node would reappear at once, so refuse.
+        g.MapDelete("/peers/{peerId}", (string peerId, PeerRegistry registry) =>
+        {
+            if (!registry.TryGet(peerId, out var p)) return Results.NotFound();
+            if (p.Online) return Results.Json(new ErrorDto { Error = "online", Message = "This node is online; it can be removed once it goes offline." }, Json.Options, statusCode: 409);
+            registry.Remove(peerId);
+            return Results.Ok();
+        });
+
+        // Manual refresh: say hello now (others answer right away) and re-check every online node's shares.
+        g.MapPost("/peers/refresh", (PeerService peers, IEnumerable<IHostedService> hosted) =>
+        {
+            hosted.OfType<DiscoveryService>().FirstOrDefault()?.AnnounceNow();
+            peers.RefreshAll();
+            return Results.Ok();
+        });
+
         g.MapGet("/peers/{peerId}/catalog", async (string peerId, bool? refresh, PeerService peers, HttpContext ctx) =>
         {
             var cat = await peers.GetCatalogAsync(peerId, refresh == true, ctx.RequestAborted);
-            return cat is null ? Results.Json(new ErrorDto { Error = "unavailable", Message = "Peer catalog not available" }, Json.Options, statusCode: 503)
+            // The node is announced (so it is on the network) but we could not connect to it.
+            return cat is null ? Results.Json(new ErrorDto { Error = "unreachable", Message = "Couldn't connect to this PC." }, Json.Options, statusCode: 503)
                                : Results.Json(cat, Json.Options);
         });
 

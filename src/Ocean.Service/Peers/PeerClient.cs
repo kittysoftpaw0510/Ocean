@@ -27,10 +27,11 @@ public sealed class PeerClient : IDisposable
     private readonly ConfigStore _config;
     private readonly ILogger<PeerClient> _log;
     private readonly ConcurrentDictionary<string, HttpClient> _clients = new();
+    private readonly Net.RelayHub _relay;
 
-    public PeerClient(NodeIdentity identity, ConfigStore config, ILogger<PeerClient> log)
+    public PeerClient(NodeIdentity identity, ConfigStore config, Net.RelayHub relay, ILogger<PeerClient> log)
     {
-        _identity = identity; _config = config; _log = log;
+        _identity = identity; _config = config; _relay = relay; _log = log;
     }
 
     private HttpClient ClientFor(string peerId) => _clients.GetOrAdd(peerId, id =>
@@ -91,35 +92,62 @@ public sealed class PeerClient : IDisposable
         try { return Uri.UnescapeDataString(s); } catch { return s; }
     }
 
-    /// <summary>Sends the request, trying each of the peer's known addresses until one connects.</summary>
+    /// <summary>
+    /// Sends the request: directly (trying each known address), or — when the node cannot be reached directly,
+    /// typically because its firewall blocks incoming connections — through a reverse connection it opens to us.
+    /// </summary>
     public async Task<HttpResponseMessage> SendAsync(HttpRequestMessage req, HttpCompletionOption option, CancellationToken ct)
     {
         if (!req.Options.TryGetValue(PeerKey, out var peer) || !req.Options.TryGetValue(PathKey, out var path))
             throw new InvalidOperationException("Request was not built with PeerClient.Build");
+        var relayable = !path.StartsWith("/p/relay", StringComparison.Ordinal);
+
+        // Already known to need the reverse connection: use it, and only retry the direct route now and then.
+        if (relayable && peer.PreferRelay && DateTimeOffset.UtcNow < peer.DirectRetryAt)
+            return await _relay.SendAsync(peer.Id, req, ct);
+
+        try
+        {
+            var resp = await SendDirectAsync(peer, req, path, option, ct);
+            if (peer.PreferRelay) { peer.PreferRelay = false; _log.LogInformation("{Peer} is reachable directly again", peer.Name); }
+            return resp;
+        }
+        catch (Exception ex) when (relayable && !ct.IsCancellationRequested
+                                   && (ex is TaskCanceledException || (ex is HttpRequestException h && IsUnreachable(h))))
+        {
+            if (!peer.PreferRelay)
+                _log.LogInformation("{Peer} can't be reached directly ({Msg}); using a reverse connection", peer.Name, ex.InnerException?.Message ?? ex.Message);
+            peer.PreferRelay = true;
+            peer.DirectRetryAt = DateTimeOffset.UtcNow.AddMinutes(2);
+            return await _relay.SendAsync(peer.Id, req, ct);
+        }
+    }
+
+    private async Task<HttpResponseMessage> SendDirectAsync(Peer peer, HttpRequestMessage req, string path, HttpCompletionOption option, CancellationToken ct)
+    {
         var client = ClientFor(peer.Id);
         var candidates = peer.Candidates();
         Exception? last = null;
         for (var i = 0; i < Math.Max(1, candidates.Count); i++)
         {
             ct.ThrowIfCancellationRequested();
-            var attempt = i == 0 ? req : Clone(req, peer.UrlFor(candidates[i]) + path);
-            if (i == 0 && candidates.Count > 0) attempt.RequestUri = new Uri(peer.UrlFor(candidates[0]) + path);
+            var attempt = Clone(req, (candidates.Count > 0 ? peer.UrlFor(candidates[i]) : peer.BaseUrl) + path);
             try
             {
                 var resp = await client.SendAsync(attempt, option, ct);
                 if (candidates.Count > 0) peer.Preferred = candidates[i];
                 return resp;
             }
-            catch (HttpRequestException ex) when (IsUnreachable(ex) && i + 1 < candidates.Count)
+            catch (HttpRequestException ex) when (IsUnreachable(ex))
             {
                 last = ex;
-                _log.LogDebug("peer {Peer} not reachable at {Addr} ({Msg}); trying next address", peer.Name, candidates[i], ex.InnerException?.Message ?? ex.Message);
-                if (Equals(peer.Preferred, candidates[i])) peer.Preferred = null;
+                _log.LogDebug("peer {Peer} not reachable at {Addr} ({Msg})", peer.Name, i < candidates.Count ? candidates[i] : null, ex.InnerException?.Message ?? ex.Message);
+                if (i < candidates.Count && Equals(peer.Preferred, candidates[i])) peer.Preferred = null;
             }
-            catch (TaskCanceledException ex) when (!ct.IsCancellationRequested && i + 1 < candidates.Count)
+            catch (TaskCanceledException ex) when (!ct.IsCancellationRequested)
             {
                 last = ex; // connect timeout
-                if (Equals(peer.Preferred, candidates[i])) peer.Preferred = null;
+                if (i < candidates.Count && Equals(peer.Preferred, candidates[i])) peer.Preferred = null;
             }
         }
         throw last ?? new HttpRequestException("No address for peer");

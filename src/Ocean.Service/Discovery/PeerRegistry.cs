@@ -26,6 +26,10 @@ public sealed class Peer
     /// <summary>False while the node is silent; it stays listed (with its last known shares) for a while.</summary>
     public bool Online { get; set; } = true;
     public DateTimeOffset? OfflineSince { get; set; }
+    /// <summary>Direct connections fail (its firewall): talk through the reverse connection it opens to us.</summary>
+    public bool PreferRelay { get; set; }
+    /// <summary>While relaying, when to try the direct route again.</summary>
+    public DateTimeOffset DirectRetryAt { get; set; }
 
     /// <summary>
     /// Every address this peer was recently heard on. A PC with several adapters (Wi-Fi + Ethernet, VPN or
@@ -44,10 +48,15 @@ public sealed class Peer
             if (now - kv.Value > AddressMaxAge && !kv.Key.Equals(Preferred)) Addresses.TryRemove(kv.Key, out _);
     }
 
-    /// <summary>Addresses to try, best first: last working one, then private LAN ranges, then most recently heard.</summary>
+    /// <summary>
+    /// Addresses to try, best first: the last one that worked, then addresses on the same subnet as one of our
+    /// physical adapters (the real LAN), then other local subnets (virtual switches, VPN), then private ranges,
+    /// then the most recently heard.
+    /// </summary>
     public List<IPAddress> Candidates()
     {
         var list = Addresses.OrderBy(kv => kv.Key.Equals(Preferred) ? 0 : 1)
+                            .ThenByDescending(kv => Net.LocalNetworks.Rank(kv.Key))
                             .ThenBy(kv => IsLikelyLan(kv.Key) ? 0 : 1)
                             .ThenByDescending(kv => kv.Value)
                             .Select(kv => kv.Key).ToList();

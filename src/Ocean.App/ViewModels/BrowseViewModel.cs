@@ -52,6 +52,7 @@ public partial class BrowseViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(IsOffline)); OnPropertyChanged(nameof(OfflineBanner));
                 if (Peer.Online) _ = LoadAsync(true); // back: fresh list
+                else { CantReach = false; Rebuild(); } // offline: the banner says it all
             }
         };
     }
@@ -101,12 +102,28 @@ public partial class BrowseViewModel : ObservableObject
         try
         {
             var cat = await _main.Api.GetAsync<CatalogDto>($"/api/peers/{Peer.Id}/catalog?refresh={(refresh ? "true" : "false")}");
+            CantReach = false;
             if (cat is not null) ApplyCatalog(cat);
+        }
+        catch (ApiException ex) when (ex.StatusCode == 503)
+        {
+            // Announced on the network but no connection: explain instead of showing a raw error.
+            CantReach = Catalog is null && !IsOffline;
+            if (CantReach) { EmptyText = ""; IsEmpty = false; }
+            else Rebuild(); // e.g. offline with nothing remembered: "Nothing to show here."
         }
         catch (ApiException ex) { Error = ex.Message; }
         catch (Exception ex) { Error = "Could not load this node: " + ex.Message; }
         finally { IsLoading = false; }
     }
+
+    /// <summary>True when the node is on the network but Ocean could not connect to it (and nothing is cached).</summary>
+    [ObservableProperty] private bool _cantReach;
+    public string CantReachTitle => $"Can't connect to {Peer.Label}";
+    public string CantReachText =>
+        $"{Peer.Label}'s PC is on the network, but Ocean couldn't open a connection to it. Usually Windows Firewall on that PC " +
+        "is blocking Ocean, or its network is set to Public. On that PC, set the network to Private " +
+        "(Settings › Network & internet), or reinstall Ocean with “Allow Ocean through Windows Firewall” checked.";
 
     public void ApplyCatalog(CatalogDto cat)
     {
@@ -230,7 +247,7 @@ public partial class BrowseViewModel : ObservableObject
         HeaderText = Summary.Length > 0 ? $"{Peer.Subtitle}  ·  {Summary}" : Peer.Subtitle;
         IsEmpty = Entries.Count == 0 && !IsLoading;
         EmptyText = !IsEmpty || SelectedShare is { IsLocked: true } ? "" :
-            _all.Count == 0 && Catalog is { Shares.Count: 0 } ? "This node is not sharing anything yet." :
+            _all.Count == 0 && Catalog is { Shares.Count: 0 } ? "Nothing to show here." :
             NewOnly ? "No new videos since your last visit." :
             Filter.Length > 0 ? "No videos match your search." :
             FolderMode && CurrentFolder.Length > 0 ? "This folder is empty." :

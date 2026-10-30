@@ -154,6 +154,12 @@ public sealed class PeerService : IDisposable
 
     public bool IsOnline(string peerId) => _registry.TryGetOnline(peerId, out _);
 
+    /// <summary>Manual refresh: re-check every reachable node's shares now.</summary>
+    public void RefreshAll()
+    {
+        foreach (var p in _registry.Snapshot().Where(p => p.Online)) ScheduleFetch(p.Id);
+    }
+
     private Peer OnlinePeer(string peerId)
     {
         if (_registry.TryGetOnline(peerId, out var p)) return p;
@@ -237,6 +243,19 @@ public sealed class PeerService : IDisposable
     private async Task<CatalogDto?> FetchCatalogAsync(string peerId, CancellationToken ct)
     {
         if (!_registry.TryGetOnline(peerId, out var peer)) return null;
+        // Its announcements say it shares nothing: no need to connect (and nothing can go wrong).
+        if (peer.ShareCount == 0)
+        {
+            var empty = new CatalogDto
+            {
+                NodeId = peer.Id, NodeName = peer.Name, UserName = peer.User, Host = peer.Host,
+                Version = peer.CatalogVersion, GeneratedAt = DateTimeOffset.UtcNow,
+            };
+            var hadItems = Cached(peerId)?.Shares.Count > 0;
+            _catalogs[peerId] = empty;
+            if (hadItems) _events.Publish("peerCatalog", new { peerId, version = empty.Version, newCount = 0, itemCount = 0 });
+            return empty;
+        }
         var gate = _fetchLocks.GetOrAdd(peerId, _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync(ct);
         try
@@ -278,7 +297,8 @@ public sealed class PeerService : IDisposable
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            _log.LogDebug("catalog fetch timed out for {Peer}", peer.Name);
+            // Typical cause: the other PC's firewall lets our discovery packets out but blocks incoming connections.
+            _log.LogWarning("catalog fetch timed out for {Peer} at {Addresses} (firewall on that PC?)", peer.Name, string.Join(", ", peer.Candidates()));
             return null;
         }
         catch (HttpRequestException ex)
