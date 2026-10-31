@@ -226,3 +226,46 @@ public sealed class ThrottledStream : Stream
         GC.SuppressFinalize(this);
     }
 }
+
+/// <summary>Write-side counterpart of <see cref="ThrottledStream"/>: paces what is written to a response.</summary>
+public sealed class PacedStream : Stream
+{
+    private readonly Stream _inner;
+    private readonly UploadScheduler _scheduler;
+    private readonly UploadKind _kind;
+    private const int Chunk = 64 * 1024;
+
+    public PacedStream(Stream inner, UploadScheduler scheduler, UploadKind kind)
+    {
+        _inner = inner; _scheduler = scheduler; _kind = kind;
+    }
+
+    public override bool CanRead => false;
+    public override bool CanSeek => false;
+    public override bool CanWrite => true;
+    public override long Length => throw new NotSupportedException();
+    public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+    public override void Flush() => _inner.Flush();
+    public override Task FlushAsync(CancellationToken ct) => _inner.FlushAsync(ct);
+    public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+
+    public override void Write(byte[] buffer, int offset, int count)
+        => WriteAsync(buffer.AsMemory(offset, count), CancellationToken.None).AsTask().GetAwaiter().GetResult();
+
+    public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
+    {
+        while (buffer.Length > 0)
+        {
+            var part = buffer.Length > Chunk ? buffer[..Chunk] : buffer;
+            await _scheduler.WaitAsync(part.Length, _kind, ct);
+            await _inner.WriteAsync(part, ct);
+            _scheduler.Sent(part.Length, _kind);
+            buffer = buffer[part.Length..];
+        }
+    }
+
+    public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken ct)
+        => WriteAsync(buffer.AsMemory(offset, count), ct).AsTask();
+}

@@ -32,6 +32,11 @@ public sealed class PeerClient : IDisposable
     private readonly ConcurrentDictionary<string, HttpClient> _clients = new();
     private readonly Net.RelayHub _relay;
     private readonly PeerRegistry _registry;
+    /// <summary>A bridge that failed for a node is left alone for a while: (node, bridge) → until.</summary>
+    private readonly ConcurrentDictionary<(string Node, string Bridge), DateTimeOffset> _avoid = new();
+    /// <summary>The bridge a transfer is using, by node and path, so a video keeps its bridge while it plays.</summary>
+    private readonly ConcurrentDictionary<string, (string Bridge, DateTimeOffset Used)> _sticky = new();
+    private static readonly TimeSpan StickyFor = TimeSpan.FromMinutes(2);
 
     public PeerClient(NodeIdentity identity, ConfigStore config, Net.RelayHub relay, PeerRegistry registry, ILogger<PeerClient> log)
     {
@@ -109,11 +114,16 @@ public sealed class PeerClient : IDisposable
             throw new InvalidOperationException("Request was not built with PeerClient.Build");
         var relayable = !path.StartsWith("/p/relay", StringComparison.Ordinal);
 
-        // No network path to it: through the node that can reach it.
-        if (peer.Via is { } viaId) return await SendViaAsync(peer, viaId, req, path, option, ct);
+        // No network path to it: through a node that can reach it.
+        if (peer.Bridged) return await SendViaAsync(peer, req, path, option, ct);
+
+        // A request for a bridge waits for its reverse connection only when that link is already up: a bridge that
+        // has gone quiet must fail fast so the next bridge gets the request.
+        var toBridge = path.StartsWith(Via.Prefix, StringComparison.Ordinal);
+        var reverseOk = !toBridge || _relay.IsConnected(peer.Id);
 
         // Already known to need the reverse connection: use it, and only retry the direct route now and then.
-        if (relayable && peer.PreferRelay && DateTimeOffset.UtcNow < peer.DirectRetryAt)
+        if (relayable && reverseOk && peer.PreferRelay && DateTimeOffset.UtcNow < peer.DirectRetryAt)
             return await _relay.SendAsync(peer.Id, req, ct);
 
         try
@@ -122,7 +132,7 @@ public sealed class PeerClient : IDisposable
             if (peer.PreferRelay) { peer.PreferRelay = false; _log.LogInformation("{Peer} is reachable directly again", peer.Name); }
             return resp;
         }
-        catch (Exception ex) when (relayable && !ct.IsCancellationRequested
+        catch (Exception ex) when (relayable && reverseOk && !ct.IsCancellationRequested
                                    && (ex is TaskCanceledException || (ex is HttpRequestException h && IsUnreachable(h))))
         {
             if (!peer.PreferRelay)
@@ -134,28 +144,77 @@ public sealed class PeerClient : IDisposable
     }
 
     /// <summary>
-    /// Sends the request to <paramref name="viaId"/> as "/p/via/{peer}{path}"; that node passes it on. Our own requests
-    /// are signed as ours; a request we only pass on (we are a relay ourselves) keeps its origin's signature.
+    /// Sends the request to a bridge as "/p/via/{peer}{path}"; that node passes it on. The least busy bridge is used
+    /// (a video keeps its bridge while it plays, so seeking stays smooth); one that fails is skipped for a while and
+    /// the request goes to the next one right away. Our own requests are signed as ours; a request we only pass on
+    /// keeps its origin's signature.
     /// </summary>
-    private async Task<HttpResponseMessage> SendViaAsync(Peer peer, string viaId, HttpRequestMessage req, string path, HttpCompletionOption option, CancellationToken ct)
+    private async Task<HttpResponseMessage> SendViaAsync(Peer peer, HttpRequestMessage req, string path, HttpCompletionOption option, CancellationToken ct)
     {
         if (!Via.IsRelayable(path)) throw new HttpRequestException($"{peer.Name} can only be reached through another PC", null, HttpStatusCode.ServiceUnavailable);
-        if (!_registry.TryGetOnline(viaId, out var via) || via.Via is not null) // one PC in between at most
-            throw new HttpRequestException($"{peer.Name} is reached through {(via?.Name ?? NodeIdentity.ShortId(viaId))}, which is offline", null, HttpStatusCode.ServiceUnavailable);
-        var outer = Build(via, req.Method, Via.Prefix + peer.Id + path);
-        // the far node sees the origin's names, grants and range; the relay adds its own proof of the secret
-        foreach (var h in req.Headers)
+        var now = DateTimeOffset.UtcNow;
+        var q = path.IndexOf('?');
+        var key = peer.Id + "|" + (q < 0 ? path : path[..q]);
+        foreach (var kv in _sticky) if (now - kv.Value.Used > StickyFor) _sticky.TryRemove(kv.Key, out _);
+        foreach (var kv in _avoid) if (now > kv.Value) _avoid.TryRemove(kv.Key, out _);
+
+        // least busy first, counting what we started ourselves lately (a bridge's own count lags a few seconds)
+        var mine = _sticky.Values.Where(v => now - v.Used < TimeSpan.FromSeconds(30)).GroupBy(v => v.Bridge).ToDictionary(g => g.Key, g => g.Count());
+        var bridges = peer.LiveBridges()
+            .Where(b => !_avoid.ContainsKey((peer.Id, b.Id)))
+            .OrderBy(b => b.Load + mine.GetValueOrDefault(b.Id)).ThenByDescending(b => b.Confirmed).ToList();
+        if (_sticky.TryGetValue(key, out var s) && bridges.FirstOrDefault(b => b.Id == s.Bridge) is { } same)
         {
-            if (h.Key.Equals("X-Ocean-Realm", StringComparison.OrdinalIgnoreCase)) continue;
-            outer.Headers.Remove(h.Key);
-            outer.Headers.TryAddWithoutValidation(h.Key, h.Value);
+            bridges.Remove(same);
+            bridges.Insert(0, same);
         }
-        if (!req.Headers.Contains(Via.OriginHeader))
-            foreach (var (k, v) in Via.Sign(_identity, peer.Id, req.Method.Method, path))
-                outer.Headers.TryAddWithoutValidation(k, v);
-        outer.Content = req.Content;
-        // the relay itself is reached directly or through its reverse connection
-        return await SendAsync(outer, option, ct);
+        if (bridges.Count == 0)
+            throw new HttpRequestException($"{peer.Name} can't be reached right now: no PC in between is available", null, HttpStatusCode.ServiceUnavailable);
+
+        var signed = req.Headers.Contains(Via.OriginHeader) ? null : Via.Sign(_identity, peer.Id, req.Method.Method, path).ToList();
+        Exception? lastError = null;
+        HttpResponseMessage? lastResponse = null;
+        foreach (var bridge in bridges.Take(4))
+        {
+            if (!_registry.TryGetOnline(bridge.Id, out var via) || via.Bridged) continue; // one PC in between at most
+            var outer = Build(via, req.Method, Via.Prefix + peer.Id + path);
+            // the far node sees the origin's names, grants and range; the bridge adds its own proof of the secret
+            foreach (var h in req.Headers)
+            {
+                if (h.Key.Equals("X-Ocean-Realm", StringComparison.OrdinalIgnoreCase)) continue;
+                outer.Headers.Remove(h.Key);
+                outer.Headers.TryAddWithoutValidation(h.Key, h.Value);
+            }
+            if (signed is not null) foreach (var (k, v) in signed) outer.Headers.TryAddWithoutValidation(k, v);
+            outer.Content = req.Content;
+            _sticky[key] = (bridge.Id, DateTimeOffset.UtcNow);
+            _log.LogDebug("{Peer}: {Path} via {Bridge} (load {Load})", peer.Name, key[65..], bridge.Name, bridge.Load + mine.GetValueOrDefault(bridge.Id));
+
+            HttpResponseMessage resp;
+            try { resp = await SendAsync(outer, option, ct); }
+            catch (Exception ex) when (!ct.IsCancellationRequested && ex is TaskCanceledException or HttpRequestException)
+            {
+                lastError = ex;
+                Avoid(peer, bridge, TimeSpan.FromSeconds(30), ex.InnerException?.Message ?? ex.Message);
+                continue;
+            }
+            var fault = resp.Headers.TryGetValues(Via.ErrorHeader, out var f) ? f.FirstOrDefault() : null;
+            if (fault is null) return resp;
+            // the bridge's own failure (not the far node's answer): try the next one
+            lastResponse?.Dispose();
+            lastResponse = resp;
+            Avoid(peer, bridge, fault switch { "busy" => TimeSpan.FromSeconds(15), "off" => TimeSpan.FromMinutes(10), _ => TimeSpan.FromSeconds(30) }, fault);
+        }
+        _sticky.TryRemove(key, out _);
+        // every bridge failed: the last answer (e.g. "busy", which a download waits on) or the last error
+        if (lastResponse is not null) return lastResponse;
+        throw lastError ?? new HttpRequestException($"{peer.Name} can't be reached right now: no PC in between is available", null, HttpStatusCode.ServiceUnavailable);
+    }
+
+    private void Avoid(Peer peer, BridgeRoute bridge, TimeSpan howLong, string why)
+    {
+        _avoid[(peer.Id, bridge.Id)] = DateTimeOffset.UtcNow + howLong;
+        _log.LogInformation("{Peer}: {Bridge} could not pass the request on ({Why}); trying another bridge", peer.Name, bridge.Name, why);
     }
 
     private async Task<HttpResponseMessage> SendDirectAsync(Peer peer, HttpRequestMessage req, string path, HttpCompletionOption option, CancellationToken ct)

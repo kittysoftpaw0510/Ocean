@@ -38,6 +38,7 @@ public partial class PeerVm : ObservableObject
     [ObservableProperty] private DateTimeOffset? _offlineSince;
     /// <summary>Name of the PC it is reached through (no network path from here), or null.</summary>
     [ObservableProperty] private string? _via;
+    [ObservableProperty] private int _viaCount;
 
     public PeerVm(PeerDto d) { Id = d.Id; Update(d); }
 
@@ -55,14 +56,15 @@ public partial class PeerVm : ObservableObject
         }
     }
 
-    public string Subtitle => (string.IsNullOrEmpty(User) || User == Name ? Host : $"{User} @ {Host}") + (Via is null ? "" : $"  ·  via {Via}");
+    public string Subtitle => (string.IsNullOrEmpty(User) || User == Name ? Host : $"{User} @ {Host}")
+                              + (Via is null ? "" : ViaCount > 1 ? $"  ·  via {Via} and {ViaCount - 1} more" : $"  ·  via {Via}");
     public string Label => DisplayNames.Of(User, Name);
 
     public void Update(PeerDto d)
     {
         Name = d.Name; User = d.User; Host = d.Host; Address = d.Address;
         NewCount = d.NewCount; ItemCount = d.ItemCount; ShareCount = d.ShareCount; CatalogLoaded = d.CatalogLoaded; FirstSeen = d.FirstSeen;
-        Online = d.Online; OfflineSince = d.OfflineSince; Via = d.Via;
+        Online = d.Online; OfflineSince = d.OfflineSince; Via = d.Via; ViaCount = d.ViaCount;
         OnPropertyChanged(nameof(Initials)); OnPropertyChanged(nameof(Subtitle)); OnPropertyChanged(nameof(Label)); OnPropertyChanged(nameof(OfflineText));
     }
 }

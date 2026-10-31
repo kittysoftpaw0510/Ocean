@@ -227,7 +227,7 @@ public static class LocalApi
                 NodeName = c.NodeName, UserName = c.UserName, Secret = c.Secret, DownloadDir = c.DownloadDir,
                 UploadLimitKBps = c.UploadLimitKBps, SharingPaused = c.SharingPaused, NewDays = c.NewDays,
                 MaxConcurrentDownloads = c.MaxConcurrentDownloads, NotifyNewVideos = c.NotifyNewVideos, OfflineKeepHours = c.OfflineKeepHours,
-                AllowPublicNetworks = c.AllowPublicNetworks, FirewallManaged = firewall.CanManage,
+                AllowPublicNetworks = c.AllowPublicNetworks, FirewallManaged = firewall.CanManage, AllowBridging = c.AllowBridging,
                 NetworkMode = c.NetworkMode,
                 StreamCacheGB = c.StreamCacheGB, StreamCacheUsedBytes = cache.UsedBytes,
             }, Json.Options);
@@ -250,6 +250,7 @@ public static class LocalApi
                 c.NotifyNewVideos = dto.NotifyNewVideos;
                 c.OfflineKeepHours = Math.Clamp(dto.OfflineKeepHours, 1, 24 * 30);
                 c.AllowPublicNetworks = dto.AllowPublicNetworks;
+                c.AllowBridging = dto.AllowBridging;
                 if (Enum.TryParse<NetworkMode>(dto.NetworkMode, true, out var mode)) c.NetworkMode = mode.ToString().ToLowerInvariant();
                 c.StreamCacheGB = Math.Clamp(dto.StreamCacheGB, 0, 500);
             });

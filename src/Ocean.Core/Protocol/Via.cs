@@ -22,6 +22,16 @@ public static class Via
     public const string HopsHeader = "X-Ocean-Hops";
     /// <summary>At most this many PCs in between (so no routing loops either).</summary>
     public const int MaxHops = 1;
+    /// <summary>
+    /// Set by a bridge on an answer that is its own failure, not the target's: "off" (bridging switched off there),
+    /// "busy" (it passes on enough downloads already), "unreachable", "loop" or "failed". The origin then tries
+    /// another bridge right away.
+    /// </summary>
+    public const string ErrorHeader = "X-Ocean-Via-Error";
+    /// <summary>/p/neighbors: the caller's last known revision of the list; unchanged → 304 with only the load.</summary>
+    public const string RevHeader = "X-Ocean-Neighbors-Rev";
+    /// <summary>/p/neighbors: how many transfers the answering node is passing on right now.</summary>
+    public const string LoadHeader = "X-Ocean-Load";
     /// <summary>Clock difference tolerated between the origin and the destination.</summary>
     private static readonly TimeSpan MaxSkew = TimeSpan.FromDays(1);
 
@@ -93,4 +103,10 @@ public sealed class NeighborDto
 public sealed class NeighborsDto
 {
     public List<NeighborDto> Nodes { get; set; } = new();
+    /// <summary>Changes when the list changes (sent back as <see cref="Via.RevHeader"/> to get a 304 next time).</summary>
+    public string Rev { get; set; } = "";
+    /// <summary>Transfers this node is passing on for others right now (the origin picks the least busy bridge).</summary>
+    public int Load { get; set; }
+    /// <summary>False when this node refuses to act as a bridge (Settings); the list is then empty.</summary>
+    public bool Bridging { get; set; } = true;
 }

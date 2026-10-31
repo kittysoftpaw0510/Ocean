@@ -150,6 +150,8 @@ public sealed class PeerDto
     public bool CatalogLoaded { get; set; }
     /// <summary>Reached through this node (name), when there is no network path to it from here.</summary>
     public string? Via { get; set; }
+    /// <summary>How many nodes can bridge to it right now (requests spread over them).</summary>
+    public int ViaCount { get; set; }
 }
 
 public sealed class ItemOverrideDto
@@ -291,6 +293,8 @@ public sealed class SettingsDto
     public bool NotifyNewVideos { get; set; }
     public int OfflineKeepHours { get; set; } = 24;
     public bool AllowPublicNetworks { get; set; } = true;
+    /// <summary>Let PCs that have no network path to each other reach each other through this one.</summary>
+    public bool AllowBridging { get; set; } = true;
     /// <summary>Read-only: false when Ocean runs without administrator rights and can't change Windows Firewall itself.</summary>
     public bool FirewallManaged { get; set; }
     /// <summary>"auto" | "classic" | "fast" (applies when the service restarts).</summary>

@@ -60,17 +60,30 @@ Beacon: `{v, t, id, pk, name, user, host, port, realm, cat, shares, ts, sig}`.
 When A and C have no network path to each other but both reach B, B bridges them:
 
 - Every 5 s each node asks the nodes it hears directly for `GET /p/neighbors`: the nodes they hear directly
-  (never nodes they reach through someone else, so there is never more than one PC in between). A node not heard
-  directly is listed as reached through the node that offered it (`PeerDto.via`). A direct beacon always wins;
-  a route through another bridge replaces the current one only when that went quiet for 12 s.
-- A sends C's request to B as `/p/via/{C's id}/p/…` (catalog, stream, thumb, access, ping only). B opens it
-  to C over its own connection (direct or reverse) and streams the answer back, `Range` and all.
+  (never nodes they reach through someone else, so there is never more than one PC in between), plus how many
+  transfers they are passing on right now. The answer carries a revision; with `X-Ocean-Neighbors-Rev` the node
+  answers 304 and only its load when nothing changed. A node not heard directly is listed as reached through
+  every node that offers it (`Peer.Bridges`; `PeerDto.via` names the one in use, `viaCount` how many there are).
+  A direct beacon always wins: a node heard within 16 s is never bridged.
+- A sends C's request to a bridge as `/p/via/{C's id}/p/…` (catalog, stream, thumb, access, ping only). The least
+  busy bridge is chosen (its reported load plus what A itself started lately); a video keeps its bridge while it
+  plays (sticky per path for 2 min), so seeking stays on one connection. A bridge that fails (connect error, or
+  an answer marked `X-Ocean-Via-Error`: off / busy / unreachable / loop / failed) is skipped for 15 s to 10 min
+  and the request goes to the next bridge at once; when all fail, the last answer is returned (a "busy" one keeps
+  a download waiting as it would on the owner). A request to a bridge waits for a reverse connection only when
+  that link is already up, so a dead bridge fails fast.
 - A signs each such request with its node key (`X-Ocean-Origin`, `-Key`, `-Ts`, `-Sig` over origin, target,
-  method, path and time; ±1 day clock tolerance). B checks the signature and its own proof of the secret is
-  checked by C; C then serves the request as A's: A's grants, A's download slots, A's name on access requests.
+  method, path and time; ±1 day clock tolerance). The bridge checks the signature, its own proof of the secret is
+  checked by C, and C serves the request as A's: A's grants, A's download slots, A's name on access requests.
   A relay can therefore carry a request but never invent one in another node's name.
-- A relay refuses a request that already passed a relay (`X-Ocean-Hops`), and never relays to a node it reaches
-  only through another one.
+- A bridge refuses a request that already passed a bridge (`X-Ocean-Hops`), never relays to a node it reaches
+  only through another one, and refuses everything when "Let other PCs reach each other through this PC" is off
+  (its neighbour list is then empty, so nobody routes through it).
+- What a bridge passes on goes through its own `UploadScheduler`: viewers before downloads, the upload limit
+  from Settings, and a download slot per relayed download (503 busy beyond that, so the origin tries another
+  bridge). A public video of the target is served from the bridge's own copy or its stream cache
+  (`PeerMedia.ServeForBridgeAsync`), so one viewer's bytes serve the next and a seek back costs the owner
+  nothing; a locked video goes to the owner with the origin's signature so the owner decides.
 - B sees what it carries (as every node with the secret is trusted to); the video passes B twice (in and out).
 
 ### Network add-ons (Winsock LSPs) and the classic networking mode
@@ -178,7 +191,7 @@ and the requester polls `GET /p/access/{requestId}` every 2 s.
 | GET | `/p/access/{id}` | poll a pending request |
 | GET | `/p/thumb/{itemId}` | JPEG; 403 `{error:"locked", lock}` when not authorized |
 | GET/HEAD | `/p/stream/{itemId}` | `Accept-Ranges: bytes`; rate-limited through a global token bucket when an upload cap is set |
-| GET | `/p/neighbors` | nodes this node hears directly (for the "via" bridge) |
+| GET | `/p/neighbors` | nodes this node hears directly, its load and a revision (304 when unchanged); empty when bridging is off |
 | GET/HEAD/POST | `/p/via/{nodeId}/p/…` | carry a signed request on to a node the caller can't reach |
 
 ## Local API (HTTP 127.0.0.1:38470)

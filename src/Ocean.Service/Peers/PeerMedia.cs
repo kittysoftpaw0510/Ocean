@@ -1,8 +1,10 @@
 using System.Net;
 using Microsoft.Net.Http.Headers;
+using Ocean.Core;
 using Ocean.Core.Media;
 using Ocean.Core.Protocol;
 using Ocean.Service.Downloads;
+using Ocean.Service.Net;
 
 namespace Ocean.Service.Peers;
 
@@ -13,17 +15,20 @@ namespace Ocean.Service.Peers;
 /// <item>otherwise bytes come through the stream cache (watched parts from disk, the rest from the owner);</item>
 /// <item>when the video isn't in the catalog we hold (rare), the request is passed through as is.</item>
 /// </list>
+/// A bridge serves a public video of a node it hears the same way to a node that can't reach it (see
+/// <see cref="ServeForBridgeAsync"/>), paced like its own uploads.
 /// </summary>
 public sealed class PeerMedia
 {
     private readonly PeerService _peers;
     private readonly StreamCache _cache;
     private readonly DownloadManager _downloads;
+    private readonly UploadScheduler _uploads;
     private readonly ILogger<PeerMedia> _log;
 
-    public PeerMedia(PeerService peers, StreamCache cache, DownloadManager downloads, ILogger<PeerMedia> log)
+    public PeerMedia(PeerService peers, StreamCache cache, DownloadManager downloads, UploadScheduler uploads, ILogger<PeerMedia> log)
     {
-        _peers = peers; _cache = cache; _downloads = downloads; _log = log;
+        _peers = peers; _cache = cache; _downloads = downloads; _uploads = uploads; _log = log;
     }
 
     public async Task ServeAsync(HttpContext ctx, string peerId, string itemId)
@@ -46,7 +51,42 @@ public sealed class PeerMedia
         await ServeCachedAsync(ctx, peerId, item);
     }
 
-    private async Task ServeCachedAsync(HttpContext ctx, string peerId, ItemDto item)
+    /// <summary>
+    /// Bridge: a public video of <paramref name="peerId"/> (a node we hear) for a node that can't reach it. Our own
+    /// copy or the stream cache serve it, so one viewer's bytes serve the next and a seek back costs the owner
+    /// nothing; what goes out is paced like our own uploads (viewers before downloads, the upload limit).
+    /// </summary>
+    public async Task ServeForBridgeAsync(HttpContext ctx, string peerId, ItemDto item, UploadKind kind, IDisposable? slot)
+    {
+        try
+        {
+            var local = _peers.OwnCopyPath(item) ?? _downloads.CompletedCopy(peerId, item.Id, item.Size);
+            if (local is not null)
+            {
+                FileStream? fs = null;
+                try
+                {
+                    fs = new FileStream(local, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1 << 16,
+                        FileOptions.Asynchronous | FileOptions.SequentialScan);
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+                if (fs is not null)
+                {
+                    var body = new ThrottledStream(fs, _uploads, kind, slot);
+                    slot = null; // released with the stream
+                    ctx.Response.Headers.CacheControl = "no-store";
+                    await Results.Stream(body, VideoTypes.ContentType(item.Name), lastModified: item.ModifiedAt,
+                        entityTag: new EntityTagHeaderValue($"\"{item.Id}-{item.ModifiedAt.UtcTicks}\""), enableRangeProcessing: true).ExecuteAsync(ctx);
+                    return;
+                }
+            }
+            await ServeCachedAsync(ctx, peerId, item, new PacedStream(ctx.Response.Body, _uploads, kind), kind == UploadKind.Download);
+        }
+        finally { slot?.Dispose(); }
+    }
+
+    private async Task ServeCachedAsync(HttpContext ctx, string peerId, ItemDto item, Stream? dest = null, bool download = false)
     {
         var size = item.Size;
         var res = ctx.Response;
@@ -76,11 +116,12 @@ public sealed class PeerMedia
 
         try
         {
-            await _cache.CopyAsync(peerId, item, from, to, res.Body, fill: true, download: false, ctx.RequestAborted);
+            await _cache.CopyAsync(peerId, item, from, to, dest ?? res.Body, fill: true, download, ctx.RequestAborted);
         }
         catch (Exception ex) when (!res.HasStarted && ex is PeerStatusException or PeerUnavailableException or HttpRequestException)
         {
-            // nothing sent yet: report the owner's answer like the plain proxy did
+            // nothing sent yet: report the owner's answer like the plain proxy did (a "busy" answer keeps its
+            // body and Retry-After, so a download through here waits as it would on the owner)
             res.Clear();
             res.StatusCode = ex switch
             {
@@ -88,6 +129,11 @@ public sealed class PeerMedia
                 PeerUnavailableException => StatusCodes.Status503ServiceUnavailable,
                 _ => StatusCodes.Status502BadGateway,
             };
+            if (ex is PeerStatusException ps && ps.Error is not null)
+            {
+                if (ps.RetryAfter is { } wait) res.Headers.RetryAfter = ((int)wait.TotalSeconds).ToString();
+                await res.WriteAsJsonAsync(new ErrorDto { Error = ps.Error, Message = ps.Message }, Json.Options);
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)

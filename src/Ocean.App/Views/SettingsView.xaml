@@ -134,6 +134,16 @@
                             <Grid Style="{StaticResource Row}">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                    <TextBlock Text="Let other PCs reach each other through this PC" Style="{StaticResource RowTitle}"/>
+                                    <TextBlock Style="{StaticResource RowHint}"
+                                               Text="When two PCs have no network path to each other but both reach this one, their videos pass through here (they see each other as 'via' this PC). That traffic counts against the upload limit above, and people watching go before downloads. Turn it off if this PC can't spare the bandwidth."/>
+                                </StackPanel>
+                                <CheckBox Grid.Column="1" Style="{StaticResource Switch}" IsChecked="{Binding AllowBridging}" AutomationProperties.Name="Let other PCs reach each other through this PC"/>
+                            </Grid>
+                            <Border Style="{StaticResource Divider}"/>
+                            <Grid Style="{StaticResource Row}">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
                                     <TextBlock Text="Networking" Style="{StaticResource RowTitle}"/>
                                     <TextBlock Style="{StaticResource RowHint}"
                                                Text="Fast uses Windows' asynchronous network I/O. Compatibility works the way classic programs like IPmsg do and survives network add-ons (VPN, proxy, 'accelerator' and some security tools) that break the fast mode. Auto picks Compatibility when such an add-on is found or the fast mode has crashed on this PC."/>

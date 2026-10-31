@@ -137,7 +137,7 @@ public static class PeerApi
         });
 
         // ---- relaying between nodes that have no network path to each other (see Via) ----
-        g.MapGet("/neighbors", (HttpContext ctx, MeshService mesh) => Results.Json(mesh.Neighbors(PeerContext.Get(ctx).ClientId), Json.Options));
+        g.MapGet("/neighbors", (HttpContext ctx, MeshService mesh) => mesh.Serve(ctx));
 
         g.MapMethods("/via/{target}/{**rest}", new[] { "GET", "HEAD", "POST" }, (HttpContext ctx, ViaForwarder via) => via.ServeAsync(ctx));
 

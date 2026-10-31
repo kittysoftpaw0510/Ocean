@@ -28,6 +28,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _networkMode = "auto";
     [ObservableProperty] private string _networkInfo = "";
     [ObservableProperty] private bool _firewallManaged = true;
+    [ObservableProperty] private bool _allowBridging = true;
     [ObservableProperty] private int _streamCacheGB = 5;
     [ObservableProperty] private string _streamCacheUsedText = "";
     [ObservableProperty] private bool _runAtStartup;
@@ -53,6 +54,7 @@ public partial class SettingsViewModel : ObservableObject
     partial void OnOfflineKeepHoursChanged(int value) => MarkDirty();
     partial void OnNotifyNewVideosChanged(bool value) => MarkDirty();
     partial void OnAllowPublicNetworksChanged(bool value) => MarkDirty();
+    partial void OnAllowBridgingChanged(bool value) => MarkDirty();
     partial void OnNetworkModeChanged(string value) => MarkDirty();
 
     [RelayCommand]
@@ -94,7 +96,7 @@ public partial class SettingsViewModel : ObservableObject
             {
                 NodeName = s.NodeName; UserName = s.UserName; Secret = s.Secret ?? ""; DownloadDir = s.DownloadDir;
                 UploadLimitKBps = s.UploadLimitKBps; NewDays = s.NewDays; MaxConcurrentDownloads = s.MaxConcurrentDownloads; NotifyNewVideos = s.NotifyNewVideos; OfflineKeepHours = s.OfflineKeepHours;
-                AllowPublicNetworks = s.AllowPublicNetworks; FirewallManaged = s.FirewallManaged;
+                AllowPublicNetworks = s.AllowPublicNetworks; FirewallManaged = s.FirewallManaged; AllowBridging = s.AllowBridging;
                 NetworkMode = string.IsNullOrEmpty(s.NetworkMode) ? "auto" : s.NetworkMode.ToLowerInvariant();
                 StreamCacheGB = s.StreamCacheGB; StreamCacheUsedText = CacheUsed(s.StreamCacheUsedBytes);
                 _main.DownloadsVm.DownloadDir = s.DownloadDir;
@@ -122,7 +124,7 @@ public partial class SettingsViewModel : ObservableObject
             await _main.Api.PutAsync("/api/settings", new SettingsDto
             {
                 NodeName = NodeName.Trim(), UserName = UserName.Trim(), Secret = Secret, DownloadDir = DownloadDir.Trim(),
-                UploadLimitKBps = UploadLimitKBps, NewDays = NewDays, MaxConcurrentDownloads = MaxConcurrentDownloads, OfflineKeepHours = OfflineKeepHours, AllowPublicNetworks = AllowPublicNetworks, StreamCacheGB = StreamCacheGB, NetworkMode = NetworkMode,
+                UploadLimitKBps = UploadLimitKBps, NewDays = NewDays, MaxConcurrentDownloads = MaxConcurrentDownloads, OfflineKeepHours = OfflineKeepHours, AllowPublicNetworks = AllowPublicNetworks, AllowBridging = AllowBridging, StreamCacheGB = StreamCacheGB, NetworkMode = NetworkMode,
                 NotifyNewVideos = NotifyNewVideos, SharingPaused = _main.SharingPaused,
             });
             Dirty = false;

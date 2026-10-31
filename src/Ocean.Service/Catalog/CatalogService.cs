@@ -864,7 +864,32 @@ public sealed class CatalogService : IDisposable
             touched.Add(share.Id);
         }
         foreach (var id in touched) if (_shares.TryGetValue(id, out var rt)) PersistIndex(rt);
-        if (touched.Count > 0) Bump("probe");
+        if (touched.Count > 0) BumpForProbe();
+    }
+
+    private static readonly TimeSpan ProbeBumpEvery = TimeSpan.FromSeconds(8);
+    private readonly object _probeLock = new();
+    private DateTime _lastProbeBump;
+    private Timer? _probeBumpTimer;
+
+    /// <summary>
+    /// A big library is read in batches of 25 for seconds or minutes; every batch would be a new catalog version
+    /// that every other node refetches and redraws. One version every few seconds carries the same information.
+    /// </summary>
+    private void BumpForProbe()
+    {
+        lock (_probeLock)
+        {
+            var since = DateTime.UtcNow - _lastProbeBump;
+            if (since >= ProbeBumpEvery)
+            {
+                _lastProbeBump = DateTime.UtcNow;
+                Bump("probe");
+                return;
+            }
+            _probeBumpTimer ??= new Timer(_ => BumpForProbe(), null, Timeout.Infinite, Timeout.Infinite);
+            _probeBumpTimer.Change(ProbeBumpEvery - since, Timeout.InfiniteTimeSpan);
+        }
     }
 
     public void Dispose()

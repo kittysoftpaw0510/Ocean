@@ -55,7 +55,12 @@ public sealed class DiscoveryService : BackgroundService
             _registry.RemoveWhere(p => p.Realm != tag);
             AnnounceNow();
         };
-        _registry.Changed += (p, change) => _events.Publish("peer", new { id = p.Id, change = change.ToString().ToLowerInvariant(), name = p.Name, user = p.User, version = p.CatalogVersion });
+        _registry.Changed += (p, change) =>
+        {
+            // with many nodes a beacon arrives several times a second; only what changes something visible reaches the UI
+            if (change != PeerChange.Seen)
+                _events.Publish("peer", new { id = p.Id, change = change.ToString().ToLowerInvariant(), name = p.Name, user = p.User, version = p.CatalogVersion });
+        };
         _registry.Changed += (p, change) =>
         {
             if (change == PeerChange.Offline)

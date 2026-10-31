@@ -194,7 +194,7 @@ public sealed class PeerService : IDisposable
         return new PeerDto
         {
             Id = p.Id, Name = p.Name, User = p.User, Host = p.Host, Port = p.Port,
-            Address = p.Via is null ? p.DisplayAddress.ToString() : "", Via = p.Via is null ? null : p.ViaName,
+            Address = p.Bridged ? "" : p.DisplayAddress.ToString(), Via = p.Via, ViaCount = p.Bridged ? p.LiveBridges().Count : 0,
             CatalogVersion = p.CatalogVersion, LastSeen = p.LastSeen, FirstSeen = p.FirstSeen, Online = p.Online, OfflineSince = p.OfflineSince,
             ShareCount = p.ShareCount,
             ItemCount = cat?.Shares.Sum(s => s.ItemCount) ?? 0,

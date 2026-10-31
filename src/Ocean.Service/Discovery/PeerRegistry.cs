@@ -33,14 +33,33 @@ public sealed class Peer
 
     /// <summary>When its own beacon was last heard here (a direct route exists).</summary>
     public DateTimeOffset DirectSeen { get; set; }
+
     /// <summary>
-    /// Id of the node this one is reached through, when there is no network path to it from here (it is never heard
-    /// directly, but a node we do hear can reach it). Null for nodes heard directly.
+    /// Nodes this one can be reached through when there is no network path to it from here (it is never heard
+    /// directly, but nodes we do hear can reach it), by bridge id. Several can be known at once: requests go to the
+    /// least busy one and move to another when one fails. Empty for nodes heard directly.
     /// </summary>
-    public string? Via { get; set; }
-    public string ViaName { get; set; } = "";
-    /// <summary>PCs between us and this node: 0 = heard directly, 1 = through <see cref="Via"/> (never more).</summary>
-    public int Hops { get; set; }
+    public ConcurrentDictionary<string, BridgeRoute> Bridges { get; } = new();
+
+    /// <summary>Its own beacons arrive: the direct route is what we go by.</summary>
+    public bool HeardDirectly => DateTimeOffset.UtcNow - DirectSeen < PeerRegistry.DirectFresh;
+
+    /// <summary>Reached only through other nodes.</summary>
+    public bool Bridged => !HeardDirectly && LiveBridges().Count > 0;
+
+    /// <summary>Bridges confirmed recently, least busy first.</summary>
+    public List<BridgeRoute> LiveBridges()
+    {
+        var now = DateTimeOffset.UtcNow;
+        return Bridges.Values.Where(b => now - b.Confirmed < PeerRegistry.BridgeFresh)
+                      .OrderBy(b => b.Load).ThenByDescending(b => b.Confirmed).ToList();
+    }
+
+    /// <summary>Name of the bridge in use (for display); null for nodes heard directly.</summary>
+    public string? Via => Bridged ? LiveBridges()[0].Name : null;
+
+    /// <summary>PCs between us and this node: 0 = heard directly, 1 = through a bridge (never more).</summary>
+    public int Hops => Bridged ? 1 : 0;
 
     /// <summary>
     /// Every address this peer was recently heard on. A PC with several adapters (Wi-Fi + Ethernet, VPN or
@@ -91,7 +110,21 @@ public sealed class Peer
     }
 }
 
-public enum PeerChange { Added, Updated, VersionChanged, Offline, Online, Removed }
+/// <summary>One way to reach a node we can't hear: through this bridge.</summary>
+public sealed class BridgeRoute
+{
+    public string Id { get; init; } = "";
+    public string Name { get; set; } = "";
+    /// <summary>When the bridge last listed the node.</summary>
+    public DateTimeOffset Confirmed { get; set; }
+    /// <summary>Transfers the bridge was passing on at that time.</summary>
+    public int Load { get; set; }
+    /// <summary>The node's catalog version as the bridge reported it.</summary>
+    public long Cat { get; set; }
+}
+
+/// <summary><see cref="Seen"/>: a beacon that changed nothing visible (not worth telling the UI about).</summary>
+public enum PeerChange { Added, Updated, VersionChanged, Offline, Online, Removed, Seen }
 
 /// <summary>
 /// Known peers of the same realm: online ones (fed by discovery beacons) and recently seen offline ones,
@@ -126,6 +159,7 @@ public sealed class PeerRegistry
         if (!_peers.TryGetValue(id, out var p) || !p.Online) return;
         lock (p) { p.Online = false; p.OfflineSince = DateTimeOffset.UtcNow; p.Preferred = null; }
         Changed?.Invoke(p, PeerChange.Offline);
+        DropBridge(id); // nodes we reached only through it may now be out of reach too
     }
 
     /// <summary>Applies a verified beacon and reports what changed (Added / Online = newly reachable).</summary>
@@ -133,7 +167,7 @@ public sealed class PeerRegistry
     {
         var now = DateTimeOffset.UtcNow;
         var isNew = false;
-        PeerChange change = PeerChange.Updated;
+        PeerChange change = PeerChange.Seen;
         var peer = _peers.AddOrUpdate(b.Id,
             _ =>
             {
@@ -154,13 +188,13 @@ public sealed class PeerRegistry
                 {
                     // Only fresh beacons count (a replayed old one must neither revive nor change a peer). The same
                     // beacon arrives once per adapter with the same timestamp, so every address is still learned.
-                    if (b.Ts < p.LastTs) { change = PeerChange.Updated; return p; }
+                    if (b.Ts < p.LastTs) { change = PeerChange.Seen; return p; }
                     p.Seen(address, now);
                     p.LastSeen = now;
-                    p.DirectSeen = now;
-                    if (p.Via is not null) { p.Via = null; p.ViaName = ""; p.Hops = 0; } // heard directly now: no relay needed
+                    p.DirectSeen = now; // heard directly: bridges (if any) are no longer used
                     if (!p.Online) { p.Online = true; p.OfflineSince = null; change = PeerChange.Online; }
                     else if (p.CatalogVersion != b.Cat) change = PeerChange.VersionChanged;
+                    else if (p.Name != b.Name || p.User != b.User || p.Host != b.Host || p.Port != b.Port || p.ShareCount != b.Shares) change = PeerChange.Updated;
                     p.Name = b.Name; p.User = b.User; p.Host = b.Host; p.Port = b.Port;
                     p.Realm = b.Realm; p.CatalogVersion = b.Cat; p.ShareCount = b.Shares; p.LastTs = b.Ts;
                 }
@@ -170,51 +204,71 @@ public sealed class PeerRegistry
         return isNew ? PeerChange.Added : change;
     }
 
+    /// <summary>A node's own beacons count as a direct route for this long (the discovery MaxAge).</summary>
+    public static readonly TimeSpan DirectFresh = TimeSpan.FromSeconds(16);
+    /// <summary>A bridge that hasn't listed the node for this long is no longer used for it.</summary>
+    public static readonly TimeSpan BridgeFresh = TimeSpan.FromSeconds(20);
+    /// <summary>A bridged node goes offline when no bridge has listed it for this long.</summary>
+    public static readonly TimeSpan BridgedSilence = TimeSpan.FromSeconds(25);
+
     /// <summary>
-    /// A node that <paramref name="via"/> can reach and we can't hear ourselves. A route through another node only
-    /// replaces the current one when that went quiet or is longer; a node heard directly is left alone.
+    /// <paramref name="via"/> reports that it hears <paramref name="n"/>: remember it as one way to reach that node.
+    /// A node heard directly keeps its own data; otherwise the report updates it and brings it online.
     /// </summary>
-    public void UpsertRelayed(NeighborDto n, Peer via, string realm)
+    public void ConfirmBridge(NeighborDto n, Peer via, int load, string realm)
     {
         var now = DateTimeOffset.UtcNow;
-        var hops = n.Hops + 1;
+        var route = new BridgeRoute { Id = via.Id, Name = Core.DisplayNames.Of(via.User, via.Name), Confirmed = now, Load = load, Cat = n.Cat };
         PeerChange? change = null;
         var peer = _peers.AddOrUpdate(n.Id,
             _ =>
             {
                 change = PeerChange.Added;
-                return new Peer
+                var p = new Peer
                 {
                     Id = n.Id, PublicKey = n.Pk, Name = n.Name, User = n.User, Host = n.Host, Realm = realm,
                     CatalogVersion = n.Cat, ShareCount = n.Shares, FirstSeen = now, LastSeen = now,
-                    Via = via.Id, ViaName = Core.DisplayNames.Of(via.User, via.Name), Hops = hops,
                 };
+                p.Bridges[via.Id] = route;
+                return p;
             },
             (_, p) =>
             {
                 lock (p)
                 {
-                    if (now - p.DirectSeen < RouteFresh) return p;                 // heard directly: that route wins
-                    if (p.Online && p.Via is { } current && current != via.Id
-                        && now - p.LastSeen < RouteFresh && p.Hops <= hops) return p; // keep the route we use
-                    if (!p.Online) { p.Online = true; p.OfflineSince = null; change = PeerChange.Online; }
-                    else change = p.CatalogVersion != n.Cat ? PeerChange.VersionChanged : PeerChange.Updated;
-                    p.Via = via.Id; p.ViaName = Core.DisplayNames.Of(via.User, via.Name); p.Hops = hops;
-                    p.LastSeen = now; p.PreferRelay = false;
-                    p.PublicKey = n.Pk; p.Name = n.Name; p.User = n.User; p.Host = n.Host; p.Realm = realm;
-                    p.CatalogVersion = n.Cat; p.ShareCount = n.Shares;
+                    p.Bridges[via.Id] = route;
+                    if (p.HeardDirectly) return p;
+                    p.LastSeen = now;
+                    if (!p.Online) { p.Online = true; p.OfflineSince = null; p.PreferRelay = false; change = PeerChange.Online; }
+                    // bridges lag each other by a few seconds: a newer version counts at once, an older one only when
+                    // every bridge reports it (the node started over)
+                    else if (n.Cat != p.CatalogVersion && (n.Cat > p.CatalogVersion || p.LiveBridges().All(b => b.Cat == n.Cat)))
+                        change = PeerChange.VersionChanged;
+                    if (change is PeerChange.Online or PeerChange.VersionChanged) p.CatalogVersion = n.Cat;
+                    p.PublicKey = n.Pk; p.Name = n.Name; p.User = n.User; p.Host = n.Host; p.Realm = realm; p.ShareCount = n.Shares;
                 }
                 return p;
             });
         if (change is { } c) Changed?.Invoke(peer, c);
     }
 
-    /// <summary>How long a route stays the one in use after it was last confirmed.</summary>
-    private static readonly TimeSpan RouteFresh = TimeSpan.FromSeconds(12);
+    /// <summary>
+    /// The bridge no longer reaches <paramref name="nodeId"/> (or, with null, anything: it went offline, was
+    /// forgotten, or switched bridging off): forget those routes.
+    /// </summary>
+    public void DropBridge(string bridgeId, string? nodeId = null)
+    {
+        foreach (var p in _peers.Values)
+        {
+            if (nodeId is not null && p.Id != nodeId) continue;
+            if (!p.Bridges.TryRemove(bridgeId, out _)) continue;
+            if (p.Online && !p.HeardDirectly && p.LiveBridges().Count == 0) MarkOffline(p.Id);
+        }
+    }
 
     public void Remove(string id)
     {
-        if (_peers.TryRemove(id, out var p)) Changed?.Invoke(p, PeerChange.Removed);
+        if (_peers.TryRemove(id, out var p)) { Changed?.Invoke(p, PeerChange.Removed); DropBridge(id); }
     }
 
     public void RemoveWhere(Func<Peer, bool> predicate)
@@ -229,7 +283,11 @@ public sealed class PeerRegistry
         var now = DateTimeOffset.UtcNow;
         foreach (var p in _peers.Values.ToList())
         {
-            if (p.Online && p.LastSeen < now - silence) MarkOffline(p.Id);
+            foreach (var b in p.Bridges.Values.ToList())
+                if (now - b.Confirmed > BridgeFresh * 3) p.Bridges.TryRemove(b.Id, out _);
+            // a bridged node is confirmed by the bridges' answers (every 5-10 s), not by beacons every 4 s
+            var quiet = !p.HeardDirectly && p.LiveBridges().Count > 0 ? BridgedSilence : silence;
+            if (p.Online && p.LastSeen < now - quiet) MarkOffline(p.Id);
             else if (!p.Online && (p.OfflineSince ?? p.LastSeen) < now - keepOffline) Remove(p.Id);
         }
     }
