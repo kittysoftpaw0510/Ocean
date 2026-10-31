@@ -23,7 +23,7 @@ public partial class HomeViewModel : ObservableObject
 public partial class MainViewModel : ObservableObject
 {
     private readonly Dictionary<string, BrowseViewModel> _browse = new();
-    private CancellationTokenSource? _peersDebounce;
+    private int _peersRefreshPending;
     private bool _initialPeersLoaded;
     private CancellationTokenSource? _eventsCts;
 
@@ -299,6 +299,7 @@ public partial class MainViewModel : ObservableObject
                     if (change == "removed")
                     {
                         var p = Peers.FirstOrDefault(x => x.Id == id);
+                        _browse.Remove(id); // a page for it would keep showing the old entry (offline) if it comes back
                         if (p is not null)
                         {
                             Peers.Remove(p);
@@ -404,12 +405,14 @@ public partial class MainViewModel : ObservableObject
 
     private void SchedulePeersRefresh()
     {
-        _peersDebounce?.Cancel();
-        var cts = _peersDebounce = new CancellationTokenSource();
-        _ = Task.Delay(300, cts.Token).ContinueWith(t =>
+        // Events can come several times a second on a big network: one refresh covers all of them, 300 ms after the
+        // first (a timer restarted on every event would never fire while they keep coming).
+        if (Interlocked.CompareExchange(ref _peersRefreshPending, 1, 0) != 0) return;
+        _ = Task.Delay(300).ContinueWith(_ => Application.Current.Dispatcher.InvokeAsync(() =>
         {
-            if (!t.IsCanceled) Application.Current.Dispatcher.InvokeAsync(() => RefreshPeersAsync());
-        }, TaskScheduler.Default);
+            Volatile.Write(ref _peersRefreshPending, 0);
+            return RefreshPeersAsync();
+        }), TaskScheduler.Default);
     }
 
     [ObservableProperty] private bool _isRefreshingNetwork;
@@ -454,7 +457,8 @@ public partial class MainViewModel : ObservableObject
         {
             var list = await Api.GetAsync<List<PeerDto>>("/api/peers") ?? new();
             var ids = list.Select(p => p.Id).ToHashSet();
-            for (var i = Peers.Count - 1; i >= 0; i--) if (!ids.Contains(Peers[i].Id)) Peers.RemoveAt(i);
+            for (var i = Peers.Count - 1; i >= 0; i--)
+                if (!ids.Contains(Peers[i].Id)) { _browse.Remove(Peers[i].Id); Peers.RemoveAt(i); }
             foreach (var dto in list)
             {
                 var vm = Peers.FirstOrDefault(p => p.Id == dto.Id);
@@ -498,7 +502,14 @@ public partial class MainViewModel : ObservableObject
     {
         if (peer is null) { ShowHome(); return; }
         if (Page is BrowseViewModel prev && prev.Peer != peer) prev.Deactivate();
-        if (!_browse.TryGetValue(peer.Id, out var vm))
+        if (_browse.TryGetValue(peer.Id, out var vm) && !ReferenceEquals(vm.Peer, peer))
+        {
+            // the node left the list and came back as a new entry: the old page would keep showing it offline
+            vm.Deactivate();
+            _browse.Remove(peer.Id);
+            vm = null;
+        }
+        if (vm is null)
         {
             vm = new BrowseViewModel(this, peer);
             _browse[peer.Id] = vm;

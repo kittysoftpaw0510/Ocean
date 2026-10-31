@@ -119,12 +119,23 @@ public partial class SharesView : UserControl
             Vm.EnterFolderCommand.Execute(f);
             e.Handled = true;
         }
+        else if ((e.OriginalSource as FrameworkElement)?.DataContext is LocalItemVm item && Vm is not null)
+        {
+            Vm.PlayCommand.Execute(item);
+            e.Handled = true;
+        }
+    }
+
+    private void Play_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { DataContext: LocalItemVm item }) Vm?.PlayCommand.Execute(item);
     }
 
     private void ItemsList_KeyDown(object sender, KeyEventArgs e)
     {
         if (Vm is null) return;
         if (e.Key == Key.Enter && ItemsList.SelectedItem is LocalFolderVm f) { Vm.EnterFolderCommand.Execute(f); e.Handled = true; }
+        else if (e.Key == Key.Enter && ItemsList.SelectedItem is LocalItemVm it) { Vm.PlayCommand.Execute(it); e.Handled = true; }
         else if (e.Key == Key.Back && Vm.FolderMode) { Vm.UpCommand.Execute(null); e.Handled = true; }
         else if (e.Key == Key.F2 && ItemsList.SelectedItem is LocalFolderVm rf) { Vm.RenameFolderCommand.Execute(rf); e.Handled = true; }
         else if (e.Key == Key.A && Keyboard.Modifiers == ModifierKeys.Control) { ItemsList.SelectAll(); e.Handled = true; }

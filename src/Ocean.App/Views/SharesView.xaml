@@ -9,6 +9,10 @@
             <Border x:Name="Row" Margin="12,1" CornerRadius="8" Padding="8,5" Background="Transparent" BorderThickness="1" BorderBrush="Transparent" Cursor="Hand">
                 <Border.ContextMenu>
                     <ContextMenu>
+                        <MenuItem Header="Play" Click="Play_Click">
+                            <MenuItem.Icon><TextBlock Text="&#xE768;" Style="{StaticResource Icon}"/></MenuItem.Icon>
+                        </MenuItem>
+                        <Separator/>
                         <MenuItem Header="Move to…" Click="MoveTo_Click">
                             <MenuItem.Icon><TextBlock Text="&#xE8DE;" Style="{StaticResource Icon}"/></MenuItem.Icon>
                         </MenuItem>

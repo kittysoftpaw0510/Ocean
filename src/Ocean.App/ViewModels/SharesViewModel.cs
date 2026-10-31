@@ -519,6 +519,15 @@ public partial class SharesViewModel : ObservableObject
         try { Process.Start(new ProcessStartInfo("explorer.exe", File.Exists(root) ? $"/select,\"{root}\"" : $"\"{root}\"") { UseShellExecute = true }); } catch { }
     }
 
+    /// <summary>Watch one of my own shared videos in the built-in player (double-click, Enter, or the row menu).</summary>
+    [RelayCommand]
+    private void Play(LocalItemVm? item)
+    {
+        if (item is null || Selected is null) return;
+        if (!File.Exists(item.Dto.FullPath)) { _main.Toast("File not found", item.Dto.FullPath, "warn"); return; }
+        _main.Player.OpenLocal(item, Selected.Name);
+    }
+
     [RelayCommand]
     private void RevealItem(LocalItemVm? item)
     {

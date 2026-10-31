@@ -12,6 +12,9 @@ public partial class PlayerViewModel : ObservableObject
     [ObservableProperty] private bool _isOpen;
     [ObservableProperty] private ItemVm? _item;
     [ObservableProperty] private PeerVm? _peer;
+    /// <summary>Downloading applies to another node's video, not to one of my own.</summary>
+    public bool CanDownload => Peer is not null;
+    partial void OnPeerChanged(PeerVm? value) => OnPropertyChanged(nameof(CanDownload));
     [ObservableProperty] private string? _url;
     [ObservableProperty] private string _title = "";
     [ObservableProperty] private string _subtitle = "";
@@ -146,6 +149,21 @@ public partial class PlayerViewModel : ObservableObject
         PositionSeconds = 0;
         DurationSeconds = item.DurationMs / 1000.0;
         ClearLoop(); // A-B points belong to one video
+        IsOpen = true;
+        Generation++;
+    }
+
+    /// <summary>Plays one of my own shared videos straight from disk.</summary>
+    public void OpenLocal(LocalItemVm item, string shareName)
+    {
+        Item = null; Peer = null; Url = item.Dto.FullPath; Error = null;
+        _playing = null; _playingPeer = null; StartAt = 0; // no resume point: it is not another node's video
+        Services.AppLog.Info("Player", $"play my own {item.Name}");
+        Title = item.Name;
+        Subtitle = $"My shares  ·  {shareName}{(item.Folder.Length > 0 ? "  ›  " + item.Folder : "")}";
+        PositionSeconds = 0;
+        DurationSeconds = (item.Dto.DurationMs ?? 0) / 1000.0;
+        ClearLoop();
         IsOpen = true;
         Generation++;
     }
