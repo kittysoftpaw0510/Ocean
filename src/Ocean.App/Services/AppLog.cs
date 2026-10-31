@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text;
 using System.Text.RegularExpressions;
 using Ocean.Core;
 
@@ -8,15 +7,17 @@ namespace Ocean.App.Services;
 /// <summary>
 /// The app's own log: <c>%ProgramData%\Ocean\logs\app-YYYYMMDD.log</c>, next to the service's log, so one folder
 /// (Settings › Open logs) holds everything needed to debug. Falls back to <c>%LocalAppData%\Ocean\logs</c> when
-/// that folder isn't writable. Kept 14 days. Never contains the local access token.
+/// that folder isn't writable. Size and age are limited by <see cref="LogFile"/>. Never contains the local access token.
 /// </summary>
 public static class AppLog
 {
     private static readonly object Lock = new();
     private static string? _dir;
+    private static LogFile? _file;
     private static readonly Regex TokenInUrl = new(@"([?&]k=)[^&\s]+", RegexOptions.Compiled);
 
     public static string Directory => _dir ??= ChooseDirectory();
+    private static LogFile Log { get { lock (Lock) return _file ??= new LogFile(Directory, "app"); } }
 
     /// <summary>First lines of a session: who, what, where.</summary>
     public static void Start(string[] args)
@@ -26,7 +27,6 @@ public static class AppLog
                     $"Windows {Environment.OSVersion.Version}, args [{string.Join(' ', args)}]");
         Info("App", $"data {OceanDefaults.DataDir}; log {Directory}" +
                     (Environment.GetEnvironmentVariable("OCEAN_DATA_DIR") is { Length: > 0 } ? " (portable: OCEAN_DATA_DIR set)" : ""));
-        Prune();
     }
 
     public static void Info(string area, string message) => Write("INF", area, message, null);
@@ -39,21 +39,12 @@ public static class AppLog
 
     private static void Write(string level, string area, string message, Exception? ex, bool full = false)
     {
-        var line = new StringBuilder()
-            .Append(DateTime.Now.ToString("HH:mm:ss.fff")).Append(' ').Append(level).Append(' ')
-            .Append(area).Append(": ").Append(Clean(message));
+        string? extra = null;
         if (ex is not null)
-        {
-            if (full) line.AppendLine().Append("    ").Append(Clean(ex.ToString()).Replace("\n", "\n    "));
-            else line.Append(" | ").Append(ex.GetType().Name).Append(": ").Append(Clean(Flatten(ex)));
-        }
-        line.AppendLine();
-        lock (Lock)
-        {
-            try { File.AppendAllText(Path.Combine(Directory, $"app-{DateTime.Now:yyyyMMdd}.log"), line.ToString()); }
-            catch { /* logging must never break the app */ }
-        }
-        Debug.Write(line.ToString());
+            extra = full ? Environment.NewLine + "    " + Clean(ex.ToString()).Replace("\n", "\n    ")
+                         : " | " + ex.GetType().Name + ": " + Clean(Flatten(ex));
+        Log.Write(level, area, Clean(message), extra);
+        Debug.WriteLine($"{level} {area}: {message}");
     }
 
     /// <summary>"outer message ← inner message" (socket errors hide in inner exceptions).</summary>
@@ -84,16 +75,6 @@ public static class AppLog
             catch { }
         }
         return Path.GetTempPath();
-    }
-
-    private static void Prune()
-    {
-        try
-        {
-            foreach (var f in System.IO.Directory.EnumerateFiles(Directory, "app-*.log"))
-                if (File.GetLastWriteTimeUtc(f) < DateTime.UtcNow.AddDays(-14)) File.Delete(f);
-        }
-        catch { }
     }
 
     private static string FileVersion()

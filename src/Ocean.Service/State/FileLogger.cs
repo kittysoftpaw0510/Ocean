@@ -2,23 +2,16 @@ using System.Text;
 
 namespace Ocean.Service.State;
 
-/// <summary>Tiny daily-rolling file logger (no external dependencies).</summary>
+/// <summary>Daily file logger (no external dependencies); size and age are limited by <see cref="Core.LogFile"/>.</summary>
 public sealed class FileLoggerProvider : ILoggerProvider
 {
-    private readonly string _dir;
-    private readonly object _lock = new();
+    private readonly Core.LogFile _file;
     private readonly LogLevel _min;
 
     public FileLoggerProvider(string dir, LogLevel min = LogLevel.Information)
     {
-        _dir = dir; _min = min;
-        Directory.CreateDirectory(dir);
-        try
-        {
-            foreach (var f in Directory.EnumerateFiles(dir, "service-*.log"))
-                if (File.GetLastWriteTimeUtc(f) < DateTime.UtcNow.AddDays(-14)) File.Delete(f);
-        }
-        catch { }
+        _file = new Core.LogFile(dir, "service");
+        _min = min;
     }
 
     public ILogger CreateLogger(string categoryName) => new FileLogger(this, categoryName);
@@ -26,16 +19,8 @@ public sealed class FileLoggerProvider : ILoggerProvider
     internal void Write(string category, LogLevel level, string message, Exception? ex)
     {
         if (level < _min) return;
-        var line = new StringBuilder()
-            .Append(DateTime.Now.ToString("HH:mm:ss.fff")).Append(' ')
-            .Append(level switch { LogLevel.Trace => "TRC", LogLevel.Debug => "DBG", LogLevel.Information => "INF", LogLevel.Warning => "WRN", LogLevel.Error => "ERR", _ => "CRT" })
-            .Append(' ').Append(Short(category)).Append(": ").Append(message);
-        if (ex is not null) line.Append(" | ").Append(ex.GetType().Name).Append(": ").Append(ex.Message);
-        line.AppendLine();
-        lock (_lock)
-        {
-            try { File.AppendAllText(Path.Combine(_dir, $"service-{DateTime.Now:yyyyMMdd}.log"), line.ToString()); } catch { }
-        }
+        var lvl = level switch { LogLevel.Trace => "TRC", LogLevel.Debug => "DBG", LogLevel.Information => "INF", LogLevel.Warning => "WRN", LogLevel.Error => "ERR", _ => "CRT" };
+        _file.Write(lvl, Short(category), message, ex is null ? null : $" | {ex.GetType().Name}: {ex.Message}");
     }
 
     private static string Short(string category)
