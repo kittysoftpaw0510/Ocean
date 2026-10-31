@@ -272,7 +272,7 @@
                                     <Run Text="{Binding HostName, Mode=OneWay}"/><Run Text="  ·  encrypted port " Foreground="{StaticResource TextMuted}"/><Run Text="{Binding PeerPort, Mode=OneWay}"/>
                                 </TextBlock>
                                 <TextBlock Grid.Row="3" Text="Version" Style="{StaticResource Muted}" Margin="0,0,24,0"/>
-                                <TextBlock Grid.Row="3" Grid.Column="1" Text="Ocean 1.0.0"/>
+                                <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding VersionText}"/>
                             </Grid>
                             <TextBlock Style="{StaticResource RowHint}" Margin="0,12,0,0"
                                        Text="Traffic between PCs is encrypted end to end (TLS 1.2/1.3 with certificates on both sides). Each PC's identity is the fingerprint of its own key, so nobody can impersonate it."/>

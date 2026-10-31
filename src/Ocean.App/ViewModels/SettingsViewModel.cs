@@ -39,6 +39,7 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _dataDir = "";
     [ObservableProperty] private string _hostName = "";
     [ObservableProperty] private int _peerPort;
+    [ObservableProperty] private string _versionText = "Ocean " + Core.OceanDefaults.AppVersion;
     private bool _loading;
 
     public SettingsViewModel(MainViewModel main) { _main = main; }
@@ -108,6 +109,9 @@ public partial class SettingsViewModel : ObservableObject
                 ModeText = st.RunningAsService ? "Windows service: starts with Windows and shares even when nobody is signed in" : "Background process started by this app (portable mode)";
                 DataDir = st.DataDir; HostName = st.Host; PeerPort = st.PeerPort;
                 NetworkInfo = st.NetworkInfo;
+                // the service's version too when it differs (an update that didn't restart the service)
+                var app = Core.OceanDefaults.AppVersion;
+                VersionText = string.IsNullOrEmpty(st.Version) || st.Version == app ? $"Ocean {app}" : $"Ocean {app}  ·  service {st.Version}";
             }
             RunAtStartup = ReadRunAtStartup();
             Dirty = false;
