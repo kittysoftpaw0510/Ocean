@@ -72,11 +72,12 @@ public sealed class FirewallRules : IHostedService
     {
         var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "netsh.exe"), args)
         {
-            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
+            // Output is NOT redirected: only the exit code matters. Redirecting it and disposing the process while a
+            // read on its output pipe was still completing crashed the whole service on some PCs
+            // ("'overlapped' has already been freed", an unhandled exception on an I/O completion thread).
+            UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden,
         };
         using var p = Process.Start(psi) ?? throw new InvalidOperationException("netsh did not start");
-        _ = p.StandardOutput.ReadToEndAsync();
-        _ = p.StandardError.ReadToEndAsync();
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         try { await p.WaitForExitAsync(cts.Token); }
         catch (OperationCanceledException) { try { p.Kill(); } catch { } return -1; }

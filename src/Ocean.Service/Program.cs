@@ -24,6 +24,14 @@ var dataDir = OceanDefaults.DataDir;
 Directory.CreateDirectory(dataDir);
 var isService = WindowsServiceHelpers.IsWindowsService();
 
+// A crash on a background thread kills the process before normal logging runs: write it (with the stack trace)
+// to our own log first, so it shows up there and not only in Windows' event log.
+AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+{
+    var text = $"{DateTime.Now:HH:mm:ss.fff} CRT Program: service crashed: {e.ExceptionObject}{Environment.NewLine}";
+    try { Directory.CreateDirectory(Path.Combine(dataDir, "logs")); File.AppendAllText(Path.Combine(dataDir, "logs", $"service-{DateTime.Now:yyyyMMdd}.log"), text); } catch { }
+};
+
 // One Ocean service per device: a second copy (e.g. started by hand while the Windows service runs) exits.
 using var instance = new SingleInstance("Ocean.Service");
 if (!instance.IsFirst)
