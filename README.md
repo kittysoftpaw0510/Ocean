@@ -30,7 +30,7 @@ and every byte between them travels over mutually authenticated, end-to-end encr
 
 ## Install (end users)
 
-Run **`Ocean-Setup-1.0.3.exe`** and click through. Nothing else is needed: the .NET runtime is bundled.
+Run **`Ocean-Setup-1.0.4.exe`** and click through. Nothing else is needed: the .NET runtime is bundled.
 The setup:
 
 - installs Ocean to `C:\Program Files\Ocean` with a Start menu shortcut (desktop shortcut optional);
@@ -45,7 +45,7 @@ The setup:
 Uninstall from *Settings > Apps* (or the Start menu). It removes the service, firewall rules and shortcuts and
 asks whether to also delete settings and caches (`%ProgramData%\Ocean`). Videos and downloads are never touched.
 
-Silent install for many PCs: `Ocean-Setup-1.0.3.exe /VERYSILENT /SUPPRESSMSGBOXES /TASKS="service,firewall,autostart"`.
+Silent install for many PCs: `Ocean-Setup-1.0.4.exe /VERYSILENT /SUPPRESSMSGBOXES /TASKS="service,firewall,autostart"`.
 
 ## Build
 
