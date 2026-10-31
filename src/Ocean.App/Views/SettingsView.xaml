@@ -130,6 +130,24 @@
                                 </StackPanel>
                                 <CheckBox Grid.Column="1" Style="{StaticResource Switch}" IsChecked="{Binding AllowPublicNetworks}" AutomationProperties.Name="Allow connections on Public networks"/>
                             </Grid>
+                            <Border Style="{StaticResource Divider}"/>
+                            <Grid Style="{StaticResource Row}">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                    <TextBlock Text="Networking" Style="{StaticResource RowTitle}"/>
+                                    <TextBlock Style="{StaticResource RowHint}"
+                                               Text="Fast uses Windows' asynchronous network I/O. Compatibility works the way classic programs like IPmsg do and survives network add-ons (VPN, proxy, 'accelerator' and some security tools) that break the fast mode. Auto picks Compatibility when such an add-on is found or the fast mode has crashed on this PC."/>
+                                    <TextBlock Style="{StaticResource RowHint}" Margin="0,4,0,0" Text="{Binding NetworkInfo}" TextWrapping="Wrap"/>
+                                    <TextBlock Style="{StaticResource RowHint}" Margin="0,4,0,0" Text="A change applies when the Ocean service restarts."/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Width="220">
+                                    <RadioButton Content="Auto (recommended)" Margin="0,2" IsChecked="{Binding NetworkMode, Converter={StaticResource Equals}, ConverterParameter=auto}"/>
+                                    <RadioButton Content="Compatibility (classic)" Margin="0,2" IsChecked="{Binding NetworkMode, Converter={StaticResource Equals}, ConverterParameter=classic}"/>
+                                    <RadioButton Content="Fast (asynchronous)" Margin="0,2" IsChecked="{Binding NetworkMode, Converter={StaticResource Equals}, ConverterParameter=fast}"/>
+                                    <Button Style="{StaticResource BtnGhost}" Content="Restart the service now" Padding="8,6" Margin="0,8,0,0" HorizontalAlignment="Left"
+                                            Command="{Binding RestartServiceCommand}" ToolTip="Saves first; the service comes back within a few seconds"/>
+                                </StackPanel>
+                            </Grid>
                         </StackPanel>
                     </Border>
 

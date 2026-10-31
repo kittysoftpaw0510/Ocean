@@ -55,15 +55,26 @@ the catalog version and share count, so browsing nodes refetch a catalog only wh
 
 Beacon: `{v, t, id, pk, name, user, host, port, realm, cat, shares, ts, sig}`.
 
-### Network add-ons (Winsock LSPs)
+### Network add-ons (Winsock LSPs) and the classic networking mode
 
-Some VPN, proxy, "network accelerator" and security programs install an old-style Winsock Layered Service
-Provider. A non-IFS one completes overlapped I/O a second time, which .NET (I/O completion ports, skip-on-success)
-cannot survive: the process dies with "'overlapped' has already been freed". Native programs like IPmsg don't use
-completion ports and are unaffected. When such a provider is installed (`WinsockCatalog`), Ocean creates every
-socket on the base MSAFD provider instead (`BaseSockets`: `WSASocketW` with the base `WSAPROTOCOL_INFOW`): Kestrel
-listens and accepts through `BaseProviderTransportFactory`, HttpClient connects through `ConnectCallback`, and
-discovery's UDP socket is replaced. The add-on is never involved. `OCEAN_BYPASS_LSP=1` forces this for testing.
+Some VPN, proxy, "network accelerator" and security programs install a Winsock Layered Service Provider
+(e.g. Astrill's ASProxy). Some of them complete overlapped I/O a second time, which .NET (I/O completion
+ports) cannot survive: the process dies with "'overlapped' has already been freed" within a second of the
+first connection. Native programs like IPmsg use plain blocking sockets and are unaffected. Ocean therefore
+has two networking modes (`NetworkCompat`):
+
+- **Fast**: .NET's normal asynchronous sockets (Kestrel's socket transport, SocketsHttpHandler).
+- **Classic**: only blocking socket calls on dedicated threads, never overlapped I/O. `ClassicSocketStream`
+  (a receive thread and a send thread with bounded queues, so TCP back-pressure still works) serves both
+  Kestrel (`ClassicTransportFactory`: blocking accept thread + `PipeReader/Writer.Create` over the stream)
+  and `SocketsHttpHandler.ConnectCallback` (service and app). TLS and HTTP above it are unchanged.
+  Discovery already used blocking UDP calls.
+- **Auto** (default) picks Classic when any layered provider is in the Winsock catalog (`WinsockCatalog`)
+  or when `classic-network.flag` exists in the data folder: the service writes it when it crashes with the
+  signature above, so a PC heals itself on the next start even for add-ons that aren't detected.
+  Settings › Networking (or `networkMode` in config.json) forces a mode; `OCEAN_NET_MODE=classic|fast`
+  overrides everything (developers). "Restart the service now" exits with code 3; the installer sets
+  `sc failureflag 1` (and the service sets it at startup) so the service manager restarts it.
 
 ### Loopback and echo cases
 

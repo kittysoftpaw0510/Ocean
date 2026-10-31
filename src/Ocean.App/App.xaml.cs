@@ -25,9 +25,7 @@ public partial class App : Application
     {
         base.OnStartup(e);
         AppLog.Start(e.Args);
-        MainViewModel.NetworkAddOns = WinsockCatalog.IncompatibleProviders();
-        if (MainViewModel.NetworkAddOns.Count > 0)
-            AppLog.Warn("App", "incompatible network add-on(s) on this PC (Ocean goes around them): " + WinsockCatalog.Describe(MainViewModel.NetworkAddOns));
+        AppLog.Info("App", "networking: " + NetworkCompat.Describe());
         DispatcherUnhandledException += OnUnhandled;
         TaskScheduler.UnobservedTaskException += (_, args) =>
         {
@@ -90,8 +88,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             AppLog.Error("App", "could not start", ex);
-            var advice = MainViewModel.NetworkAddOns.Count > 0 ? "\n\n" + MainViewModel.NetworkAddOnAdvice() : "";
-            MessageBox.Show(ex.Message + advice, "Ocean could not start", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(ex.Message, "Ocean could not start", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown();
         }
     }

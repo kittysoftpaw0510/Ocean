@@ -47,6 +47,8 @@ public sealed class ServiceConfig
     public int OfflineKeepHours { get; set; } = 24;
     /// <summary>Let other PCs connect on networks Windows marks as Public (the service manages the firewall rule).</summary>
     public bool AllowPublicNetworks { get; set; } = true;
+    /// <summary>"auto" | "classic" | "fast": how sockets are driven (see Ocean.Core.NetworkCompat).</summary>
+    public string NetworkMode { get; set; } = "auto";
     /// <summary>Disk space for watched video bytes from other PCs (GB, 0 = off): replays and seeking back cost no network.</summary>
     public int StreamCacheGB { get; set; } = 5;
     public List<ShareDefinition> Shares { get; set; } = new();

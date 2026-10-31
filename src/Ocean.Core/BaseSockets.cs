@@ -1,40 +1,29 @@
 using System.Collections.Concurrent;
-using System.Net;
-using System.Net.Http;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 
 namespace Ocean.Core;
 
 /// <summary>
-/// Creates sockets directly on Windows' own network provider (MSAFD), skipping network add-ons layered on top of it
-/// (see <see cref="WinsockCatalog"/>). With an old-style add-on installed, a normal .NET socket goes through it and
-/// the process dies within seconds; a socket on the base provider never touches it. Native programs such as IPmsg
-/// are unaffected by those add-ons for a different reason (they don't use I/O completion ports); this gives Ocean the
-/// same robustness.
-/// <para>
-/// Active only when such an add-on is present (or OCEAN_BYPASS_LSP=1 is set, for testing). On a normal PC the base
-/// provider is what every socket gets anyway, so nothing changes there. Any failure falls back to a normal socket.
-/// </para>
+/// Creates sockets. Normally plain <see cref="Socket"/>s; with <c>OCEAN_BASE_PROVIDER=1</c> (an experiment, off by
+/// default) directly on Windows' own network provider (MSAFD), skipping add-ons layered on top of it. That alone
+/// did not stop Astrill's ASProxy from breaking asynchronous I/O (it hooks deeper than the catalog), which is why
+/// Ocean relies on <see cref="NetworkCompat"/>'s classic mode instead; IPmsg uses ordinary sockets too.
 /// </summary>
 public static class BaseSockets
 {
-    private static readonly Lazy<bool> _bypass = new(() =>
-        Environment.GetEnvironmentVariable("OCEAN_BYPASS_LSP") == "1" || WinsockCatalog.IncompatibleProviders().Count > 0);
-
+    private static readonly Lazy<bool> _useBase = new(() => Environment.GetEnvironmentVariable("OCEAN_BASE_PROVIDER") == "1");
     private static readonly ConcurrentDictionary<(AddressFamily, SocketType, ProtocolType), WinsockCatalog.WSAPROTOCOL_INFOW?> _providers = new();
     private static int _started;
 
-    /// <summary>True when sockets are created on the base provider (an incompatible add-on was found).</summary>
-    public static bool Bypass => _bypass.Value;
+    public static bool UseBaseProvider => _useBase.Value;
 
     /// <summary>Why the last socket fell back to a normal one (null = every socket so far is on the base provider).</summary>
     public static string? FallbackReason { get; private set; }
 
-    /// <summary>A socket on Windows' own provider when <see cref="Bypass"/> is on, otherwise a normal socket.</summary>
     public static Socket Create(AddressFamily family, SocketType type, ProtocolType protocol)
     {
-        if (!Bypass) return new Socket(family, type, protocol);
+        if (!UseBaseProvider) return new Socket(family, type, protocol);
         try
         {
             if (Interlocked.Exchange(ref _started, 1) == 0) WinsockCatalog.WSAStartup(0x0202, new byte[512]); // kept for the process lifetime
@@ -48,35 +37,6 @@ public static class BaseSockets
         }
         catch (Exception ex) { FallbackReason = $"{family}/{type}/{protocol}: {ex.Message}"; }
         return new Socket(family, type, protocol);
-    }
-
-    /// <summary>For <see cref="SocketsHttpHandler.ConnectCallback"/>: connects on a base-provider socket.</summary>
-    public static async ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext context, CancellationToken ct)
-    {
-        var host = context.DnsEndPoint.Host;
-        var addresses = IPAddress.TryParse(host.Trim('[', ']'), out var ip) ? new[] { ip } : await Dns.GetHostAddressesAsync(host, ct);
-        Exception? last = null;
-        foreach (var address in addresses)
-        {
-            var socket = Create(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
-            try
-            {
-                socket.NoDelay = true;
-                await socket.ConnectAsync(new IPEndPoint(address, context.DnsEndPoint.Port), ct);
-                return new NetworkStream(socket, ownsSocket: true);
-            }
-            catch (Exception ex) when (ex is SocketException)
-            {
-                socket.Dispose();
-                last = ex;
-            }
-            catch
-            {
-                socket.Dispose();
-                throw;
-            }
-        }
-        throw last ?? new SocketException((int)SocketError.HostNotFound);
     }
 
     /// <summary>The non-layered, IFS entry (MSAFD) for this kind of socket, or null.</summary>

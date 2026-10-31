@@ -53,7 +53,8 @@ public sealed class BytesConverter : IValueConverter
 public sealed class EqualsConverter : IValueConverter
 {
     public object Convert(object? value, Type t, object? p, CultureInfo c) => value is not null && p is not null && string.Equals(value.ToString(), p.ToString(), StringComparison.OrdinalIgnoreCase);
-    public object? ConvertBack(object? value, Type t, object? p, CultureInfo c) => value is true ? Enum.Parse(t, p!.ToString()!, true) : Binding.DoNothing;
+    public object? ConvertBack(object? value, Type t, object? p, CultureInfo c)
+        => value is not true ? Binding.DoNothing : t == typeof(string) ? p!.ToString() : Enum.Parse(t, p!.ToString()!, true);
 }
 
 public sealed class EqualsToVisibilityConverter : IValueConverter

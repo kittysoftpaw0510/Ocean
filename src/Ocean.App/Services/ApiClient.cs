@@ -29,8 +29,8 @@ public sealed class ApiClient
     {
         BaseUrl = $"http://127.0.0.1:{port}";
         Token = token;
-        // An incompatible network add-on on this PC: connect on Windows' own provider (see BaseSockets).
-        HttpMessageHandler transport = BaseSockets.Bypass ? new SocketsHttpHandler { ConnectCallback = BaseSockets.ConnectAsync } : new HttpClientHandler();
+        // Classic networking (see NetworkCompat): blocking sockets on threads, no overlapped I/O.
+        HttpMessageHandler transport = NetworkCompat.Classic ? new SocketsHttpHandler { ConnectCallback = NetworkCompat.ConnectAsync } : new HttpClientHandler();
         _http = new HttpClient(new LoggingHandler(transport)) { BaseAddress = new Uri(BaseUrl), Timeout = TimeSpan.FromSeconds(60) };
         _http.DefaultRequestHeaders.Add("X-Ocean-Local", token);
     }

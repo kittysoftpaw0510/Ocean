@@ -76,6 +76,13 @@ Try-Add 'Crashes reported by Windows (last 2 days)' {
         Select-Object -First 10 |
         ForEach-Object { "----- {0:MM-dd HH:mm:ss} {1} [{2}]`n{3}" -f $_.TimeCreated, $_.ProviderName, $_.Id, $_.Message }
 }
+Try-Add 'Networking mode' {
+    $marker = Join-Path $data 'classic-network.flag'
+    if (Test-Path $marker) { "classic-network.flag present (the fast mode crashed here; classic networking is used): " + (Get-Content $marker -Raw) }
+    else { "no classic-network.flag (classic networking only if an add-on is found or chosen in Settings)" }
+    $cfg = Join-Path $data 'config.json'
+    if (Test-Path $cfg) { try { "config networkMode: " + ((Get-Content $cfg -Raw | ConvertFrom-Json).networkMode) } catch { } }
+}
 Try-Add 'Ocean data folder' { Get-ChildItem $data -ErrorAction SilentlyContinue | Format-Table Name, Length, LastWriteTime -AutoSize | Out-String }
 Try-Add 'Service log (end)' {
     Get-ChildItem (Join-Path $data 'logs\service-*.log') -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 2 |

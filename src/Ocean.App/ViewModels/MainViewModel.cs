@@ -204,18 +204,23 @@ public partial class MainViewModel : ObservableObject
 
     // ---- old-style network add-ons that crash the service (see WinsockCatalog)
 
-    public static IReadOnlyList<WinsockCatalog.Provider> NetworkAddOns { get; set; } = Array.Empty<WinsockCatalog.Provider>();
+    public static IReadOnlyList<WinsockCatalog.Provider> NetworkAddOns => NetworkCompat.AddOns;
     private bool _addOnsExplained;
     private readonly Queue<DateTime> _recentLosses = new();
 
-    public static string NetworkAddOnAdvice() =>
-        "Ocean's background service keeps stopping. This PC has a network add-on that is known to cause that:\n\n" +
-        string.Join("\n", NetworkAddOns.Select(p => "  •  " + p.Name + (p.Path is null ? "" : "\n      " + p.Path))) + "\n\n" +
-        "Some VPN, proxy, \"network accelerator\" and security programs install such add-ons. Ocean already goes around " +
-        "it, but if the service still keeps stopping, uninstall the program that installed it, or open Command Prompt " +
-        "as administrator, run\n" +
-        "    netsh winsock reset\n" +
-        "and restart Windows (that program may need to be reinstalled afterwards).";
+    public static string NetworkAddOnAdvice()
+    {
+        var addOns = NetworkAddOns.Count == 0 ? "" :
+            "This PC has a network add-on of the kind that breaks programs:\n\n" +
+            string.Join("\n", NetworkAddOns.Select(p => "  •  " + p.Name + (p.Path is null ? "" : "\n      " + p.Path))) + "\n\n" +
+            "Some VPN, proxy, \"network accelerator\" and security programs install such add-ons. Ocean runs in its " +
+            "compatibility mode because of it (Settings › Networking), which normally survives them.\n\n";
+        return "Ocean's background service keeps stopping. " + addOns +
+               "Please send the logs (Settings › Open logs: service-*.log and app-*.log) to whoever supports Ocean for you." +
+               (NetworkAddOns.Count == 0 ? "" :
+                "\n\nIf you'd rather remove the add-on: uninstall the program that installed it, or open Command Prompt as " +
+                "administrator, run\n    netsh winsock reset\nand restart Windows (that program may need to be reinstalled afterwards).");
+    }
 
     public void ConnectionLost()
     {
@@ -228,10 +233,10 @@ public partial class MainViewModel : ObservableObject
         var now = DateTime.UtcNow;
         _recentLosses.Enqueue(now);
         while (_recentLosses.Count > 0 && now - _recentLosses.Peek() > TimeSpan.FromMinutes(3)) _recentLosses.Dequeue();
-        if (NetworkAddOns.Count > 0 && !_addOnsExplained && _recentLosses.Count >= 3)
+        if (!_addOnsExplained && _recentLosses.Count >= 3)
         {
             _addOnsExplained = true;
-            AppLog.Warn("Main", "service keeps stopping; explaining the network add-on to the user");
+            AppLog.Warn("Main", $"service keeps stopping; telling the user (network add-ons found: {NetworkAddOns.Count})");
             Application.Current.Dispatcher.InvokeAsync(() => Dialogs.ShowError("Ocean's service keeps stopping", NetworkAddOnAdvice()));
         }
         _ = Task.Run(async () =>

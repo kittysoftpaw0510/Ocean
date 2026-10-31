@@ -127,6 +127,8 @@ public sealed class NodeStatusDto
     public int PeerPort { get; set; }
     public int NewDays { get; set; }
     public long CatalogVersion { get; set; }
+    /// <summary>How the service talks to the network right now, e.g. "Compatibility mode (classic networking): ...".</summary>
+    public string NetworkInfo { get; set; } = "";
 }
 
 public sealed class PeerDto
@@ -288,6 +290,8 @@ public sealed class SettingsDto
     public bool AllowPublicNetworks { get; set; } = true;
     /// <summary>Read-only: false when Ocean runs without administrator rights and can't change Windows Firewall itself.</summary>
     public bool FirewallManaged { get; set; }
+    /// <summary>"auto" | "classic" | "fast" (applies when the service restarts).</summary>
+    public string NetworkMode { get; set; } = "auto";
     /// <summary>Disk space for watched video bytes from other PCs (GB, 0 = off).</summary>
     public int StreamCacheGB { get; set; } = 5;
     /// <summary>Read-only: how much of it is used now.</summary>

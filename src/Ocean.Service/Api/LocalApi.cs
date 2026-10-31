@@ -31,6 +31,7 @@ public static class LocalApi
                 Version = OceanDefaults.AppVersion, RealmSet = Realm.Normalize(c.Secret).Length > 0, SharingPaused = c.SharingPaused,
                 RunningAsService = host.RunningAsService, DataDir = OceanDefaults.DataDir, PeerPort = c.PeerPort, NewDays = c.NewDays,
                 CatalogVersion = catalog.Version,
+                NetworkInfo = NetworkCompat.Describe(),
             }, Json.Options);
         });
 
@@ -227,6 +228,7 @@ public static class LocalApi
                 UploadLimitKBps = c.UploadLimitKBps, SharingPaused = c.SharingPaused, NewDays = c.NewDays,
                 MaxConcurrentDownloads = c.MaxConcurrentDownloads, NotifyNewVideos = c.NotifyNewVideos, OfflineKeepHours = c.OfflineKeepHours,
                 AllowPublicNetworks = c.AllowPublicNetworks, FirewallManaged = firewall.CanManage,
+                NetworkMode = c.NetworkMode,
                 StreamCacheGB = c.StreamCacheGB, StreamCacheUsedBytes = cache.UsedBytes,
             }, Json.Options);
         });
@@ -248,6 +250,7 @@ public static class LocalApi
                 c.NotifyNewVideos = dto.NotifyNewVideos;
                 c.OfflineKeepHours = Math.Clamp(dto.OfflineKeepHours, 1, 24 * 30);
                 c.AllowPublicNetworks = dto.AllowPublicNetworks;
+                if (Enum.TryParse<NetworkMode>(dto.NetworkMode, true, out var mode)) c.NetworkMode = mode.ToString().ToLowerInvariant();
                 c.StreamCacheGB = Math.Clamp(dto.StreamCacheGB, 0, 500);
             });
             limiter.BytesPerSecond = config.Current.UploadLimitKBps * 1024L;
@@ -261,6 +264,18 @@ public static class LocalApi
         {
             config.Update(c => c.SharingPaused = paused);
             events.Publish("settings");
+            return Results.Ok();
+        });
+
+        // Restart the service (a changed networking mode applies at start). As a Windows service: exit with a failure
+        // code and let the service manager restart it (ServiceRestart); as a background process: stop, the app starts it again.
+        g.MapPost("/service/restart", (HostInfo host, IHostApplicationLifetime life) =>
+        {
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(300);
+                if (host.RunningAsService) ServiceRestart.ExitForRestart(); else life.StopApplication();
+            });
             return Results.Ok();
         });
 

@@ -29,6 +29,10 @@ var isService = WindowsServiceHelpers.IsWindowsService();
 AppDomain.CurrentDomain.UnhandledException += (_, e) =>
 {
     var text = $"{DateTime.Now:HH:mm:ss.fff} CRT Program: service crashed: {e.ExceptionObject}{Environment.NewLine}";
+    // The signature of a network add-on completing overlapped I/O twice: from the next start on, use classic
+    // networking (blocking sockets on threads), which such add-ons cannot break. See NetworkCompat.
+    if (e.ExceptionObject is Exception ex && NetworkCompat.LooksLikeOverlappedCrash(ex) && NetworkCompat.RecordCrash(ex))
+        text += $"{DateTime.Now:HH:mm:ss.fff} WRN Program: that is the signature of a network add-on breaking asynchronous I/O; switching to classic networking at the next start ({NetworkCompat.MarkerFile}){Environment.NewLine}";
     try { Directory.CreateDirectory(Path.Combine(dataDir, "logs")); File.AppendAllText(Path.Combine(dataDir, "logs", $"service-{DateTime.Now:yyyyMMdd}.log"), text); } catch { }
 };
 
@@ -62,6 +66,8 @@ var config = new ConfigStore(dataDir);
 var identity = NodeIdentity.LoadOrCreate(Path.Combine(dataDir, "node.pfx"));
 var localAuth = new LocalAuth();
 var cfg = config.Current;
+// Decide classic vs fast networking before anything opens a socket (see NetworkCompat).
+NetworkCompat.Configure(Enum.TryParse<NetworkMode>(cfg.NetworkMode, true, out var netMode) ? netMode : NetworkMode.Auto);
 
 builder.Services.AddSingleton(config);
 builder.Services.AddSingleton(identity);
@@ -76,8 +82,8 @@ builder.Services.AddSingleton<AccessService>();
 builder.Services.AddSingleton<RelayHub>();
 builder.Services.AddSingleton<RelayWorker>();
 builder.Services.AddSingleton<FirewallRules>();
-// An incompatible network add-on on this PC: serve on sockets of Windows' own provider instead (see BaseSockets).
-if (BaseSockets.Bypass) builder.Services.AddSingleton<Microsoft.AspNetCore.Connections.IConnectionListenerFactory, BaseProviderTransportFactory>();
+// Classic networking (see NetworkCompat): Kestrel on blocking sockets driven by threads, never overlapped I/O.
+if (NetworkCompat.Classic) builder.Services.AddSingleton<Microsoft.AspNetCore.Connections.IConnectionListenerFactory, ClassicTransportFactory>();
 builder.Services.AddSingleton<PeerClient>();
 builder.Services.AddSingleton<PeerService>();
 builder.Services.AddSingleton<StreamCache>();
@@ -195,14 +201,11 @@ log.LogInformation("Ocean {Version} starting as {Mode}; node {Node} ({Name}); da
     OceanDefaults.AppVersion, isService ? "Windows service" : "background process", NodeIdentity.ShortId(identity.NodeId), cfg.NodeName,
     dataDir, cfg.LocalPort, cfg.PeerPort, cfg.DiscoveryPort);
 
-// Old-style network add-ons (non-IFS LSPs) make .NET networking crash the process within seconds. Ocean can't work
-// around them; name them in the log so the user knows what to remove.
-var addOns = WinsockCatalog.IncompatibleProviders();
-if (addOns.Count > 0)
-    log.LogWarning("incompatible network add-on(s) installed on this PC: {AddOns}. They report network operations twice, which " +
-                   "crashes .NET programs; Ocean bypasses them and uses Windows' own network provider (bypass active: {Bypass}).",
-                   WinsockCatalog.Describe(addOns), BaseSockets.Bypass);
-else if (BaseSockets.Bypass) log.LogInformation("network add-ons bypassed (OCEAN_BYPASS_LSP=1)");
+log.LogInformation("networking: {Mode}", NetworkCompat.Describe());
+if (NetworkCompat.AddOns.Count > 0 && !NetworkCompat.Classic)
+    log.LogWarning("network add-on(s) installed but the fast mode was chosen: {AddOns}", WinsockCatalog.Describe(NetworkCompat.AddOns));
+if (BaseSockets.UseBaseProvider) log.LogInformation("sockets on Windows' own provider (OCEAN_BASE_PROVIDER=1)");
+if (isService) ServiceRestart.AllowRestartOnExit(log);
 
 try
 {

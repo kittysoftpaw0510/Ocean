@@ -54,7 +54,7 @@ public sealed class PeerClient : IDisposable
                 RemoteCertificateValidationCallback = (_, cert, _, _) => Pinned(cert, id),
             },
         };
-        if (BaseSockets.Bypass) handler.ConnectCallback = BaseSockets.ConnectAsync; // skip incompatible network add-ons
+        if (NetworkCompat.Classic) handler.ConnectCallback = NetworkCompat.ConnectAsync; // blocking sockets on threads (see NetworkCompat)
         var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Ocean/" + OceanDefaults.AppVersion);
         return client;

@@ -14,10 +14,13 @@ namespace Ocean.Core;
 /// </summary>
 public static class WinsockCatalog
 {
-    public sealed record Provider(string Name, string? Path);
+    public sealed record Provider(string Name, string? Path, bool Ifs);
 
-    /// <summary>Layered providers whose sockets are not real kernel handles (the ones that break .NET). Empty when fine.</summary>
-    public static List<Provider> IncompatibleProviders()
+    /// <summary>Layered providers whose sockets are not real kernel handles (the ones known to break .NET).</summary>
+    public static List<Provider> IncompatibleProviders() => LayeredProviders().Where(p => !p.Ifs).ToList();
+
+    /// <summary>Every add-on layered into the stack (one entry per DLL). Empty on a clean PC.</summary>
+    public static List<Provider> LayeredProviders()
     {
         var result = new List<Provider>();
         try
@@ -39,10 +42,11 @@ public static class WinsockCatalog
                         var info = Marshal.PtrToStructure<WSAPROTOCOL_INFOW>(buffer + i * itemSize);
                         var layered = info.ProtocolChain.ChainLen != 1;          // 0 = the add-on itself, >1 = a chain through it
                         var ifs = (info.dwServiceFlags1 & XP1_IFS_HANDLES) != 0;
-                        if (!layered || ifs) continue;
+                        if (!layered) continue;
                         var name = string.IsNullOrWhiteSpace(info.szProtocol) ? info.ProviderId.ToString() : info.szProtocol.Trim();
                         var path = ProviderPath(info.ProviderId);
-                        if (seen.Add(path ?? name)) result.Add(new Provider(name, path));
+                        var key = (path ?? name) + (ifs ? "|ifs" : "");
+                        if (seen.Add(key)) result.Add(new Provider(StripChain(name), path, ifs));
                     }
                 }
                 finally { Marshal.FreeHGlobal(buffer); }
@@ -56,6 +60,13 @@ public static class WinsockCatalog
     /// <summary>One line for logs and messages, e.g. "Some VPN [C:\...\lsp.dll]".</summary>
     public static string Describe(IEnumerable<Provider> providers)
         => string.Join("; ", providers.Select(p => p.Path is null ? p.Name : $"{p.Name} [{p.Path}]"));
+
+    // "ASProxy over [MSAFD Tcpip [TCP/IP]]" -> "ASProxy": the DLL is what matters, not which base entry it sits on.
+    private static string StripChain(string name)
+    {
+        var i = name.IndexOf(" over [", StringComparison.OrdinalIgnoreCase);
+        return i > 0 ? name[..i].Trim() : name;
+    }
 
     private static string? ProviderPath(Guid id)
     {
