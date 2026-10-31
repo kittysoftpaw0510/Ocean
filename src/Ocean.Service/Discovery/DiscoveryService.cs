@@ -80,6 +80,8 @@ public sealed class DiscoveryService : BackgroundService
             _udp.Client.Bind(new IPEndPoint(IPAddress.Any, port));
             // Windows: don't let ICMP "port unreachable" from a dead peer kill the socket.
             try { _udp.Client.IOControl(-1744830452 /* SIO_UDP_CONNRESET */, new byte[] { 0 }, null); } catch { }
+            // Wake the blocking receive every second, so stopping never waits on it.
+            _udp.Client.ReceiveTimeout = 1000;
         }
         catch (Exception ex)
         {
@@ -88,7 +90,8 @@ public sealed class DiscoveryService : BackgroundService
         }
         _log.LogInformation("discovery on UDP {Port}, node {Id}; networks: {Nets}", port, NodeIdentity.ShortId(_identity.NodeId), Net.LocalNetworks.Describe());
 
-        var receive = ReceiveLoop(ct);
+        // Receiving runs on its own thread with plain blocking calls (see ReceiveLoop).
+        var receive = Task.Factory.StartNew(() => ReceiveLoop(ct), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         var send = SendLoop(ct);
         await Task.WhenAny(receive, send);
     }
@@ -104,15 +107,30 @@ public sealed class DiscoveryService : BackgroundService
         }
     }
 
-    private async Task ReceiveLoop(CancellationToken ct)
+    /// <summary>
+    /// Receives beacons with plain blocking calls on a dedicated thread, never overlapped (asynchronous) I/O.
+    /// On some PCs, software that hooks into Windows networking (VPN clients, virtual adapters, security tools)
+    /// makes an asynchronous UDP receive complete twice; .NET then kills the whole process ("'overlapped' has
+    /// already been freed" on an I/O completion thread), right after startup and on every restart. Blocking
+    /// receives never go through the I/O completion port, so that cannot happen.
+    /// </summary>
+    private void ReceiveLoop(CancellationToken ct)
     {
         var myTag = () => Realm.Tag(_config.Current.Secret);
+        var buffer = new byte[8192];
         while (!ct.IsCancellationRequested)
         {
             UdpReceiveResult r;
-            try { r = await _udp!.ReceiveAsync(ct); }
-            catch (OperationCanceledException) { break; }
-            catch (Exception ex) { _log.LogDebug(ex, "udp receive"); await Task.Delay(200, ct); continue; }
+            try
+            {
+                EndPoint from = new IPEndPoint(IPAddress.Any, 0);
+                var n = _udp!.Client.ReceiveFrom(buffer, ref from);
+                r = new UdpReceiveResult(buffer.AsSpan(0, n).ToArray(), (IPEndPoint)from);
+            }
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.TimedOut) { continue; }
+            catch (ObjectDisposedException) { break; }
+            catch (Exception ex) when (!ct.IsCancellationRequested) { _log.LogDebug(ex, "udp receive"); Thread.Sleep(200); continue; }
+            catch { break; }
             try
             {
                 if (r.Buffer.Length < 32 || r.Buffer.Length > 8192) continue;
@@ -125,7 +143,7 @@ public sealed class DiscoveryService : BackgroundService
                 if (b.T == "bye")
                 {
                     // a fresh "bye" (not a replayed one) puts the peer offline; it stays listed for a while
-                    if (_registry.TryGet(b.Id, out var leaving) && b.Ts >= leaving.LastTs)
+                    if (_registry.TryGet(b.Id, out var leaving) && leaving.Online && b.Ts >= leaving.LastTs)
                     {
                         _log.LogInformation("peer offline (said goodbye): {Name}", b.Name);
                         _registry.MarkOffline(b.Id);
