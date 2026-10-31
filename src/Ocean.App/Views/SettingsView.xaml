@@ -292,6 +292,21 @@
                                     <TextBlock Text="GB at most" Style="{StaticResource Muted}" VerticalAlignment="Center" Margin="10,0,0,0"/>
                                 </StackPanel>
                             </Grid>
+                            <Border Style="{StaticResource Divider}"/>
+                            <Grid Style="{StaticResource Row}">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Maximum CPU for Ocean" Style="{StaticResource RowTitle}"/>
+                                        <TextBlock Style="{StaticResource InfoTip}" ToolTip="Sharing, bridging and making lighter copies together never use more than this share of the PC's processor; Windows enforces it. Lighter copies get two thirds of it, so people watching always keep a share. The player in this app is not limited. 100 = no limit." AutomationProperties.HelpText="Sharing, bridging and making lighter copies together never use more than this share of the PC's processor; Windows enforces it. Lighter copies get two thirds of it, so people watching always keep a share. The player in this app is not limited. 100 = no limit."/>
+                                    </StackPanel>
+                                    <TextBlock Text="Ocean's background work never goes above this." Style="{StaticResource RowHint}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBox Text="{Binding CpuLimitPercent, UpdateSourceTrigger=PropertyChanged}" Width="56" HorizontalContentAlignment="Center" AutomationProperties.Name="Maximum CPU for Ocean in percent"/>
+                                    <TextBlock Text="%" Style="{StaticResource Muted}" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                                </StackPanel>
+                            </Grid>
                         </StackPanel>
                     </Border>
 

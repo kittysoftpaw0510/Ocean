@@ -53,6 +53,8 @@ public sealed class ServiceConfig
     public bool LightCopies { get; set; } = true;
     public int LightKeepDays { get; set; } = 7;
     public int LightCacheGB { get; set; } = 20;
+    /// <summary>Ocean's service (and the ffmpeg it starts) together use at most this much of the PC's CPU (100 = no cap).</summary>
+    public int CpuLimitPercent { get; set; } = CpuLimit.DefaultPercent;
     /// <summary>"auto" | "classic" | "fast": how sockets are driven (see Ocean.Core.NetworkCompat).</summary>
     public string NetworkMode { get; set; } = "auto";
     /// <summary>Disk space for watched video bytes from other PCs (GB, 0 = off): replays and seeking back cost no network.</summary>

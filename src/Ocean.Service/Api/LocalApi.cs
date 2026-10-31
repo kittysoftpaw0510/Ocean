@@ -228,7 +228,7 @@ public static class LocalApi
             var c = config.Current;
             return Results.Json(new SettingsDto
             {
-                LightCopies = c.LightCopies, LightKeepDays = c.LightKeepDays, LightCacheGB = c.LightCacheGB,
+                LightCopies = c.LightCopies, LightKeepDays = c.LightKeepDays, LightCacheGB = c.LightCacheGB, CpuLimitPercent = c.CpuLimitPercent,
                 LightReadyCount = light.ReadyCount, LightUsedBytes = light.UsedBytes, LightAvailable = Media.LightCopies.Ffmpeg is not null,
                 NodeName = c.NodeName, UserName = c.UserName, Secret = c.Secret, DownloadDir = c.DownloadDir,
                 UploadLimitKBps = c.UploadLimitKBps, SharingPaused = c.SharingPaused, NewDays = c.NewDays,
@@ -260,6 +260,7 @@ public static class LocalApi
                 c.LightCopies = dto.LightCopies;
                 c.LightKeepDays = Math.Clamp(dto.LightKeepDays, 1, 365);
                 c.LightCacheGB = Math.Clamp(dto.LightCacheGB, 1, 2000);
+                if (dto.CpuLimitPercent > 0) c.CpuLimitPercent = Math.Clamp(dto.CpuLimitPercent, 10, 100);
                 if (Enum.TryParse<NetworkMode>(dto.NetworkMode, true, out var mode)) c.NetworkMode = mode.ToString().ToLowerInvariant();
                 c.StreamCacheGB = Math.Clamp(dto.StreamCacheGB, 0, 500);
             });

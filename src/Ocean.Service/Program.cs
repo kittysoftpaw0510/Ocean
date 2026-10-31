@@ -226,6 +226,9 @@ if (NetworkCompat.AddOns.Count > 0 && !NetworkCompat.Classic)
     log.LogWarning("network add-on(s) installed but the fast mode was chosen: {AddOns}", WinsockCatalog.Describe(NetworkCompat.AddOns));
 if (BaseSockets.UseBaseProvider) log.LogInformation("sockets on Windows' own provider (OCEAN_BASE_PROVIDER=1)");
 if (isService) ServiceRestart.AllowRestartOnExit(log);
+// Ocean (and the ffmpeg it starts) stays under its CPU share; a change in Settings applies at once
+CpuLimit.Apply(config.Current.CpuLimitPercent, log);
+config.Changed += c => { if (c.CpuLimitPercent != CpuLimit.Percent) CpuLimit.Apply(c.CpuLimitPercent, log); };
 
 try
 {

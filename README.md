@@ -25,6 +25,8 @@ and every byte between them travels over mutually authenticated, end-to-end encr
   "Preparing…" meanwhile and can switch, or are switched when playback keeps stalling. The original is never
   touched and downloads always get it. Copies are kept for a number of days after the last viewing, within a disk
   limit; both are set in Settings, where the feature can also be turned off.
+- **Light on the PC**: Ocean's service, including making lighter copies, never uses more than 25 % of the processor
+  (Windows enforces it; adjustable in Settings). The player in the app is not limited.
 - **Player**: speed control (0.25× to 2×) and A-B repeat with markers on the seek bar.
 - **New videos are highlighted** (since your last visit to that node) and you get a notification
   when a node adds something.

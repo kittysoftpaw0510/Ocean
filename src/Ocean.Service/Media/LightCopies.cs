@@ -189,13 +189,15 @@ public sealed class LightCopies : BackgroundService
         {
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = false,
         };
+        // as many threads as its CPU share can keep busy (more would only wait for their turn, and take memory)
+        var threads = CpuLimit.FfmpegThreads().ToString();
         foreach (var a in new[]
                  {
                      "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1",
-                     "-i", src, "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn",
+                     "-threads", threads, "-i", src, "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn",
                      "-vf", "scale=-2:'min(720,ih)'",
                      "-c:v", "libx264", "-preset", "veryfast", "-crf", "25", "-maxrate", "1800k", "-bufsize", "3600k",
-                     "-profile:v", "main", "-level", "4.0", "-pix_fmt", "yuv420p", "-g", "120",
+                     "-profile:v", "main", "-level", "4.0", "-pix_fmt", "yuv420p", "-g", "120", "-threads", threads,
                      "-c:a", "aac", "-b:a", "96k", "-ac", "2",
                      "-movflags", "+faststart", tmp,
                  }) psi.ArgumentList.Add(a);
@@ -203,6 +205,7 @@ public sealed class LightCopies : BackgroundService
         using var p = new Process { StartInfo = psi };
         p.Start();
         try { p.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
+        using var cap = CpuLimit.CapChild(p, _log); // its share of Ocean's CPU budget; closing it also ends ffmpeg
         var errors = new Queue<string>();
         var readErr = Task.Run(async () =>
         {

@@ -222,6 +222,16 @@ per-item policies, pending requests and grants, downloads, settings. See `Api/Lo
   same position with the lighter URL, and two stalls after the first 10 s switch automatically. "Watch original"
   switches back and is remembered for the session.
 
+## CPU limit (`Ocean.Service.State.CpuLimit`)
+
+At start the service puts itself in a Windows job object with a hard CPU cap (`CpuLimitPercent`, 25 % of the
+whole PC by default, 100 = none; a change in Settings applies at once). Processes it starts join the job, so
+ffmpeg is inside the same budget. ffmpeg also gets a nested job capped at two thirds of it; a nested job's rate is a
+share of its parent's budget, not of the PC. Both jobs kill their processes when closed, so ffmpeg never
+outlives the service. ffmpeg's thread count follows its share (more threads would only wait, and take memory).
+Measured on 28 cores: a lighter copy of a 14-min 1080p video took 54 s at 17 % average (21 % peak) instead of
+30 s at 61 %; streaming under the cap still ran at 2.1 Gbit/s. The app's player is not capped.
+
 ## Downloads
 
 Jobs are persisted (`downloads.json`) and resumed with HTTP ranges from a `.oceanpart` file. Destination

@@ -304,6 +304,8 @@ public sealed class SettingsDto
     public int LightKeepDays { get; set; } = 7;
     /// <summary>Disk space for lighter copies (GB).</summary>
     public int LightCacheGB { get; set; } = 20;
+    /// <summary>Ocean's service (and ffmpeg) use at most this share of the PC's CPU, in percent (100 = no cap).</summary>
+    public int CpuLimitPercent { get; set; } = 25;
     /// <summary>Read-only: copies ready now, their size, and whether ffmpeg was found.</summary>
     public int LightReadyCount { get; set; }
     public long LightUsedBytes { get; set; }
