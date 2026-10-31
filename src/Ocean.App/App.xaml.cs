@@ -24,12 +24,25 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        AppLog.Start(e.Args);
+        MainViewModel.NetworkAddOns = WinsockCatalog.IncompatibleProviders();
+        if (MainViewModel.NetworkAddOns.Count > 0)
+            AppLog.Warn("App", "incompatible network add-on(s) on this PC (Ocean goes around them): " + WinsockCatalog.Describe(MainViewModel.NetworkAddOns));
         DispatcherUnhandledException += OnUnhandled;
-        TaskScheduler.UnobservedTaskException += (_, args) => args.SetObserved();
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            AppLog.Warn("App", "background task failed (ignored)", args.Exception.InnerException ?? args.Exception);
+            args.SetObserved();
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+            AppLog.Error("App", "app crashed", args.ExceptionObject as Exception);
 
         _instance = new SingleInstance("Ocean.App");
         if (!_instance.IsFirst)
         {
+            AppLog.Info("App", _instance.OwnedByOtherUser
+                ? "another user already has Ocean open on this PC; exiting"
+                : "already running in this session; bringing that window forward and exiting");
             var shown = false;
             if (!_instance.OwnedByOtherUser)
             {
@@ -56,7 +69,9 @@ public partial class App : Application
         var minimized = e.Args.Contains("--minimized", StringComparer.OrdinalIgnoreCase);
         try
         {
-            var (api, status, _) = await ServiceConnector.ConnectAsync(null, CancellationToken.None);
+            var (api, status, spawned) = await ServiceConnector.ConnectAsync(null, CancellationToken.None);
+            AppLog.Info("App", $"connected to the service: Ocean {status.Version}, {(status.RunningAsService ? "Windows service" : spawned ? "background process started by this app" : "background process")}, " +
+                               $"node {status.NodeName} ({status.UserName})");
             _vm = new MainViewModel(api);
             _window = new MainWindow(_vm);
             _vm.Dialogs = _window;
@@ -74,7 +89,9 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Ocean could not start", MessageBoxButton.OK, MessageBoxImage.Error);
+            AppLog.Error("App", "could not start", ex);
+            var advice = MainViewModel.NetworkAddOns.Count > 0 ? "\n\n" + MainViewModel.NetworkAddOnAdvice() : "";
+            MessageBox.Show(ex.Message + advice, "Ocean could not start", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown();
         }
     }
@@ -128,6 +145,7 @@ public partial class App : Application
     {
         if (_exiting) return;
         _exiting = true;
+        AppLog.Info("App", stopService ? "exit requested (and stop sharing)" : "exit requested");
         try
         {
             if (stopService && _vm is not null)
@@ -153,19 +171,14 @@ public partial class App : Application
     private void OnUnhandled(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         e.Handled = true;
-        try
-        {
-            var dir = Path.Combine(OceanDefaults.DataDir, "logs");
-            Directory.CreateDirectory(dir);
-            File.AppendAllText(Path.Combine(dir, "app-errors.log"), $"{DateTime.Now:s} {e.Exception}\n\n");
-        }
-        catch { }
+        AppLog.Error("App", "unhandled error in the window (kept running)", e.Exception);
         _vm?.Toast("Something went wrong", e.Exception.Message, "error");
         Debug.WriteLine(e.Exception);
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        AppLog.Info("App", $"exit (code {e.ApplicationExitCode})");
         _tray?.Dispose();
         _instance?.Dispose();
         base.OnExit(e);

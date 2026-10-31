@@ -76,6 +76,8 @@ builder.Services.AddSingleton<AccessService>();
 builder.Services.AddSingleton<RelayHub>();
 builder.Services.AddSingleton<RelayWorker>();
 builder.Services.AddSingleton<FirewallRules>();
+// An incompatible network add-on on this PC: serve on sockets of Windows' own provider instead (see BaseSockets).
+if (BaseSockets.Bypass) builder.Services.AddSingleton<Microsoft.AspNetCore.Connections.IConnectionListenerFactory, BaseProviderTransportFactory>();
 builder.Services.AddSingleton<PeerClient>();
 builder.Services.AddSingleton<PeerService>();
 builder.Services.AddSingleton<StreamCache>();
@@ -192,6 +194,15 @@ app.Services.GetRequiredService<PeerService>();
 log.LogInformation("Ocean {Version} starting as {Mode}; node {Node} ({Name}); data {Dir}; local {Local}, peers {Peer}, discovery {Disc}",
     OceanDefaults.AppVersion, isService ? "Windows service" : "background process", NodeIdentity.ShortId(identity.NodeId), cfg.NodeName,
     dataDir, cfg.LocalPort, cfg.PeerPort, cfg.DiscoveryPort);
+
+// Old-style network add-ons (non-IFS LSPs) make .NET networking crash the process within seconds. Ocean can't work
+// around them; name them in the log so the user knows what to remove.
+var addOns = WinsockCatalog.IncompatibleProviders();
+if (addOns.Count > 0)
+    log.LogWarning("incompatible network add-on(s) installed on this PC: {AddOns}. They report network operations twice, which " +
+                   "crashes .NET programs; Ocean bypasses them and uses Windows' own network provider (bypass active: {Bypass}).",
+                   WinsockCatalog.Describe(addOns), BaseSockets.Bypass);
+else if (BaseSockets.Bypass) log.LogInformation("network add-ons bypassed (OCEAN_BYPASS_LSP=1)");
 
 try
 {

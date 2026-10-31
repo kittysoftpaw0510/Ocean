@@ -55,6 +55,16 @@ the catalog version and share count, so browsing nodes refetch a catalog only wh
 
 Beacon: `{v, t, id, pk, name, user, host, port, realm, cat, shares, ts, sig}`.
 
+### Network add-ons (Winsock LSPs)
+
+Some VPN, proxy, "network accelerator" and security programs install an old-style Winsock Layered Service
+Provider. A non-IFS one completes overlapped I/O a second time, which .NET (I/O completion ports, skip-on-success)
+cannot survive: the process dies with "'overlapped' has already been freed". Native programs like IPmsg don't use
+completion ports and are unaffected. When such a provider is installed (`WinsockCatalog`), Ocean creates every
+socket on the base MSAFD provider instead (`BaseSockets`: `WSASocketW` with the base `WSAPROTOCOL_INFOW`): Kestrel
+listens and accepts through `BaseProviderTransportFactory`, HttpClient connects through `ConnectCallback`, and
+discovery's UDP socket is replaced. The add-on is never involved. `OCEAN_BYPASS_LSP=1` forces this for testing.
+
 ### Loopback and echo cases
 
 - **Own beacons.** Broadcasts are delivered back to the sender (and once per adapter). A node drops any beacon
@@ -186,7 +196,7 @@ catalog/         per-share item index + version
 thumbs/          own thumbnails;  cache/thumbs/<peer>/  remote thumbnails
 cache/streams/   watched video bytes from other PCs (sparse files + block maps)
 cache/peers/     last known catalog of each node (offline view, delta base)
-logs/            service-YYYYMMDD.log (14 days), app-errors.log
+logs/            service-YYYYMMDD.log + app-YYYYMMDD.log (14 days; the app log falls back to %LocalAppData%\Ocean\logs)
 ```
 
 ## Possible next steps

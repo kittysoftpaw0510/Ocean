@@ -112,5 +112,9 @@ public partial class MainWindow : Window, IDialogs
         return dlg.ShowDialog(Owner_) == true ? dlg.FileNames : null;
     }
 
-    public void ShowError(string title, string message) => ConfirmWindow.Show(Owner_, title, message, "OK", null, true);
+    public void ShowError(string title, string message)
+    {
+        Services.AppLog.Warn("Dialog", $"{title}: {message}");
+        ConfirmWindow.Show(Owner_, title, message, "OK", null, true);
+    }
 }

@@ -30,20 +30,25 @@ public static class ServiceConnector
         progress?.Report("Connecting to the Ocean service…");
         var existing = await TryConnectAsync(ct);
         if (existing is not null) return (existing.Value.Api, existing.Value.Status, false);
+        AppLog.Info("Service", $"service not answering on 127.0.0.1:{LocalPort} ({LastError ?? "unknown"})");
 
         // Portable/dev runs (OCEAN_DATA_DIR set) always use their own background process.
         var portable = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("OCEAN_DATA_DIR"));
         var installed = portable ? null : InstalledServiceStatus();
         if (installed is not null)
         {
+            AppLog.Info("Service", $"Windows service installed, state {installed}");
             progress?.Report("Waiting for the Ocean service…");
             if (installed is ServiceControllerStatus.Stopped or ServiceControllerStatus.Paused)
             {
                 // Setup grants signed-in users the right to start (not stop) the service.
-                try { using var sc = new ServiceController(OceanDefaults.ServiceName); sc.Start(); } catch { }
+                try { using var sc = new ServiceController(OceanDefaults.ServiceName); sc.Start(); AppLog.Info("Service", "asked Windows to start the service"); }
+                catch (Exception ex) { AppLog.Warn("Service", "could not start the Windows service", ex); }
             }
+            var started = Stopwatch.StartNew();
             var r = await WaitAsync(TimeSpan.FromSeconds(90), ct);
-            if (r is not null) return (r.Value.Api, r.Value.Status, false);
+            if (r is not null) { AppLog.Info("Service", $"service answered after {started.Elapsed.TotalSeconds:0.0} s"); return (r.Value.Api, r.Value.Status, false); }
+            AppLog.Error("Service", $"Windows service still not answering after 90 s (state {InstalledServiceStatus()}, last error: {LastError})");
             throw new InvalidOperationException(
                 "The Ocean service is installed but is not answering.\n\n" +
                 "Open Services (services.msc), start “Ocean LAN Video Sharing”, then open Ocean again. " +
@@ -61,11 +66,13 @@ public static class ServiceConnector
             WindowStyle = ProcessWindowStyle.Hidden,
             WorkingDirectory = AppContext.BaseDirectory,
         };
+        AppLog.Info("Service", "no Windows service: starting " + exe + " as a background process");
         try { Process.Start(psi); }
-        catch (Exception ex) { throw new InvalidOperationException("Could not start Ocean.Service.exe: " + ex.Message, ex); }
+        catch (Exception ex) { AppLog.Error("Service", "could not start the background service", ex); throw new InvalidOperationException("Could not start Ocean.Service.exe: " + ex.Message, ex); }
 
         var spawned = await WaitAsync(TimeSpan.FromSeconds(25), ct);
         if (spawned is not null) return (spawned.Value.Api, spawned.Value.Status, true);
+        AppLog.Error("Service", $"background service did not answer within 25 s (last error: {LastError})");
         throw new System.TimeoutException("The Ocean service did not start. Check the logs in " + Path.Combine(OceanDefaults.DataDir, "logs"));
     }
 
@@ -81,22 +88,27 @@ public static class ServiceConnector
         return null;
     }
 
+    /// <summary>Why the last connection attempt failed (for the log).</summary>
+    public static string? LastError { get; private set; }
+
     public static async Task<(ApiClient Api, NodeStatusDto Status)?> TryConnectAsync(CancellationToken ct)
     {
         string token;
         try { token = File.Exists(OceanDefaults.LocalTokenPath) ? File.ReadAllText(OceanDefaults.LocalTokenPath).Trim() : ""; }
         catch { token = ""; }
-        if (token.Length == 0) return null;
+        if (token.Length == 0) { LastError = "no access token yet (" + OceanDefaults.LocalTokenPath + ")"; return null; }
         var api = new ApiClient(LocalPort, token);
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(3));
             var status = await api.GetAsync<NodeStatusDto>("/api/status", cts.Token);
+            LastError = null;
             return status is null ? null : (api, status);
         }
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or ApiException)
         {
+            LastError = ex is OperationCanceledException ? "no answer within 3 s" : (ex.InnerException?.Message ?? ex.Message);
             return null;
         }
     }

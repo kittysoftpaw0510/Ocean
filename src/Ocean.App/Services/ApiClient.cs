@@ -29,7 +29,9 @@ public sealed class ApiClient
     {
         BaseUrl = $"http://127.0.0.1:{port}";
         Token = token;
-        _http = new HttpClient { BaseAddress = new Uri(BaseUrl), Timeout = TimeSpan.FromSeconds(60) };
+        // An incompatible network add-on on this PC: connect on Windows' own provider (see BaseSockets).
+        HttpMessageHandler transport = BaseSockets.Bypass ? new SocketsHttpHandler { ConnectCallback = BaseSockets.ConnectAsync } : new HttpClientHandler();
+        _http = new HttpClient(new LoggingHandler(transport)) { BaseAddress = new Uri(BaseUrl), Timeout = TimeSpan.FromSeconds(60) };
         _http.DefaultRequestHeaders.Add("X-Ocean-Local", token);
     }
 
@@ -135,5 +137,42 @@ public sealed class ApiException : Exception
         }
         catch { }
         return new ApiException((int)resp.StatusCode, code, message);
+    }
+}
+
+/// <summary>
+/// Logs calls to the service that fail, get an error answer, or are slow (successful calls are not logged: the
+/// app polls often). Never logs headers, so the access token stays out of the log.
+/// </summary>
+internal sealed class LoggingHandler : DelegatingHandler
+{
+    private static readonly TimeSpan Slow = TimeSpan.FromSeconds(3);
+
+    public LoggingHandler(HttpMessageHandler inner) : base(inner) { }
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var what = $"{request.Method} {request.RequestUri?.PathAndQuery}";
+        try
+        {
+            var resp = await base.SendAsync(request, ct);
+            var code = (int)resp.StatusCode;
+            var missingThumb = code == 404 && what.Contains("/thumb/", StringComparison.Ordinal);
+            if (!resp.IsSuccessStatusCode && code != 304 && !missingThumb)
+                AppLog.Warn("Api", $"{what} -> {code} {resp.ReasonPhrase} in {sw.ElapsedMilliseconds} ms");
+            else if (sw.Elapsed > Slow && !what.Contains("/api/events", StringComparison.Ordinal))
+                AppLog.Warn("Api", $"{what} slow: {sw.ElapsedMilliseconds} ms");
+            return resp;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw; // the app gave up on purpose (closed a page, a 3 s connection probe...)
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn("Api", $"{what} failed after {sw.ElapsedMilliseconds} ms", ex);
+            throw;
+        }
     }
 }

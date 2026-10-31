@@ -112,8 +112,8 @@ public partial class BrowseViewModel : ObservableObject
             if (CantReach) { EmptyText = ""; IsEmpty = false; }
             else Rebuild(); // e.g. offline with nothing remembered: "Nothing to show here."
         }
-        catch (ApiException ex) { Error = ex.Message; }
-        catch (Exception ex) { Error = "Could not load this node: " + ex.Message; }
+        catch (ApiException ex) { Error = ex.Message; AppLog.Warn("Browse", $"{Peer.Label}: {ex.Message} ({ex.StatusCode} {ex.Code})"); }
+        catch (Exception ex) { Error = "Could not load this node: " + ex.Message; AppLog.Warn("Browse", $"{Peer.Label}: could not load", ex); }
         finally { IsLoading = false; }
     }
 

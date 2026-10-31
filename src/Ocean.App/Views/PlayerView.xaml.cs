@@ -291,6 +291,7 @@ public partial class PlayerView : UserControl
         if (_vm is null) return;
         _vm.IsPlaying = false; _vm.IsBuffering = false;
         _vm.Error = e.ErrorException?.Message ?? "Unknown playback error";
+        Services.AppLog.Warn("Player", $"playback failed: {_vm.Title} ({_vm.Peer?.Label})", e.ErrorException);
         SetChrome(true);
     }
 

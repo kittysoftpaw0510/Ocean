@@ -75,6 +75,12 @@ public sealed class DiscoveryService : BackgroundService
         try
         {
             _udp = new UdpClient(AddressFamily.InterNetwork);
+            if (BaseSockets.Bypass)
+            {
+                // skip incompatible network add-ons: use a socket on Windows' own provider
+                _udp.Client.Dispose();
+                _udp.Client = BaseSockets.Create(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            }
             _udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
             _udp.EnableBroadcast = true;
             _udp.Client.Bind(new IPEndPoint(IPAddress.Any, port));

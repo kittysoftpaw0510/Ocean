@@ -75,6 +75,7 @@ public partial class MainViewModel : ObservableObject
 
     public async Task InitializeAsync(NodeStatusDto status)
     {
+        AppLog.Info("Main", "loading nodes, shares, downloads and settings");
         ApplyStatus(status);
         Connected = true;
         await ClaimUserNameAsync(status);
@@ -86,6 +87,7 @@ public partial class MainViewModel : ObservableObject
         await SettingsVm.LoadAsync();
         await LoadPendingAsync();
         StartEventLoop();
+        AppLog.Info("Main", $"ready: {Peers.Count} nodes known ({Peers.Count(p => p.Online)} online)");
         UpdateStatusText();
     }
 
@@ -126,6 +128,7 @@ public partial class MainViewModel : ObservableObject
                 if (s is null) return;
                 s.UserName = me;
                 await Api.PutAsync("/api/settings", s);
+                AppLog.Info("Main", $"this PC now announces the Windows user name '{me}' instead of the PC name");
                 await ReloadStatusAsync();
             }
             k.SetValue("NameClaimed", status.NodeId);
@@ -163,9 +166,10 @@ public partial class MainViewModel : ObservableObject
                     }
                 }
                 catch (OperationCanceledException) { break; }
-                catch
+                catch (Exception ex)
                 {
                     failures++;
+                    AppLog.Warn("Events", $"live updates from the service interrupted (attempt {failures})", ex);
                     await Application.Current.Dispatcher.InvokeAsync(() => { Connected = false; UpdateStatusText(); });
                     await Task.Delay(Math.Min(10000, 1000 * failures), cts.Token).ContinueWith(_ => { });
                     if (cts.IsCancellationRequested) break;
@@ -193,15 +197,43 @@ public partial class MainViewModel : ObservableObject
     /// </summary>
     public void Error(string title, Exception ex)
     {
-        if (ApiClient.IsServiceUnreachable(ex)) { ConnectionLost(); return; }
+        if (ApiClient.IsServiceUnreachable(ex)) { AppLog.Warn("Error", $"{title}: the service is not reachable", ex); ConnectionLost(); return; }
+        AppLog.Warn("Error", title, ex);
         Toast(title, ex.Message, "error");
     }
+
+    // ---- old-style network add-ons that crash the service (see WinsockCatalog)
+
+    public static IReadOnlyList<WinsockCatalog.Provider> NetworkAddOns { get; set; } = Array.Empty<WinsockCatalog.Provider>();
+    private bool _addOnsExplained;
+    private readonly Queue<DateTime> _recentLosses = new();
+
+    public static string NetworkAddOnAdvice() =>
+        "Ocean's background service keeps stopping. This PC has a network add-on that is known to cause that:\n\n" +
+        string.Join("\n", NetworkAddOns.Select(p => "  •  " + p.Name + (p.Path is null ? "" : "\n      " + p.Path))) + "\n\n" +
+        "Some VPN, proxy, \"network accelerator\" and security programs install such add-ons. Ocean already goes around " +
+        "it, but if the service still keeps stopping, uninstall the program that installed it, or open Command Prompt " +
+        "as administrator, run\n" +
+        "    netsh winsock reset\n" +
+        "and restart Windows (that program may need to be reinstalled afterwards).";
 
     public void ConnectionLost()
     {
         Connected = false;
         UpdateStatusText();
         if (Interlocked.Exchange(ref _recovering, 1) == 1) return;
+        AppLog.Warn("Main", "lost the connection to the service; reconnecting");
+        // The service keeps dying (3 times within 3 minutes) and an add-on known to cause that is installed: say so,
+        // once. Otherwise the only visible symptom would be "Reconnecting..." again and again.
+        var now = DateTime.UtcNow;
+        _recentLosses.Enqueue(now);
+        while (_recentLosses.Count > 0 && now - _recentLosses.Peek() > TimeSpan.FromMinutes(3)) _recentLosses.Dequeue();
+        if (NetworkAddOns.Count > 0 && !_addOnsExplained && _recentLosses.Count >= 3)
+        {
+            _addOnsExplained = true;
+            AppLog.Warn("Main", "service keeps stopping; explaining the network add-on to the user");
+            Application.Current.Dispatcher.InvokeAsync(() => Dialogs.ShowError("Ocean's service keeps stopping", NetworkAddOnAdvice()));
+        }
         _ = Task.Run(async () =>
         {
             try
@@ -223,6 +255,7 @@ public partial class MainViewModel : ObservableObject
     /// <summary>The service answers again: refresh everything that may have been missed meanwhile.</summary>
     private async Task ReconnectedAsync(ApiClient api, NodeStatusDto status)
     {
+        AppLog.Info("Main", $"reconnected to the service (Ocean {status.Version}, node {status.NodeName})");
         Api = api; Thumbs = new ThumbCache(Api);
         ApplyStatus(status); Connected = true; UpdateStatusText();
         await ClaimUserNameAsync(status); // may have been missed if the service was away when the app started
@@ -249,6 +282,7 @@ public partial class MainViewModel : ObservableObject
                     var change = doc.RootElement.TryGetProperty("change", out var c) ? c.GetString() : "";
                     var name = doc.RootElement.TryGetProperty("user", out var u) && u.GetString() is { Length: > 0 } us ? us : doc.RootElement.GetProperty("name").GetString() ?? "";
                     var id = doc.RootElement.GetProperty("id").GetString() ?? "";
+                    if (change is not ("updated" or "versionchanged")) AppLog.Info("Peers", $"{change}: {name} ({(id.Length > 12 ? id[..12] : id)})");
                     if (change == "added" && _initialPeersLoaded) Toast("Node online", $"{name} joined your network.", "info", () => SelectPeerById(id));
                     if (change == "online" && _initialPeersLoaded) Toast("Back online", $"{name} is reachable again.", "success", () => SelectPeerById(id));
                     if (change == "offline")
@@ -630,6 +664,7 @@ public partial class MainViewModel : ObservableObject
 
     public void Toast(string title, string message, string kind = "info", Action? onClick = null)
     {
+        AppLog.Info("Toast", $"[{kind}] {title}: {message}");
         void Add()
         {
             var t = new ToastVm { Title = title, Message = message, Kind = kind, OnClick = onClick };

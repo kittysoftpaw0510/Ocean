@@ -140,6 +140,7 @@ public partial class PlayerViewModel : ObservableObject
     {
         Item = item; Peer = peer; Url = url; Error = null;
         _playing = item; _playingPeer = peer; StartAt = Math.Max(0, startAt);
+        Services.AppLog.Info("Player", $"play {item.Name} from {peer.Label}" + (StartAt > 0 ? $" at {StartAt:0} s" : ""));
         Title = item.Name;
         Subtitle = $"{peer.Label}  ·  {item.ShareName}{(item.Folder.Length > 0 ? "  ›  " + item.Folder : "")}{(item.ResolutionText.Length > 0 ? "  ·  " + item.ResolutionText : "")}";
         PositionSeconds = 0;

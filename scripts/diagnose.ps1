@@ -57,6 +57,10 @@ Try-Add 'Firewall rules mentioning Ocean' {
         "{0} | {1} | {2} | enabled={3} | profile={4} | {5}" -f $_.DisplayName, $_.Direction, $_.Action, $_.Enabled, $_.Profile, $app
     }
 }
+Try-Add 'Network add-ons (Winsock catalog; layered entries that lack 0x20000 in Service Flags crash Ocean)' {
+    netsh winsock show catalog | Select-String -Pattern 'Description|Provider Path|Service Flags|Protocol Chain Length|^-{5,}' |
+        ForEach-Object { $_.Line.Trim() }
+}
 Try-Add 'Security software' {
     Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct -ErrorAction SilentlyContinue | ForEach-Object { $_.displayName }
     Get-CimInstance -Namespace root/SecurityCenter2 -ClassName FirewallProduct -ErrorAction SilentlyContinue | ForEach-Object { "firewall: " + $_.displayName }
@@ -77,7 +81,15 @@ Try-Add 'Service log (end)' {
     Get-ChildItem (Join-Path $data 'logs\service-*.log') -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 2 |
         ForEach-Object { "--- $($_.Name)"; Get-Content $_.FullName -Tail 300 }
 }
-Try-Add 'App errors (end)' { Get-Content (Join-Path $data 'logs\app-errors.log') -Tail 80 -ErrorAction SilentlyContinue }
+Try-Add 'App log (end)' {
+    # app-YYYYMMDD.log lives next to the service log, or in the user's own folder when that isn't writable
+    $dirs = @((Join-Path $data 'logs'), (Join-Path $env:LOCALAPPDATA 'Ocean\logs'))
+    Get-ChildItem ($dirs | ForEach-Object { Join-Path $_ 'app-*.log' }) -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime | Select-Object -Last 2 |
+        ForEach-Object { "--- $($_.FullName)"; Get-Content $_.FullName -Tail 300 }
+    $old = Join-Path $data 'logs\app-errors.log'
+    if (Test-Path $old) { "--- $old (older versions)"; Get-Content $old -Tail 40 }
+}
 
 $sb.ToString() | Set-Content -Encoding UTF8 $out
 Write-Host "Saved: $out" -ForegroundColor Green
