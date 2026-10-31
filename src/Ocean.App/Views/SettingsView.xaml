@@ -29,6 +29,18 @@
             <Setter Property="TextWrapping" Value="Wrap"/>
             <Setter Property="Margin" Value="0,2,0,0"/>
         </Style>
+        <!-- "i" next to a setting's title: the full explanation, on hover -->
+        <Style x:Key="InfoTip" TargetType="TextBlock" BasedOn="{StaticResource Icon}">
+            <Setter Property="Text" Value="&#xE946;"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Margin" Value="6,1,0,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+            <Setter Property="Cursor" Value="Help"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="ToolTipService.InitialShowDelay" Value="150"/>
+            <Setter Property="ToolTipService.ShowDuration" Value="60000"/>
+        </Style>
         <Style x:Key="Divider" TargetType="Border">
             <Setter Property="Height" Value="1"/>
             <Setter Property="Background" Value="{StaticResource Border}"/>
@@ -55,7 +67,7 @@
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
                                     <TextBlock Text="Your name" Style="{StaticResource RowTitle}"/>
-                                    <TextBlock Text="Shown to other people next to your shares." Style="{StaticResource RowHint}"/>
+                                    <TextBlock Text="What others see next to your shares." Style="{StaticResource RowHint}"/>
                                 </StackPanel>
                                 <TextBox Grid.Column="1" Width="280" Text="{Binding UserName, UpdateSourceTrigger=PropertyChanged}"/>
                             </Grid>
@@ -78,9 +90,11 @@
                             <Grid Style="{StaticResource Row}">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
-                                    <TextBlock Text="Private group (shared secret)" Style="{StaticResource RowTitle}"/>
-                                    <TextBlock Style="{StaticResource RowHint}"
-                                               Text="Empty: everyone on your network sees you. With a secret, only PCs that enter the same secret can see you and your shares. The secret never leaves this PC."/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Private group (shared secret)" Style="{StaticResource RowTitle}"/>
+                                        <TextBlock Style="{StaticResource InfoTip}" ToolTip="Empty: everyone on your network sees you. With a secret, only PCs that enter the same secret can see you and your shares. The secret never leaves this PC." AutomationProperties.HelpText="Empty: everyone on your network sees you. With a secret, only PCs that enter the same secret can see you and your shares. The secret never leaves this PC."/>
+                                    </StackPanel>
+                                    <TextBlock Text="Only PCs with the same secret see each other." Style="{StaticResource RowHint}"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                     <Grid Width="200">
@@ -99,7 +113,7 @@
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
                                     <TextBlock Text="Upload speed limit" Style="{StaticResource RowTitle}"/>
-                                    <TextBlock Text="Caps the bandwidth used to stream and serve your videos to others." Style="{StaticResource RowHint}"/>
+                                    <TextBlock Text="Caps what this PC sends to others." Style="{StaticResource RowHint}"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                     <Slider Minimum="0" Maximum="20480" TickFrequency="256" IsSnapToTickEnabled="True" Value="{Binding UploadLimitKBps}" Width="200" VerticalAlignment="Center"/>
@@ -110,8 +124,11 @@
                             <Grid Style="{StaticResource Row}">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
-                                    <TextBlock Text="Keep offline nodes visible" Style="{StaticResource RowTitle}"/>
-                                    <TextBlock Text="When a PC goes offline, its last known shares stay listed (dimmed) for this long." Style="{StaticResource RowHint}"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Keep offline nodes visible" Style="{StaticResource RowTitle}"/>
+                                        <TextBlock Style="{StaticResource InfoTip}" ToolTip="When a PC goes offline, its last known shares stay listed (dimmed) for this long." AutomationProperties.HelpText="When a PC goes offline, its last known shares stay listed (dimmed) for this long."/>
+                                    </StackPanel>
+                                    <TextBlock Text="Offline PCs stay listed, dimmed, for this long." Style="{StaticResource RowHint}"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                     <TextBox Text="{Binding OfflineKeepHours, UpdateSourceTrigger=PropertyChanged}" Width="56" HorizontalContentAlignment="Center"/>
@@ -122,11 +139,13 @@
                             <Grid Style="{StaticResource Row}">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
-                                    <TextBlock Text="Allow connections on Public networks" Style="{StaticResource RowTitle}"/>
-                                    <TextBlock Style="{StaticResource RowHint}"
-                                               Text="Windows marks many home and office networks as Public, and its firewall then stops other PCs from opening your shares. Turn this off on networks you don't trust, like a coffee shop's Wi-Fi."/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Allow connections on Public networks" Style="{StaticResource RowTitle}"/>
+                                        <TextBlock Style="{StaticResource InfoTip}" ToolTip="Windows marks many home and office networks as Public, and its firewall then stops other PCs from opening your shares. Turn this off on networks you don't trust, like a coffee shop's Wi-Fi." AutomationProperties.HelpText="Windows marks many home and office networks as Public, and its firewall then stops other PCs from opening your shares. Turn this off on networks you don't trust, like a coffee shop's Wi-Fi."/>
+                                    </StackPanel>
+                                    <TextBlock Text="Needed when Windows calls your network Public." Style="{StaticResource RowHint}"/>
                                     <TextBlock Style="{StaticResource RowHint}" Margin="0,4,0,0" Visibility="{Binding FirewallManaged, Converter={StaticResource InvBoolToVis}}"
-                                               Text="Ocean isn't running as a Windows service on this PC, so it can't change Windows Firewall itself. Reinstall Ocean with the service option to let it."/>
+                                               Text="Ocean can't change the firewall here: reinstall it with the service option."/>
                                 </StackPanel>
                                 <CheckBox Grid.Column="1" Style="{StaticResource Switch}" IsChecked="{Binding AllowPublicNetworks}" AutomationProperties.Name="Allow connections on Public networks"/>
                             </Grid>
@@ -134,9 +153,11 @@
                             <Grid Style="{StaticResource Row}">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
-                                    <TextBlock Text="Let other PCs reach each other through this PC" Style="{StaticResource RowTitle}"/>
-                                    <TextBlock Style="{StaticResource RowHint}"
-                                               Text="When two PCs have no network path to each other but both reach this one, their videos pass through here (they see each other as 'via' this PC). That traffic counts against the upload limit above, and people watching go before downloads. Turn it off if this PC can't spare the bandwidth."/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Let other PCs reach each other through this PC" Style="{StaticResource RowTitle}"/>
+                                        <TextBlock Style="{StaticResource InfoTip}" ToolTip="When two PCs have no network path to each other but both reach this one, their videos pass through here (they see each other as 'via' this PC). That traffic counts against the upload limit above, and people watching go before downloads. Turn it off if this PC can't spare the bandwidth." AutomationProperties.HelpText="When two PCs have no network path to each other but both reach this one, their videos pass through here (they see each other as 'via' this PC). That traffic counts against the upload limit above, and people watching go before downloads. Turn it off if this PC can't spare the bandwidth."/>
+                                    </StackPanel>
+                                    <TextBlock Text="Passes videos between PCs that can&#x27;t reach each other." Style="{StaticResource RowHint}"/>
                                 </StackPanel>
                                 <CheckBox Grid.Column="1" Style="{StaticResource Switch}" IsChecked="{Binding AllowBridging}" AutomationProperties.Name="Let other PCs reach each other through this PC"/>
                             </Grid>
@@ -144,11 +165,12 @@
                             <Grid Style="{StaticResource Row}">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
-                                    <TextBlock Text="Networking" Style="{StaticResource RowTitle}"/>
-                                    <TextBlock Style="{StaticResource RowHint}"
-                                               Text="Fast uses Windows' asynchronous network I/O. Compatibility works the way classic programs like IPmsg do and survives network add-ons (VPN, proxy, 'accelerator' and some security tools) that break the fast mode. Auto picks Compatibility when such an add-on is found or the fast mode has crashed on this PC."/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Networking" Style="{StaticResource RowTitle}"/>
+                                        <TextBlock Style="{StaticResource InfoTip}" ToolTip="Fast uses Windows' asynchronous network I/O. Compatibility works the way classic programs like IPmsg do and survives network add-ons (VPN, proxy, 'accelerator' and some security tools) that break the fast mode. Auto picks Compatibility when such an add-on is found or the fast mode has crashed on this PC. A change applies when the Ocean service restarts." AutomationProperties.HelpText="Fast uses Windows' asynchronous network I/O. Compatibility works the way classic programs like IPmsg do and survives network add-ons (VPN, proxy, 'accelerator' and some security tools) that break the fast mode. Auto picks Compatibility when such an add-on is found or the fast mode has crashed on this PC. A change applies when the Ocean service restarts."/>
+                                    </StackPanel>
+                                    <TextBlock Text="Auto suits almost every PC." Style="{StaticResource RowHint}"/>
                                     <TextBlock Style="{StaticResource RowHint}" Margin="0,4,0,0" Text="{Binding NetworkInfo}" TextWrapping="Wrap"/>
-                                    <TextBlock Style="{StaticResource RowHint}" Margin="0,4,0,0" Text="A change applies when the Ocean service restarts."/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Width="220">
                                     <RadioButton Content="Auto (recommended)" Margin="0,2" IsChecked="{Binding NetworkMode, Converter={StaticResource Equals}, ConverterParameter=auto}"/>
@@ -168,8 +190,11 @@
                             <Grid Style="{StaticResource Row}">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
-                                    <TextBlock Text="Highlight videos as new" Style="{StaticResource RowTitle}"/>
-                                    <TextBlock Text="Videos added since your last visit to a node are marked NEW, but never older than this." Style="{StaticResource RowHint}"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Highlight videos as new" Style="{StaticResource RowTitle}"/>
+                                        <TextBlock Style="{StaticResource InfoTip}" ToolTip="Videos added since your last visit to a node are marked NEW, but never older than this." AutomationProperties.HelpText="Videos added since your last visit to a node are marked NEW, but never older than this."/>
+                                    </StackPanel>
+                                    <TextBlock Text="How long new videos keep their NEW mark." Style="{StaticResource RowHint}"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                     <TextBox Text="{Binding NewDays, UpdateSourceTrigger=PropertyChanged}" Width="56" HorizontalContentAlignment="Center"/>
@@ -181,7 +206,7 @@
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
                                     <TextBlock Text="Notifications" Style="{StaticResource RowTitle}"/>
-                                    <TextBlock Text="Tell me when someone on the network adds videos." Style="{StaticResource RowHint}"/>
+                                    <TextBlock Text="Tell me when someone adds videos." Style="{StaticResource RowHint}"/>
                                 </StackPanel>
                                 <CheckBox Grid.Column="1" Style="{StaticResource Switch}" IsChecked="{Binding NotifyNewVideos}"/>
                             </Grid>
@@ -195,8 +220,11 @@
                             <Grid Style="{StaticResource Row}">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
-                                    <TextBlock Text="Save downloads to" Style="{StaticResource RowTitle}"/>
-                                    <TextBlock Text="Each node gets its own folder; the original folder structure is kept." Style="{StaticResource RowHint}"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Save downloads to" Style="{StaticResource RowTitle}"/>
+                                        <TextBlock Style="{StaticResource InfoTip}" ToolTip="Each node gets its own folder; the original folder structure is kept." AutomationProperties.HelpText="Each node gets its own folder; the original folder structure is kept."/>
+                                    </StackPanel>
+                                    <TextBlock Text="Each PC gets its own folder." Style="{StaticResource RowHint}"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                     <TextBox Width="240" Text="{Binding DownloadDir, UpdateSourceTrigger=PropertyChanged}" ToolTip="{Binding DownloadDir}"/>
@@ -219,9 +247,11 @@
                             <Grid Style="{StaticResource Row}">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
-                                    <TextBlock Text="Video cache" Style="{StaticResource RowTitle}"/>
-                                    <TextBlock Style="{StaticResource RowHint}"
-                                               Text="Keeps what you watched from other PCs, so watching again, seeking back, or downloading it afterwards doesn't use the network again. The oldest videos make room. 0 turns it off."/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Video cache" Style="{StaticResource RowTitle}"/>
+                                        <TextBlock Style="{StaticResource InfoTip}" ToolTip="Keeps what you watched from other PCs, so watching again, seeking back, or downloading it afterwards doesn't use the network again. The oldest videos make room. 0 turns it off." AutomationProperties.HelpText="Keeps what you watched from other PCs, so watching again, seeking back, or downloading it afterwards doesn't use the network again. The oldest videos make room. 0 turns it off."/>
+                                    </StackPanel>
+                                    <TextBlock Text="Makes watching again and seeking back instant. 0 = off." Style="{StaticResource RowHint}"/>
                                     <TextBlock Text="{Binding StreamCacheUsedText}" Style="{StaticResource RowHint}" Margin="0,4,0,0"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
@@ -236,9 +266,11 @@
                             <Grid Style="{StaticResource Row}">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
-                                    <TextBlock Text="Make lighter copies of my videos for watching" Style="{StaticResource RowTitle}"/>
-                                    <TextBlock Style="{StaticResource RowHint}"
-                                               Text="When someone has been watching one of your heavy videos for half a minute, this PC makes a 720p copy at about 1.5 Mbps and serves that to viewers from then on: the same picture for screen recordings, a fraction of the network. Your original file is never touched, and downloads always get the original. Made one at a time at low priority; viewers see 'Preparing…' meanwhile."/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Make lighter copies of my videos for watching" Style="{StaticResource RowTitle}"/>
+                                        <TextBlock Style="{StaticResource InfoTip}" ToolTip="When someone has been watching one of your heavy videos for half a minute, this PC makes a 720p copy at about 1.5 Mbps and serves that to viewers from then on: the same picture for screen recordings, a fraction of the network. Your original file is never touched, and downloads always get the original. Made one at a time at low priority; viewers see 'Preparing…' meanwhile." AutomationProperties.HelpText="When someone has been watching one of your heavy videos for half a minute, this PC makes a 720p copy at about 1.5 Mbps and serves that to viewers from then on: the same picture for screen recordings, a fraction of the network. Your original file is never touched, and downloads always get the original. Made one at a time at low priority; viewers see 'Preparing…' meanwhile."/>
+                                    </StackPanel>
+                                    <TextBlock Text="720p copies of heavy videos, made when someone watches." Style="{StaticResource RowHint}"/>
                                     <TextBlock Text="{Binding LightStatusText}" Style="{StaticResource RowHint}" Margin="0,4,0,0"/>
                                 </StackPanel>
                                 <CheckBox Grid.Column="1" Style="{StaticResource Switch}" IsChecked="{Binding LightCopies}" IsEnabled="{Binding LightAvailable}" AutomationProperties.Name="Make lighter copies of my videos for watching"/>
@@ -247,8 +279,11 @@
                             <Grid Style="{StaticResource Row}" IsEnabled="{Binding LightCopies}">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
-                                    <TextBlock Text="Keep lighter copies" Style="{StaticResource RowTitle}"/>
-                                    <TextBlock Style="{StaticResource RowHint}" Text="A copy is deleted this many days after it was last watched, and when the original changes or leaves the share. The disk limit removes the least recently watched copies first."/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Keep lighter copies" Style="{StaticResource RowTitle}"/>
+                                        <TextBlock Style="{StaticResource InfoTip}" ToolTip="A copy is deleted this many days after it was last watched, and when the original changes or leaves the share. The disk limit removes the least recently watched copies first." AutomationProperties.HelpText="A copy is deleted this many days after it was last watched, and when the original changes or leaves the share. The disk limit removes the least recently watched copies first."/>
+                                    </StackPanel>
+                                    <TextBlock Text="Days after the last viewing, and a disk limit." Style="{StaticResource RowHint}"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                     <TextBox Text="{Binding LightKeepDays, UpdateSourceTrigger=PropertyChanged}" Width="56" HorizontalContentAlignment="Center" AutomationProperties.Name="Days to keep lighter copies"/>
@@ -266,8 +301,11 @@
                         <Grid Style="{StaticResource Row}">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
-                                <TextBlock Text="Open Ocean when I sign in" Style="{StaticResource RowTitle}"/>
-                                <TextBlock Text="Starts minimized in the system tray. Sharing itself runs as a service either way." Style="{StaticResource RowHint}"/>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Open Ocean when I sign in" Style="{StaticResource RowTitle}"/>
+                                    <TextBlock Style="{StaticResource InfoTip}" ToolTip="Starts minimized in the system tray. Sharing itself runs as a service either way." AutomationProperties.HelpText="Starts minimized in the system tray. Sharing itself runs as a service either way."/>
+                                </StackPanel>
+                                <TextBlock Text="Starts minimized in the tray." Style="{StaticResource RowHint}"/>
                             </StackPanel>
                             <CheckBox Grid.Column="1" Style="{StaticResource Switch}" IsChecked="{Binding RunAtStartup}"/>
                         </Grid>
@@ -299,8 +337,7 @@
                                 <TextBlock Grid.Row="3" Text="Version" Style="{StaticResource Muted}" Margin="0,0,24,0"/>
                                 <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding VersionText}"/>
                             </Grid>
-                            <TextBlock Style="{StaticResource RowHint}" Margin="0,12,0,0"
-                                       Text="Traffic between PCs is encrypted end to end (TLS 1.2/1.3 with certificates on both sides). Each PC's identity is the fingerprint of its own key, so nobody can impersonate it."/>
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0"><TextBlock Text="Traffic between PCs is encrypted." Style="{StaticResource RowHint}" Margin="0"/><TextBlock Style="{StaticResource InfoTip}" ToolTip="Traffic between PCs is encrypted end to end (TLS 1.2/1.3 with certificates on both sides). Each PC's identity is the fingerprint of its own key, so nobody can impersonate it." AutomationProperties.HelpText="Traffic between PCs is encrypted end to end (TLS 1.2/1.3 with certificates on both sides). Each PC's identity is the fingerprint of its own key, so nobody can impersonate it."/></StackPanel>
                             <WrapPanel Margin="-8,10,0,0">
                                 <Button Style="{StaticResource BtnGhost}" Content="Copy node id" Command="{Binding CopyNodeIdCommand}"/>
                                 <Button Style="{StaticResource BtnGhost}" Content="Open data folder" Command="{Binding OpenDataDirCommand}"/>

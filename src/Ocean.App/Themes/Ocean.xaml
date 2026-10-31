@@ -650,7 +650,14 @@
             <Setter.Value>
                 <ControlTemplate TargetType="ToolTip">
                     <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="10,6" MaxWidth="420">
-                        <ContentPresenter/>
+                        <ContentPresenter>
+                            <!-- plain-text tooltips wrap instead of being cut off at the border -->
+                            <ContentPresenter.Resources>
+                                <Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                    <Setter Property="TextWrapping" Value="Wrap"/>
+                                </Style>
+                            </ContentPresenter.Resources>
+                        </ContentPresenter>
                     </Border>
                 </ControlTemplate>
             </Setter.Value>
