@@ -14,9 +14,19 @@ public partial class PlayerView : UserControl
     private readonly DispatcherTimer _idle = new() { Interval = TimeSpan.FromSeconds(2.5) };
     private readonly DispatcherTimer _osd = new() { Interval = TimeSpan.FromSeconds(1.1) };
     private PlayerViewModel? _vm;
-    private bool _dragging;
+    private bool _dragging; // the seek bar's thumb is being dragged
+    private bool _pressed;  // the mouse is down on the seek bar: leave the bar where the user put it
     private bool _opened;   // the current video opened (a resume point read before that would be 0)
     private bool _ended;    // reached the end and rewound: keep "watched" instead of recording 0
+
+    // A jump the player hasn't carried out yet. Over a network stream the player can drop a position change (it
+    // arrives while it is still opening or fetching another part), so the jump is checked and repeated until the
+    // video is really there; meanwhile the bar shows the target instead of snapping back.
+    private double? _seekTarget;
+    private double _seekFrom;        // where the player was when the jump was asked for
+    private double? _queuedSeek;     // asked for before the video opened
+    private DateTime _seekStarted, _seekIssued;
+    private int _seekTries;
 
     public PlayerView()
     {
@@ -28,6 +38,8 @@ public partial class PlayerView : UserControl
         _osd.Tick += (_, _) => { _osd.Stop(); SpeedOsd.Visibility = Visibility.Collapsed; };
         MouseMove += (_, _) => { SetChrome(true); _idle.Stop(); _idle.Start(); };
         PreviewKeyDown += OnKey;
+        // The slider handles a click on its track itself (it jumps the thumb there), so listen to handled clicks too.
+        Seek.AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler(Seek_MouseDown), handledEventsToo: true);
     }
 
     private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
@@ -83,6 +95,7 @@ public partial class PlayerView : UserControl
         try
         {
             _opened = false; _ended = false;
+            _seekTarget = null; _queuedSeek = null;
             Media.Stop();
             Media.Close();
             Media.Volume = _vm.Volume;
@@ -103,6 +116,7 @@ public partial class PlayerView : UserControl
     {
         RememberNow();
         _opened = false;
+        _seekTarget = null; _queuedSeek = null; _pressed = false;
         _tick.Stop();
         _idle.Stop();
         try { Media.Stop(); Media.Close(); Media.Source = null; } catch { }
@@ -118,6 +132,13 @@ public partial class PlayerView : UserControl
     private void UpdatePosition()
     {
         if (_vm is null || _dragging) return;
+        if (_pressed)
+        {
+            if (Mouse.LeftButton == MouseButtonState.Pressed) return;
+            // released somewhere we didn't hear about: still go where the bar was put
+            _pressed = false;
+            SeekTo(Seek.Value);
+        }
         try
         {
             if (Media.NaturalDuration.HasTimeSpan)
@@ -126,6 +147,11 @@ public partial class PlayerView : UserControl
                 if (d > 0 && Math.Abs(d - _vm.DurationSeconds) > 0.5) _vm.DurationSeconds = d;
             }
             var pos = Media.Position.TotalSeconds;
+            if (_seekTarget is { } target && !CheckSeek(pos, target))
+            {
+                _vm.PositionSeconds = target; // not there yet: keep the bar at the target
+                return;
+            }
             if (_vm is { LoopActive: true, LoopA: { } a, LoopB: { } b } && pos >= b)
             {
                 Media.Position = TimeSpan.FromSeconds(a); // A-B repeat
@@ -148,6 +174,7 @@ public partial class PlayerView : UserControl
 
     private double CurrentSeconds()
     {
+        if (_seekTarget is { } target) return target; // where the player is about to be
         try { return Media.Position.TotalSeconds; } catch { return _vm?.PositionSeconds ?? 0; }
     }
 
@@ -237,10 +264,55 @@ public partial class PlayerView : UserControl
     private void SeekTo(double seconds)
     {
         if (_vm is null) return;
-        seconds = Math.Clamp(seconds, 0, Math.Max(0, _vm.DurationSeconds));
-        // A deliberate jump out of the A–B range ends the repeat instead of snapping back to A.
+        var d = _vm.DurationSeconds;
+        seconds = Math.Max(0, d > 0 ? Math.Min(seconds, d) : seconds);
+        // A deliberate jump out of the A-B range ends the repeat instead of snapping back to A.
         if (_vm.EndLoopIfOutside(seconds)) ShowOsd("Repeat off");
-        try { Media.Position = TimeSpan.FromSeconds(seconds); _vm.PositionSeconds = seconds; } catch { }
+        _ended = false;
+        _vm.PositionSeconds = seconds;
+        if (!_opened) { _queuedSeek = seconds; return; } // still opening: the player would ignore it now
+        BeginSeek(seconds);
+    }
+
+    private void BeginSeek(double seconds)
+    {
+        try { _seekFrom = Media.Position.TotalSeconds; } catch { _seekFrom = 0; }
+        _seekTarget = seconds;
+        _seekStarted = DateTime.UtcNow;
+        _seekTries = 0;
+        IssueSeek(seconds);
+    }
+
+    private void IssueSeek(double seconds)
+    {
+        _seekTries++;
+        _seekIssued = DateTime.UtcNow;
+        if (_seekTries > 1) Services.AppLog.Info("Player", $"jump to {seconds:0.#} s not done yet, asking again (try {_seekTries})");
+        try { Media.Position = TimeSpan.FromSeconds(seconds); } catch { }
+    }
+
+    /// <summary>
+    /// True once the player has made the pending jump (or we gave up on it); otherwise asks again now and then.
+    /// </summary>
+    private bool CheckSeek(double pos, double target)
+    {
+        var now = DateTime.UtcNow;
+        var since = (now - _seekStarted).TotalSeconds;
+        var played = 1.5 + since * Math.Max(1, _vm!.Speed); // how far playback could have moved on by itself
+        // at the target (or playing on from it), or somewhere the old position couldn't have reached on its own
+        // (the player starts at the key frame before the target, which can be several seconds earlier)
+        var landed = (pos >= target - 1.5 && pos <= target + played) || Math.Abs(pos - _seekFrom) > played;
+        if (landed || since > 30)
+        {
+            if (!landed) Services.AppLog.Warn("Player", $"jump to {target:0.#} s didn't happen (player stays at {pos:0.#} s): {_vm.Title}");
+            _seekTarget = null;
+            return true;
+        }
+        // ask again after 1.5, 3, 6, 12 s; longer while the player says it is fetching (it may be on its way)
+        var wait = 1.5 * Math.Pow(2, Math.Min(_seekTries - 1, 3));
+        if (_vm.IsBuffering) wait = Math.Max(wait, 5);
+        if ((now - _seekIssued).TotalSeconds >= wait) IssueSeek(target);
+        return false;
     }
 
     // ---- events ----------------------------------------------------------------
@@ -251,13 +323,16 @@ public partial class PlayerView : UserControl
         _vm.IsBuffering = false;
         if (Media.NaturalDuration.HasTimeSpan) _vm.DurationSeconds = Media.NaturalDuration.TimeSpan.TotalSeconds;
         ApplySpeed();
-        // Continue watching: jump to where the user stopped last time.
-        var start = _vm.StartAt;
+        // A jump asked for while opening, else Continue watching: where the user stopped last time.
+        var resume = _vm.StartAt;
         _vm.StartAt = 0;
+        var start = _queuedSeek ?? resume;
+        _queuedSeek = null;
         if (start > 0 && (_vm.DurationSeconds <= 0 || start < _vm.DurationSeconds - 1))
         {
-            try { Media.Position = TimeSpan.FromSeconds(start); _vm.PositionSeconds = start; } catch { }
-            ShowOsd("Resumed at " + Core.Format.Duration(TimeSpan.FromSeconds(start)));
+            _vm.PositionSeconds = start;
+            BeginSeek(start);
+            if (start == resume) ShowOsd("Resumed at " + Core.Format.Duration(TimeSpan.FromSeconds(start)));
         }
         _opened = true;
     }
@@ -266,6 +341,7 @@ public partial class PlayerView : UserControl
     private void Media_MediaEnded(object sender, RoutedEventArgs e)
     {
         if (_vm is null) return;
+        _seekTarget = null; // a jump to the very end lands here
         if (_vm is { LoopActive: true, LoopA: { } a })
         {
             // B was at (or past) the very end: keep repeating from A
@@ -289,6 +365,7 @@ public partial class PlayerView : UserControl
     private void Media_MediaFailed(object sender, ExceptionRoutedEventArgs e)
     {
         if (_vm is null) return;
+        _seekTarget = null; _queuedSeek = null;
         _vm.IsPlaying = false; _vm.IsBuffering = false;
         _vm.Error = e.ErrorException?.Message ?? "Unknown playback error";
         Services.AppLog.Warn("Player", $"playback failed: {_vm.Title} ({_vm.Peer?.Label})", e.ErrorException);
@@ -309,9 +386,30 @@ public partial class PlayerView : UserControl
     private void Back_Click(object sender, RoutedEventArgs e) => SeekTo((_vm?.PositionSeconds ?? 0) - 10);
     private void Fwd_Click(object sender, RoutedEventArgs e) => SeekTo((_vm?.PositionSeconds ?? 0) + 10);
 
+    // Seek bar. Dragging the thumb jumps when it is let go. A click on the track moves the thumb there at once
+    // (IsMoveToPointEnabled) and jumps when the button is released, wherever that happens: the bar takes the mouse
+    // until then, and position updates leave the bar alone meanwhile so the click can't be undone.
+    private void Seek_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        _pressed = true;
+        if (e.Handled && !_dragging) Seek.CaptureMouse(); // a track click (the thumb takes the mouse itself)
+    }
+
+    private void Seek_MouseUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_pressed || _dragging) return; // a thumb drag ends in Seek_DragCompleted
+        _pressed = false;
+        if (Seek.IsMouseCaptured) Seek.ReleaseMouseCapture();
+        SeekTo(Seek.Value);
+    }
+
     private void Seek_DragStarted(object sender, DragStartedEventArgs e) => _dragging = true;
-    private void Seek_DragCompleted(object sender, DragCompletedEventArgs e) { _dragging = false; SeekTo(Seek.Value); }
-    private void Seek_MouseUp(object sender, MouseButtonEventArgs e) { if (!_dragging) Dispatcher.InvokeAsync(() => SeekTo(Seek.Value)); }
+
+    private void Seek_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        _dragging = false; _pressed = false;
+        if (e.HorizontalChange != 0) SeekTo(Seek.Value); // a click on the thumb without moving it isn't a jump
+    }
 
     private void OnKey(object sender, KeyEventArgs e)
     {
