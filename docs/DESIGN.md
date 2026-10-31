@@ -1,4 +1,4 @@
-# Ocean — design
+# Ocean: design
 
 ## Goals
 
@@ -110,7 +110,7 @@ has two networking modes (`NetworkCompat`):
   `AddedAt > max(lastVisit, now − NewDays)`.
 - A `FileSystemWatcher` per root triggers a debounced rescan; a full rescan also runs every 15 min.
 - Duration/resolution come from Shell properties (`System.Media.Duration`, `System.Video.FrameWidth`),
-  thumbnails from `IShellItemImageFactory` — the same providers Explorer uses, run on a dedicated STA
+  thumbnails from `IShellItemImageFactory`, the same providers Explorer uses, run on a dedicated STA
   thread, pre-generated in the background and cached as 320×180 JPEGs keyed by item id + mtime.
 - Catalog version is a persisted counter bumped on any change. Responses carry an ETag that depends on
   the version *and* on which locks the caller has open.

@@ -54,7 +54,7 @@ public partial class PeerVm : ObservableObject
     }
 
     public string Subtitle => string.IsNullOrEmpty(User) || User == Name ? Host : $"{User} @ {Host}";
-    public string Label => string.IsNullOrEmpty(User) ? Name : User;
+    public string Label => DisplayNames.Of(User, Name);
 
     public void Update(PeerDto d)
     {
@@ -217,7 +217,7 @@ public partial class PendingAccessVm : ObservableObject
     public PendingAccessDto Dto { get; }
     public PendingAccessVm(PendingAccessDto d) { Dto = d; }
     public string RequestId => Dto.RequestId;
-    public string Who => string.IsNullOrEmpty(Dto.ClientUser) ? Dto.ClientName : $"{Dto.ClientUser} ({Dto.ClientName})";
+    public string Who => DisplayNames.Of(Dto.ClientUser, Dto.ClientName);
     public string What => Dto.ItemName is null ? $"share “{Dto.ShareName}”" : $"“{Dto.ItemName}” in “{Dto.ShareName}”";
     public string Title => $"{Who} wants to access {What}";
     public string Since => Format.Ago(Dto.CreatedAt);

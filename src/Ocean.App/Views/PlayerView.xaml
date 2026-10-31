@@ -13,7 +13,7 @@
                 <TextBlock Text="&#xE7BA;" Style="{StaticResource Icon}" FontSize="36" Foreground="{StaticResource Warn}"/>
                 <TextBlock Text="This video can't be played in the built-in player" Style="{StaticResource H2}" HorizontalAlignment="Center" Margin="0,14,0,6" TextWrapping="Wrap" TextAlignment="Center"/>
                 <TextBlock Text="{Binding Error}" Style="{StaticResource Muted}" TextWrapping="Wrap" TextAlignment="Center"/>
-                <TextBlock Text="The built-in player relies on the codecs installed in Windows. VLC (or your default player) can play almost anything — streaming stays the same." Style="{StaticResource Dim}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,8,0,0"/>
+                <TextBlock Text="The built-in player relies on the codecs installed in Windows. VLC (or your default player) can play almost anything, and streaming works the same way." Style="{StaticResource Dim}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,8,0,0"/>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,18,0,0">
                     <Button Style="{StaticResource BtnPrimary}" Content="Open in external player" Command="{Binding OpenExternalCommand}"/>
                     <Button Content="Download instead" Margin="8,0,0,0" Command="{Binding DownloadCommand}"/>

@@ -8,7 +8,7 @@
                 <Run Text="Welcome, "/><Run Text="{Binding MyName}"/>
             </TextBlock>
             <TextBlock Style="{StaticResource Muted}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="14"
-                       Text="Pick a node on the left to browse and watch what it shares. Add your own videos under My shares — everyone on this network will see them."/>
+                       Text="Pick a node on the left to browse and watch what it shares. Add your own videos under My shares, and everyone on this network will see them."/>
 
             <!-- Continue watching: the last video played and where it stopped -->
             <Border Style="{StaticResource Card}" Margin="0,28,0,0" Padding="12" DataContext="{Binding Resume}"
@@ -92,7 +92,7 @@
             <Border Style="{StaticResource Card}" Margin="0,28,0,0" Visibility="{Binding TotalNew, Converter={StaticResource CountToVis}}">
                 <StackPanel Orientation="Horizontal">
                     <Border Style="{StaticResource Badge}" Margin="0,0,10,0"><TextBlock Text="{Binding TotalNew}" FontWeight="SemiBold" Foreground="#042F2E"/></Border>
-                    <TextBlock Text="new videos since your last visits — highlighted in the node list." Style="{StaticResource Muted}" VerticalAlignment="Center"/>
+                    <TextBlock Text="new videos since your last visits, highlighted in the node list." Style="{StaticResource Muted}" VerticalAlignment="Center"/>
                 </StackPanel>
             </Border>
         </StackPanel>

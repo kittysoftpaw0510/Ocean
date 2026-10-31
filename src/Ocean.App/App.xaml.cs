@@ -126,7 +126,7 @@ public partial class App : Application
         if (_tray is null || _vm is null) return;
         _tray.SetBadge(_vm.TotalNew > 0);
         _tray.SetPaused(_vm.SharingPaused);
-        _tray.SetText("Ocean — " + _vm.StatusText + (_vm.TotalNew > 0 ? $"  ·  {_vm.TotalNew} new" : ""));
+        _tray.SetText("Ocean: " + _vm.StatusText + (_vm.TotalNew > 0 ? $"  ·  {_vm.TotalNew} new" : ""));
     }
 
     private void ShowWindow()

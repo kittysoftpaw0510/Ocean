@@ -14,6 +14,7 @@ public sealed class GrantRecord
     public string LockId { get; set; } = "";
     public string ClientId { get; set; } = "";
     public string ClientName { get; set; } = "";
+    public string ClientUser { get; set; } = "";
     public string Token { get; set; } = "";
     public DateTimeOffset? ExpiresAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
@@ -102,7 +103,7 @@ public sealed class AccessService
         switch (mode)
         {
             case AccessMode.Public:
-                return Granted(Issue(req.LockId, clientId, clientName, null));
+                return Granted(Issue(req.LockId, clientId, clientName, clientUser, null));
 
             case AccessMode.Password:
                 if (string.IsNullOrEmpty(req.Password))
@@ -112,7 +113,7 @@ public sealed class AccessService
                     _log.LogInformation("wrong password for '{Label}' from {Client}", label, clientName);
                     return new AccessResponseDto { Status = AccessStatus.WrongPassword, Message = "Wrong password" };
                 }
-                return Granted(existing ?? Issue(req.LockId, clientId, clientName, null));
+                return Granted(existing ?? Issue(req.LockId, clientId, clientName, clientUser, null));
 
             case AccessMode.Ask:
             default:
@@ -156,7 +157,7 @@ public sealed class AccessService
         p.Decision = decision;
         p.DecidedAt = DateTimeOffset.UtcNow;
         if (decision is "once" or "always")
-            p.Grant = Issue(p.LockId, p.ClientId, p.ClientName, decision == "once" ? DateTimeOffset.UtcNow + OnceDuration : null);
+            p.Grant = Issue(p.LockId, p.ClientId, p.ClientName, p.ClientUser, decision == "once" ? DateTimeOffset.UtcNow + OnceDuration : null);
         _log.LogInformation("access {Decision} for request {Id} ({Client})", decision, requestId, p.ClientName);
         _events.Publish("accessDecided", new { requestId, decision });
         return true;
@@ -175,9 +176,11 @@ public sealed class AccessService
             return _grants.Where(g => g.IsValid).Select(g =>
             {
                 var r = _catalog.ResolveLock(g.LockId);
+                // the name that PC uses now; grants from older versions didn't record one
+                var user = _peers.TryGet(g.ClientId, out var peer) && !string.IsNullOrWhiteSpace(peer.User) ? peer.User : g.ClientUser;
                 return new GrantDto
                 {
-                    Id = g.Id, LockId = g.LockId, ClientId = g.ClientId, ClientName = g.ClientName,
+                    Id = g.Id, LockId = g.LockId, ClientId = g.ClientId, ClientName = g.ClientName, ClientUser = user,
                     LockLabel = r?.Label ?? g.LockId, ExpiresAt = g.ExpiresAt, CreatedAt = g.CreatedAt,
                 };
             }).OrderByDescending(g => g.CreatedAt).ToList();
@@ -204,11 +207,11 @@ public sealed class AccessService
         lock (_lock) return _grants.FirstOrDefault(g => g.LockId == lockId && g.ClientId == clientId && g.IsValid);
     }
 
-    private GrantRecord Issue(string lockId, string clientId, string clientName, DateTimeOffset? expires)
+    private GrantRecord Issue(string lockId, string clientId, string clientName, string clientUser, DateTimeOffset? expires)
     {
         var g = new GrantRecord
         {
-            Id = Passwords.ShortId(6), LockId = lockId, ClientId = clientId, ClientName = clientName,
+            Id = Passwords.ShortId(6), LockId = lockId, ClientId = clientId, ClientName = clientName, ClientUser = clientUser,
             Token = Passwords.RandomToken(), ExpiresAt = expires, CreatedAt = DateTimeOffset.UtcNow,
         };
         lock (_lock)

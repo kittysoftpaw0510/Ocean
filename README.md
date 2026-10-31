@@ -1,4 +1,4 @@
-# Ocean — LAN video sharing
+# Ocean: LAN video sharing
 
 Ocean turns every Windows PC on a local network into a node that can share videos and watch what
 other nodes share. No server, no accounts, no cloud: nodes find each other automatically (like IP Messenger),
@@ -7,16 +7,16 @@ and every byte between them travels over mutually authenticated, end-to-end encr
 - **Share** a folder or a handful of files as a named group ("Family 2024", "Travel"). Sub-folders are kept:
   others browse the share as folders, and downloads recreate the same structure on disk.
 - **Organize** a share into folders inside Ocean: create, rename and remove folders, and move videos between them
-  (drag and drop, or *Move to…*). This is Ocean's view only — files on your disk are never moved or renamed.
+  (drag and drop, or *Move to…*). This is Ocean's view only; files on your disk are never moved or renamed.
 - **Protect** a group, or a single video inside it: public, password, or *ask me each time*.
 - **Private circles**: set a shared secret and only PCs with the same secret can see each other.
 - **Watch** by streaming (built-in player, or VLC / your default player), or **download** one video,
-  a group, or everything — resumable, with folder structure preserved.
+  a group, or everything, resumable and with folder structure preserved.
 - **Thumbnails**, duration and resolution for every video; grid / tiles / list views; sort by newest,
   name, size, duration or folder; search.
 - **Offline nodes stay visible**: when a PC goes offline it stays listed (dimmed, "last seen …") with its last known
   shares for 24 h by default; downloads you start wait and continue when it is back.
-- **Player**: speed control (0.25×–2×) and A-B repeat with markers on the seek bar.
+- **Player**: speed control (0.25× to 2×) and A-B repeat with markers on the seek bar.
 - **New videos are highlighted** (since your last visit to that node) and you get a notification
   when a node adds something.
 - Background service + a small tray app. Light on bandwidth: catalogs are fetched only when they
@@ -141,7 +141,7 @@ $env:OCEAN_LOCAL_PORT = 38480; $env:OCEAN_PEER_PORT = 38481
 Any container the Windows Shell can inspect is listed and thumbnailed; streaming and downloading
 work for every file regardless of codec. The built-in player uses the codecs installed in Windows
 (MP4/H.264, WMV, MPEG-1, AVI/MPEG-4 part 2 out of the box, HEVC/AV1 with the Store extensions). For
-MKV, AVI with exotic codecs, etc. use *Open in external player* — Ocean finds VLC automatically.
+MKV, AVI with exotic codecs, etc. use *Open in external player*. Ocean finds VLC automatically.
 
 ## Notes & limits
 

@@ -99,7 +99,7 @@
                         <Image x:Name="Logo" Width="30" Height="30" VerticalAlignment="Center"/>
                         <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
                             <TextBlock Text="Ocean" FontSize="17" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
-                            <TextBlock Style="{StaticResource Dim}" Text="{Binding IdentityText}" MaxWidth="180" ToolTip="{Binding IdentityText}"/>
+                            <TextBlock Style="{StaticResource Dim}" Text="{Binding IdentityText}" MaxWidth="180" ToolTip="{Binding MyHost}" ToolTipService.InitialShowDelay="400"/>
                         </StackPanel>
                     </StackPanel>
                 </Button>

@@ -103,7 +103,7 @@ public partial class GrantVm : ObservableObject
     public GrantDto Dto { get; }
     public GrantVm(GrantDto d) { Dto = d; }
     public string Id => Dto.Id;
-    public string Who => Dto.ClientName;
+    public string Who => DisplayNames.Of(Dto.ClientUser, Dto.ClientName);
     public string What => Dto.LockLabel;
     public string ExpiresText => Dto.ExpiresAt is { } e ? (e < DateTimeOffset.UtcNow ? "expired" : "until " + e.LocalDateTime.ToString("g")) : "always";
 }

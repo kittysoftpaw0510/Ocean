@@ -96,8 +96,8 @@ public sealed class PeerClient : IDisposable
     }
 
     /// <summary>
-    /// Sends the request: directly (trying each known address), or — when the node cannot be reached directly,
-    /// typically because its firewall blocks incoming connections — through a reverse connection it opens to us.
+    /// Sends the request: directly (trying each known address), or, when the node cannot be reached directly
+    /// (typically because its firewall blocks incoming connections), through a reverse connection it opens to us.
     /// </summary>
     public async Task<HttpResponseMessage> SendAsync(HttpRequestMessage req, HttpCompletionOption option, CancellationToken ct)
     {

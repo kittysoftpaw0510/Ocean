@@ -215,6 +215,7 @@ public sealed class GrantDto
     public string LockLabel { get; set; } = "";
     public string ClientId { get; set; } = "";
     public string ClientName { get; set; } = "";
+    public string ClientUser { get; set; } = "";
     public DateTimeOffset? ExpiresAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }

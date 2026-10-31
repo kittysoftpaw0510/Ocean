@@ -28,7 +28,7 @@ public partial class PlayerViewModel : ObservableObject
     public PlayerViewModel(MainViewModel main) { _main = main; }
 
     // ---- A-B repeat --------------------------------------------------------------------------
-    // Click once: A = here. Again: B = here, the segment A–B loops. Again: off.
+    // Click once: A = here. Again: B = here, the segment A-B loops. Again: off.
 
     public const double MinLoop = 0.5;
 
@@ -37,7 +37,7 @@ public partial class PlayerViewModel : ObservableObject
 
     public bool LoopActive => LoopA is not null && LoopB is not null;
     public bool LoopArmed => LoopA is not null && LoopB is null;
-    public string LoopText => LoopA is not { } a ? "A-B" : LoopB is not { } b ? $"A {T(a)}  ·  set B" : $"{T(a)} – {T(b)}";
+    public string LoopText => LoopA is not { } a ? "A-B" : LoopB is not { } b ? $"A {T(a)}  ·  set B" : $"{T(a)} to {T(b)}";
 
     partial void OnLoopAChanged(double? value) => NotifyLoop();
     partial void OnLoopBChanged(double? value) => NotifyLoop();
@@ -61,7 +61,7 @@ public partial class PlayerViewModel : ObservableObject
     {
         LoopA = Math.Max(0, position);
         if (LoopB is { } b && b - LoopA < MinLoop) LoopB = null;
-        return LoopB is null ? $"A  {T(LoopA.Value)}" : $"Repeat {T(LoopA.Value)} – {T(LoopB!.Value)}";
+        return LoopB is null ? $"A  {T(LoopA.Value)}" : $"Repeat {T(LoopA.Value)} to {T(LoopB!.Value)}";
     }
 
     public string SetLoopB(double position)
@@ -73,10 +73,10 @@ public partial class PlayerViewModel : ObservableObject
         // keep A and ask them to move on first.
         if (b - a < MinLoop) return LoopA is null ? "Set A first" : $"A  {T(LoopA.Value)}  ·  play on, then set B";
         LoopA = a; LoopB = b;
-        return $"Repeat {T(a)} – {T(b)}";
+        return $"Repeat {T(a)} to {T(b)}";
     }
 
-    /// <summary>The user jumped somewhere: leaving the A–B range ends the repeat (instead of snapping back).</summary>
+    /// <summary>The user jumped somewhere: leaving the A-B range ends the repeat (instead of snapping back).</summary>
     public bool EndLoopIfOutside(double position)
     {
         if (LoopA is not { } a || LoopB is not { } b) return false;

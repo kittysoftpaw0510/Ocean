@@ -95,14 +95,13 @@ public partial class MainViewModel : ObservableObject
     {
         Status = status;
         SharingPaused = status.SharingPaused;
-        MyName = status.UserName;
+        MyName = DisplayNames.Of(status.UserName, status.NodeName);
         MyHost = status.NodeName;
-        // Sidebar subtitle: "Riddle · DESKTOP-1" or just the PC name when both are the same.
-        IdentityText = string.Equals(status.UserName, status.NodeName, StringComparison.OrdinalIgnoreCase)
-            ? status.NodeName : $"{status.UserName}  ·  {status.NodeName}";
+        // Sidebar subtitle: "Your name" from Settings (the PC's name is in the tooltip).
+        IdentityText = MyName;
         RealmSet = status.RealmSet;
         Home.RealmSet = status.RealmSet;
-        Home.MyName = status.UserName;
+        Home.MyName = MyName;
     }
 
     /// <summary>

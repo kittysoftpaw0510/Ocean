@@ -1,7 +1,7 @@
 <Window x:Class="Ocean.App.Views.AccessRequestWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Access request — Ocean" Width="460" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterScreen" Topmost="True"
+        Title="Ocean access request" Width="460" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterScreen" Topmost="True"
         Background="{StaticResource Bg1}" Foreground="{StaticResource Text}" FontFamily="{StaticResource UiFont}">
     <StackPanel Margin="24,20,24,20">
         <StackPanel Orientation="Horizontal">

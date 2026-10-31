@@ -20,9 +20,9 @@ public partial class DownloadVm : ObservableObject
     [ObservableProperty] private string _destination = "";
     [ObservableProperty] private double _speedBps;
 
-    public DownloadVm(DownloadJobDto d)
+    public DownloadVm(DownloadJobDto d, string? peerName = null)
     {
-        Id = d.Id; PeerName = d.PeerName; Name = d.Name; RelPath = d.RelPath; CreatedAt = d.CreatedAt;
+        Id = d.Id; PeerName = peerName ?? d.PeerName; Name = d.Name; RelPath = d.RelPath; CreatedAt = d.CreatedAt;
         Update(d);
     }
 
@@ -74,16 +74,19 @@ public partial class DownloadsViewModel : ObservableObject
         {
             var list = await _main.Api.GetAsync<List<DownloadJobDto>>("/api/downloads") ?? new();
             Jobs.Clear();
-            foreach (var d in list) Jobs.Add(new DownloadVm(d));
+            foreach (var d in list) Jobs.Add(new DownloadVm(d, PeerLabel(d)));
             Recount();
         }
         catch (Exception ex) { _main.Error("Could not load downloads", ex); }
     }
 
+    // the name the sender uses now (older downloads recorded the PC's name)
+    private string? PeerLabel(DownloadJobDto d) => _main.Peers.FirstOrDefault(p => p.Id == d.PeerId)?.Label;
+
     public void Upsert(DownloadJobDto d)
     {
         var vm = Jobs.FirstOrDefault(j => j.Id == d.Id);
-        if (vm is null) Jobs.Insert(0, new DownloadVm(d));
+        if (vm is null) Jobs.Insert(0, new DownloadVm(d, PeerLabel(d)));
         else vm.Update(d);
         Recount();
     }

@@ -326,7 +326,7 @@ public sealed class PeerService : IDisposable
                 var fresh = cat.Shares.Where(s => visibleBefore.Contains(s.Id))
                     .SelectMany(s => s.Items).Where(i => !known.Contains(i.Id) && i.IsNew && i.Unlocked).ToList();
                 if (fresh.Count > 0)
-                    _events.Publish("newVideos", new { peerId, peerName = cat.NodeName, count = fresh.Count, names = fresh.Take(3).Select(i => i.Name).ToList() });
+                    _events.Publish("newVideos", new { peerId, peerName = DisplayNames.Of(cat.UserName, cat.NodeName), count = fresh.Count, names = fresh.Take(3).Select(i => i.Name).ToList() });
             }
             _log.LogInformation("catalog v{Version} from {Peer}: {Shares} shares, {Items} items, {New} new", cat.Version, peer.Name, cat.Shares.Count, itemCount, newCount);
             return cat;

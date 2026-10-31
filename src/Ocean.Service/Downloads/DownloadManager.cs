@@ -137,7 +137,7 @@ public sealed class DownloadManager : BackgroundService
                 try { if (File.Exists(destination) && new FileInfo(destination).Length == item.Size) { skipped++; continue; } } catch { }
                 var job = new DownloadJob
                 {
-                    Id = Core.Crypto.Passwords.ShortId(6), PeerId = req.PeerId, PeerName = cat.NodeName, ItemId = item.Id,
+                    Id = Core.Crypto.Passwords.ShortId(6), PeerId = req.PeerId, PeerName = DisplayNames.Of(cat.UserName, cat.NodeName), ItemId = item.Id,
                     Name = item.Name, RelPath = LocalRelPath(item), Size = item.Size, Status = DownloadStatus.Queued,
                     Destination = destination,
                     CreatedAt = DateTimeOffset.UtcNow,
