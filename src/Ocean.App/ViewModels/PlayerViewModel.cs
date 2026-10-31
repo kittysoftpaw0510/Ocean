@@ -359,25 +359,74 @@ public partial class PlayerViewModel : ObservableObject
         catch (Exception ex) { _main.Error("Download failed to start", ex); }
     }
 
-    /// <summary>Opens the stream in VLC when installed (best format coverage), otherwise with the system default handler.</summary>
+    /// <summary>
+    /// Opens a video in a player outside Ocean. A file on this PC goes to its default app. A stream (an http address)
+    /// can't: Windows picks the program for an address by its scheme, i.e. the browser, and Store apps such as
+    /// Windows 11's Media Player only accept files. So a stream goes to the first of: the default player for the
+    /// video's type when that is a desktop program, VLC / MPC-HC / PotPlayer / mpv, the classic Windows Media Player
+    /// (part of Windows), and only then the browser.
+    /// </summary>
     public static void OpenExternally(string url, MainViewModel main)
     {
         try
         {
-            var vlc = FindVlc();
-            if (vlc is not null) Process.Start(new ProcessStartInfo(vlc, $"\"{url}\"") { UseShellExecute = false });
-            else Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            if (!url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            {
+                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); // my own file: its default app
+                return;
+            }
+            var player = DefaultDesktopPlayer(ExtensionOf(url)) ?? KnownPlayer() ?? ClassicMediaPlayer();
+            if (player is not null)
+            {
+                Services.AppLog.Info("Player", $"external player: {player}");
+                Process.Start(new ProcessStartInfo(player, $"\"{url}\"") { UseShellExecute = false });
+                return;
+            }
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            main.Toast("Opened in your browser", "No video player on this PC can play a network stream. VLC (free) plays almost anything.", "info");
         }
         catch (Exception ex) { main.Toast("Could not open player", ex.Message, "error"); }
     }
 
-    private static string? FindVlc()
+    private static string ExtensionOf(string url)
     {
+        try { var ext = Path.GetExtension(Uri.UnescapeDataString(new Uri(url).AbsolutePath)); return ext.Length > 1 ? ext : ".mp4"; }
+        catch { return ".mp4"; }
+    }
+
+    /// <summary>The default program for the video's type, when it is a desktop program (not a Store app, not a browser).</summary>
+    private static string? DefaultDesktopPlayer(string extension)
+    {
+        try
+        {
+            var sb = new System.Text.StringBuilder(1024);
+            uint len = (uint)sb.Capacity;
+            if (AssocQueryString(0, 2 /* ASSOCSTR_EXECUTABLE */, extension, null, sb, ref len) != 0) return null; // e.g. a Store app
+            var exe = sb.ToString();
+            if (!File.Exists(exe)) return null;
+            var name = Path.GetFileName(exe).ToLowerInvariant();
+            string[] notPlayers = { "rundll32.exe", "explorer.exe", "openwith.exe", "applicationframehost.exe", "msedge.exe", "chrome.exe", "firefox.exe", "opera.exe", "brave.exe", "iexplore.exe" };
+            return notPlayers.Contains(name) ? null : exe;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>A well-known player that plays network streams, installed in its usual place.</summary>
+    private static string? KnownPlayer()
+    {
+        string[] candidates =
+        {
+            @"VideoLAN\VLC\vlc.exe", @"MPC-HC\mpc-hc64.exe", @"MPC-HC\mpc-hc.exe", @"K-Lite Codec Pack\MPC-HC64\mpc-hc64.exe",
+            @"MPC-BE x64\mpc-be64.exe", @"DAUM\PotPlayer\PotPlayerMini64.exe", @"Kakao\PotPlayer\PotPlayerMini64.exe", @"PotPlayer\PotPlayerMini64.exe",
+        };
         foreach (var root in new[] { Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86) })
         {
             if (string.IsNullOrEmpty(root)) continue;
-            var p = Path.Combine(root, "VideoLAN", "VLC", "vlc.exe");
-            if (File.Exists(p)) return p;
+            foreach (var c in candidates)
+            {
+                var p = Path.Combine(root, c);
+                if (File.Exists(p)) return p;
+            }
         }
         try
         {
@@ -385,6 +434,25 @@ public partial class PlayerViewModel : ObservableObject
             if (k?.GetValue("") is string exe && File.Exists(exe)) return exe;
         }
         catch { }
+        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            try { var p = Path.Combine(dir.Trim(), "mpv.exe"); if (File.Exists(p)) return p; } catch { }
+        }
         return null;
     }
+
+    /// <summary>The classic Windows Media Player, part of Windows 10 and 11; it plays network streams.</summary>
+    private static string? ClassicMediaPlayer()
+    {
+        foreach (var root in new[] { Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86) })
+        {
+            if (string.IsNullOrEmpty(root)) continue;
+            var p = Path.Combine(root, "Windows Media Player", "wmplayer.exe");
+            if (File.Exists(p)) return p;
+        }
+        return null;
+    }
+
+    [System.Runtime.InteropServices.DllImport("shlwapi.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern int AssocQueryString(int flags, int str, string assoc, string? extra, System.Text.StringBuilder outStr, ref uint outLen);
 }
