@@ -90,7 +90,10 @@ builder.Services.AddSingleton<StreamCache>();
 builder.Services.AddSingleton<PeerMedia>();
 builder.Services.AddSingleton<DownloadManager>();
 builder.Services.AddSingleton(new UploadScheduler { BytesPerSecond = cfg.UploadLimitKBps * 1024L });
+builder.Services.AddSingleton<MeshService>();
+builder.Services.AddSingleton<ViaForwarder>();
 builder.Services.AddHostedService<DiscoveryService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<MeshService>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DownloadManager>());
 builder.Services.AddHostedService<CatalogMaintenance>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<FirewallRules>());
@@ -167,6 +170,21 @@ app.Use(async (ctx, next) =>
             ctx.Response.StatusCode = 403;
             await ctx.Response.WriteAsJsonAsync(new Ocean.Core.Protocol.ErrorDto { Error = "realm", Message = "Different shared secret" }, Json.Options);
             return;
+        }
+        // Carried by other nodes (Via): the caller is a relay; the origin signed the request. Checked by every node on
+        // the way; the destination serves it as the origin's (its grants, its download slots).
+        if (ctx.Request.Headers.ContainsKey(Ocean.Core.Protocol.Via.OriginHeader))
+        {
+            var raw = ViaForwarder.RawTarget(ctx);
+            var (target, inner) = Ocean.Core.Protocol.Via.TryParse(raw, out var t, out var i) ? (t, i) : (identity.NodeId, raw);
+            if (!Ocean.Core.Protocol.Via.Verify(h => ctx.Request.Headers[h].ToString(), target, ctx.Request.Method, inner, out var origin, out var why))
+            {
+                log.LogWarning("refused a request relayed by {Relay} for {Origin}: {Why}", NodeIdentity.ShortId(clientId), NodeIdentity.ShortId(origin), why);
+                ctx.Response.StatusCode = 403;
+                await ctx.Response.WriteAsJsonAsync(new Ocean.Core.Protocol.ErrorDto { Error = "origin", Message = "Relayed request not signed by its sender: " + why }, Json.Options);
+                return;
+            }
+            if (target == identity.NodeId) clientId = origin;
         }
         ctx.Items["ocean.peer"] = PeerContext.FromRequest(ctx, clientId);
     }

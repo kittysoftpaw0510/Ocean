@@ -193,7 +193,8 @@ public sealed class PeerService : IDisposable
         _catalogs.TryGetValue(p.Id, out var cat);
         return new PeerDto
         {
-            Id = p.Id, Name = p.Name, User = p.User, Host = p.Host, Address = p.DisplayAddress.ToString(), Port = p.Port,
+            Id = p.Id, Name = p.Name, User = p.User, Host = p.Host, Port = p.Port,
+            Address = p.Via is null ? p.DisplayAddress.ToString() : "", Via = p.Via is null ? null : p.ViaName,
             CatalogVersion = p.CatalogVersion, LastSeen = p.LastSeen, FirstSeen = p.FirstSeen, Online = p.Online, OfflineSince = p.OfflineSince,
             ShareCount = p.ShareCount,
             ItemCount = cat?.Shares.Sum(s => s.ItemCount) ?? 0,

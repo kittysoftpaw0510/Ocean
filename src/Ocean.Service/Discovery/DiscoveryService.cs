@@ -124,6 +124,10 @@ public sealed class DiscoveryService : BackgroundService
     {
         var myTag = () => Realm.Tag(_config.Current.Secret);
         var buffer = new byte[8192];
+        // OCEAN_TEST_DEAF_TO (developers only): node id prefixes whose beacons are ignored, which looks exactly like a
+        // PC on another network. Used to test reaching a node through another one (Via) on one machine.
+        var deafTo = (Environment.GetEnvironmentVariable("OCEAN_TEST_DEAF_TO") ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         while (!ct.IsCancellationRequested)
         {
             UdpReceiveResult r;
@@ -143,6 +147,7 @@ public sealed class DiscoveryService : BackgroundService
                 var b = Json.Deserialize<Beacon>(r.Buffer);
                 if (b is null || b.V != OceanDefaults.ProtocolVersion || b.Id == _identity.NodeId) continue;
                 if (b.Port <= 0 || b.Port > 65535 || string.IsNullOrEmpty(b.Id)) continue;
+                if (deafTo.Length > 0 && deafTo.Any(d => b.Id.StartsWith(d, StringComparison.OrdinalIgnoreCase))) continue;
                 if (!b.Verify()) { _log.LogDebug("beacon with bad signature from {Addr}", r.RemoteEndPoint); continue; }
                 if (b.Realm != myTag()) continue; // different shared secret: invisible
 

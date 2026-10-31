@@ -31,6 +31,17 @@ public sealed class Peer
     /// <summary>While relaying, when to try the direct route again.</summary>
     public DateTimeOffset DirectRetryAt { get; set; }
 
+    /// <summary>When its own beacon was last heard here (a direct route exists).</summary>
+    public DateTimeOffset DirectSeen { get; set; }
+    /// <summary>
+    /// Id of the node this one is reached through, when there is no network path to it from here (it is never heard
+    /// directly, but a node we do hear can reach it). Null for nodes heard directly.
+    /// </summary>
+    public string? Via { get; set; }
+    public string ViaName { get; set; } = "";
+    /// <summary>PCs between us and this node: 0 = heard directly, 1 = through <see cref="Via"/> (never more).</summary>
+    public int Hops { get; set; }
+
     /// <summary>
     /// Every address this peer was recently heard on. A PC with several adapters (Wi-Fi + Ethernet, VPN or
     /// virtual switches) is heard on each of them, and some of those addresses may not be reachable from here.
@@ -132,6 +143,7 @@ public sealed class PeerRegistry
                 {
                     Id = b.Id, PublicKey = b.Pk, Name = b.Name, User = b.User, Host = b.Host, Port = b.Port,
                     Realm = b.Realm, CatalogVersion = b.Cat, ShareCount = b.Shares, LastTs = b.Ts, FirstSeen = now, LastSeen = now,
+                    DirectSeen = now,
                 };
                 p.Seen(address, now);
                 return p;
@@ -145,6 +157,8 @@ public sealed class PeerRegistry
                     if (b.Ts < p.LastTs) { change = PeerChange.Updated; return p; }
                     p.Seen(address, now);
                     p.LastSeen = now;
+                    p.DirectSeen = now;
+                    if (p.Via is not null) { p.Via = null; p.ViaName = ""; p.Hops = 0; } // heard directly now: no relay needed
                     if (!p.Online) { p.Online = true; p.OfflineSince = null; change = PeerChange.Online; }
                     else if (p.CatalogVersion != b.Cat) change = PeerChange.VersionChanged;
                     p.Name = b.Name; p.User = b.User; p.Host = b.Host; p.Port = b.Port;
@@ -155,6 +169,48 @@ public sealed class PeerRegistry
         Changed?.Invoke(peer, change);
         return isNew ? PeerChange.Added : change;
     }
+
+    /// <summary>
+    /// A node that <paramref name="via"/> can reach and we can't hear ourselves. A route through another node only
+    /// replaces the current one when that went quiet or is longer; a node heard directly is left alone.
+    /// </summary>
+    public void UpsertRelayed(NeighborDto n, Peer via, string realm)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var hops = n.Hops + 1;
+        PeerChange? change = null;
+        var peer = _peers.AddOrUpdate(n.Id,
+            _ =>
+            {
+                change = PeerChange.Added;
+                return new Peer
+                {
+                    Id = n.Id, PublicKey = n.Pk, Name = n.Name, User = n.User, Host = n.Host, Realm = realm,
+                    CatalogVersion = n.Cat, ShareCount = n.Shares, FirstSeen = now, LastSeen = now,
+                    Via = via.Id, ViaName = Core.DisplayNames.Of(via.User, via.Name), Hops = hops,
+                };
+            },
+            (_, p) =>
+            {
+                lock (p)
+                {
+                    if (now - p.DirectSeen < RouteFresh) return p;                 // heard directly: that route wins
+                    if (p.Online && p.Via is { } current && current != via.Id
+                        && now - p.LastSeen < RouteFresh && p.Hops <= hops) return p; // keep the route we use
+                    if (!p.Online) { p.Online = true; p.OfflineSince = null; change = PeerChange.Online; }
+                    else change = p.CatalogVersion != n.Cat ? PeerChange.VersionChanged : PeerChange.Updated;
+                    p.Via = via.Id; p.ViaName = Core.DisplayNames.Of(via.User, via.Name); p.Hops = hops;
+                    p.LastSeen = now; p.PreferRelay = false;
+                    p.PublicKey = n.Pk; p.Name = n.Name; p.User = n.User; p.Host = n.Host; p.Realm = realm;
+                    p.CatalogVersion = n.Cat; p.ShareCount = n.Shares;
+                }
+                return p;
+            });
+        if (change is { } c) Changed?.Invoke(peer, c);
+    }
+
+    /// <summary>How long a route stays the one in use after it was last confirmed.</summary>
+    private static readonly TimeSpan RouteFresh = TimeSpan.FromSeconds(12);
 
     public void Remove(string id)
     {

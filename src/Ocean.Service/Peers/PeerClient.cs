@@ -1,10 +1,12 @@
 using System.Collections.Concurrent;
+using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using Ocean.Core;
 using Ocean.Core.Crypto;
+using Ocean.Core.Protocol;
 using Ocean.Service.Discovery;
 using Ocean.Service.State;
 
@@ -17,6 +19,7 @@ namespace Ocean.Service.Peers;
 /// - Multi-homed peers: a PC is often heard on several adapters (Ethernet, Wi-Fi, VPN/virtual switches). Requests
 ///   go to the last address that worked and fail over to the others with a short connect timeout.
 /// - Adds the shared-secret proof and the caller's grant tokens to every request.
+/// - Nodes we have no network path to are reached through the node that can reach them (see <see cref="Via"/>).
 /// </summary>
 public sealed class PeerClient : IDisposable
 {
@@ -28,10 +31,11 @@ public sealed class PeerClient : IDisposable
     private readonly ILogger<PeerClient> _log;
     private readonly ConcurrentDictionary<string, HttpClient> _clients = new();
     private readonly Net.RelayHub _relay;
+    private readonly PeerRegistry _registry;
 
-    public PeerClient(NodeIdentity identity, ConfigStore config, Net.RelayHub relay, ILogger<PeerClient> log)
+    public PeerClient(NodeIdentity identity, ConfigStore config, Net.RelayHub relay, PeerRegistry registry, ILogger<PeerClient> log)
     {
-        _identity = identity; _config = config; _relay = relay; _log = log;
+        _identity = identity; _config = config; _relay = relay; _registry = registry; _log = log;
     }
 
     private HttpClient ClientFor(string peerId) => _clients.GetOrAdd(peerId, id =>
@@ -105,6 +109,9 @@ public sealed class PeerClient : IDisposable
             throw new InvalidOperationException("Request was not built with PeerClient.Build");
         var relayable = !path.StartsWith("/p/relay", StringComparison.Ordinal);
 
+        // No network path to it: through the node that can reach it.
+        if (peer.Via is { } viaId) return await SendViaAsync(peer, viaId, req, path, option, ct);
+
         // Already known to need the reverse connection: use it, and only retry the direct route now and then.
         if (relayable && peer.PreferRelay && DateTimeOffset.UtcNow < peer.DirectRetryAt)
             return await _relay.SendAsync(peer.Id, req, ct);
@@ -124,6 +131,31 @@ public sealed class PeerClient : IDisposable
             peer.DirectRetryAt = DateTimeOffset.UtcNow.AddMinutes(2);
             return await _relay.SendAsync(peer.Id, req, ct);
         }
+    }
+
+    /// <summary>
+    /// Sends the request to <paramref name="viaId"/> as "/p/via/{peer}{path}"; that node passes it on. Our own requests
+    /// are signed as ours; a request we only pass on (we are a relay ourselves) keeps its origin's signature.
+    /// </summary>
+    private async Task<HttpResponseMessage> SendViaAsync(Peer peer, string viaId, HttpRequestMessage req, string path, HttpCompletionOption option, CancellationToken ct)
+    {
+        if (!Via.IsRelayable(path)) throw new HttpRequestException($"{peer.Name} can only be reached through another PC", null, HttpStatusCode.ServiceUnavailable);
+        if (!_registry.TryGetOnline(viaId, out var via) || via.Via is not null) // one PC in between at most
+            throw new HttpRequestException($"{peer.Name} is reached through {(via?.Name ?? NodeIdentity.ShortId(viaId))}, which is offline", null, HttpStatusCode.ServiceUnavailable);
+        var outer = Build(via, req.Method, Via.Prefix + peer.Id + path);
+        // the far node sees the origin's names, grants and range; the relay adds its own proof of the secret
+        foreach (var h in req.Headers)
+        {
+            if (h.Key.Equals("X-Ocean-Realm", StringComparison.OrdinalIgnoreCase)) continue;
+            outer.Headers.Remove(h.Key);
+            outer.Headers.TryAddWithoutValidation(h.Key, h.Value);
+        }
+        if (!req.Headers.Contains(Via.OriginHeader))
+            foreach (var (k, v) in Via.Sign(_identity, peer.Id, req.Method.Method, path))
+                outer.Headers.TryAddWithoutValidation(k, v);
+        outer.Content = req.Content;
+        // the relay itself is reached directly or through its reverse connection
+        return await SendAsync(outer, option, ct);
     }
 
     private async Task<HttpResponseMessage> SendDirectAsync(Peer peer, HttpRequestMessage req, string path, HttpCompletionOption option, CancellationToken ct)

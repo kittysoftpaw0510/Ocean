@@ -136,6 +136,11 @@ public static class PeerApi
             return ok ? Results.Ok() : Results.NotFound();
         });
 
+        // ---- relaying between nodes that have no network path to each other (see Via) ----
+        g.MapGet("/neighbors", (HttpContext ctx, MeshService mesh) => Results.Json(mesh.Neighbors(PeerContext.Get(ctx).ClientId), Json.Options));
+
+        g.MapMethods("/via/{target}/{**rest}", new[] { "GET", "HEAD", "POST" }, (HttpContext ctx, ViaForwarder via) => via.ServeAsync(ctx));
+
         g.MapGet("/thumb/{itemId}", async (HttpContext ctx, string itemId, CatalogService catalog, AccessService access, ThumbnailService thumbs, ConfigStore config) =>
         {
             if (config.Current.SharingPaused) return Results.StatusCode(503);

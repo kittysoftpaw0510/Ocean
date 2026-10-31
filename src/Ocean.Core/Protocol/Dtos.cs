@@ -148,6 +148,8 @@ public sealed class PeerDto
     public int ItemCount { get; set; }
     public int NewCount { get; set; }
     public bool CatalogLoaded { get; set; }
+    /// <summary>Reached through this node (name), when there is no network path to it from here.</summary>
+    public string? Via { get; set; }
 }
 
 public sealed class ItemOverrideDto

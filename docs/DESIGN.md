@@ -55,6 +55,24 @@ the catalog version and share count, so browsing nodes refetch a catalog only wh
 
 Beacon: `{v, t, id, pk, name, user, host, port, realm, cat, shares, ts, sig}`.
 
+### Reaching a PC through another one ("via", one bridge at most)
+
+When A and C have no network path to each other but both reach B, B bridges them:
+
+- Every 5 s each node asks the nodes it hears directly for `GET /p/neighbors`: the nodes they hear directly
+  (never nodes they reach through someone else, so there is never more than one PC in between). A node not heard
+  directly is listed as reached through the node that offered it (`PeerDto.via`). A direct beacon always wins;
+  a route through another bridge replaces the current one only when that went quiet for 12 s.
+- A sends C's request to B as `/p/via/{C's id}/p/…` (catalog, stream, thumb, access, ping only). B opens it
+  to C over its own connection (direct or reverse) and streams the answer back, `Range` and all.
+- A signs each such request with its node key (`X-Ocean-Origin`, `-Key`, `-Ts`, `-Sig` over origin, target,
+  method, path and time; ±1 day clock tolerance). B checks the signature and its own proof of the secret is
+  checked by C; C then serves the request as A's: A's grants, A's download slots, A's name on access requests.
+  A relay can therefore carry a request but never invent one in another node's name.
+- A relay refuses a request that already passed a relay (`X-Ocean-Hops`), and never relays to a node it reaches
+  only through another one.
+- B sees what it carries (as every node with the secret is trusted to); the video passes B twice (in and out).
+
 ### Network add-ons (Winsock LSPs) and the classic networking mode
 
 Some VPN, proxy, "network accelerator" and security programs install a Winsock Layered Service Provider
@@ -160,6 +178,8 @@ and the requester polls `GET /p/access/{requestId}` every 2 s.
 | GET | `/p/access/{id}` | poll a pending request |
 | GET | `/p/thumb/{itemId}` | JPEG; 403 `{error:"locked", lock}` when not authorized |
 | GET/HEAD | `/p/stream/{itemId}` | `Accept-Ranges: bytes`; rate-limited through a global token bucket when an upload cap is set |
+| GET | `/p/neighbors` | nodes this node hears directly (for the "via" bridge) |
+| GET/HEAD/POST | `/p/via/{nodeId}/p/…` | carry a signed request on to a node the caller can't reach |
 
 ## Local API (HTTP 127.0.0.1:38470)
 

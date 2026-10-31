@@ -16,6 +16,8 @@ and every byte between them travels over mutually authenticated, end-to-end encr
   name, size, duration or folder; search.
 - **Offline nodes stay visible**: when a PC goes offline it stays listed (dimmed, "last seen …") with its last known
   shares for 24 h by default; downloads you start wait and continue when it is back.
+- **Bridged networks**: when two PCs have no network path to each other but both reach a third one, Ocean passes
+  videos through that PC (shown as "via …" in the list). At most one PC in between.
 - **Player**: speed control (0.25× to 2×) and A-B repeat with markers on the seek bar.
 - **New videos are highlighted** (since your last visit to that node) and you get a notification
   when a node adds something.
@@ -136,6 +138,9 @@ $env:OCEAN_LOCAL_PORT = 38480; $env:OCEAN_PEER_PORT = 38481
 .\dist\Ocean\Ocean.Service.exe --verbose
 ```
 
+`OCEAN_TEST_DEAF_TO` (comma-separated node id prefixes) makes a node ignore those nodes' beacons, as if they were on
+another network: handy for testing the "via" bridge on one PC.
+
 ## Supported formats
 
 Any container the Windows Shell can inspect is listed and thumbnailed; streaming and downloading
@@ -146,5 +151,6 @@ MKV, AVI with exotic codecs, etc. use *Open in external player*. Ocean finds VLC
 ## Notes & limits
 
 - The service, when installed as a Windows service, runs as `LocalSystem`: it can read local drives and UNC paths but not mapped network drives.
-- Discovery uses UDP broadcast on port 38472; nodes must be on the same broadcast domain (same LAN/VLAN).
+- Discovery uses UDP broadcast on port 38472. A PC on another network is reached only through a PC that hears both
+  (at most one PC in between); that PC must be running Ocean and carries the traffic twice (in and out).
 - File names are transported as UTF-8 and never placed in URLs; downloads sanitize names (reserved names, invalid characters, >200-char segments, long paths).
