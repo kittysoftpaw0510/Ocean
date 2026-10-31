@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Ocean.Core.Protocol;
 
 namespace Ocean.App.ViewModels;
 
@@ -27,8 +29,162 @@ public partial class PlayerViewModel : ObservableObject
     [ObservableProperty] private bool _isFullscreen;
     [ObservableProperty] private string? _error;
     [ObservableProperty] private int _generation;
+    /// <summary>The next (re)open keeps quiet about resuming (switching between the original and the lighter copy).</summary>
+    public bool QuietStart { get; set; }
 
     public PlayerViewModel(MainViewModel main) { _main = main; }
+
+    // ---- lighter copy ----------------------------------------------------------------------
+    // After half a minute of watching the original, the owner is asked for a lighter copy; the banner follows it
+    // ("Preparing… 35%"), and once it is ready the viewer can switch (or is switched when playback keeps stalling).
+
+    /// <summary>none | queued | preparing | ready | off</summary>
+    [ObservableProperty] private string _lightState = "none";
+    [ObservableProperty] private int _lightPercent;
+    [ObservableProperty] private int _lightQueue;
+    [ObservableProperty] private bool _usingLight;
+    [ObservableProperty] private string _lightBanner = "";
+    [ObservableProperty] private bool _lightBannerVisible;
+    /// <summary>A short message the view shows on screen.</summary>
+    [ObservableProperty] private string? _notice;
+    private string? _originalUrl, _lightUrl;
+    private int _watchedTicks, _stalls;
+    private bool _lightRequested, _lightDismissed;
+    private CancellationTokenSource? _lightCts;
+    /// <summary>Remembered for the session: the user chose the original over the lighter copy.</summary>
+    private static bool _preferOriginal;
+    private const int TicksBeforeRequest = 120; // ticks come every 250 ms while playing: 30 s of watching
+
+    public bool CanSwitchToLight => LightState == LightVariant.Ready && !UsingLight && Peer is not null && _lightUrl is not null;
+    public bool CanToggleVariant => LightState == LightVariant.Ready && Peer is not null && _lightUrl is not null;
+    public string VariantButtonText => UsingLight ? "Watch original" : "Watch lighter version";
+    partial void OnLightStateChanged(string value) => LightChanged();
+    partial void OnUsingLightChanged(bool value) => LightChanged();
+    partial void OnLightPercentChanged(int value) => UpdateBanner();
+    partial void OnLightQueueChanged(int value) => UpdateBanner();
+
+    private void LightChanged()
+    {
+        OnPropertyChanged(nameof(CanSwitchToLight)); OnPropertyChanged(nameof(CanToggleVariant)); OnPropertyChanged(nameof(VariantButtonText));
+        UpdateBanner();
+    }
+
+    private void UpdateBanner()
+    {
+        var text = _lightDismissed ? "" : LightState switch
+        {
+            "queued" => $"Waiting to prepare a lighter version ({Place(LightQueue)} in line)… You're watching the original meanwhile.",
+            LightVariant.Preparing => $"Preparing a lighter version… {LightPercent}%. You're watching the original meanwhile.",
+            LightVariant.Ready when !UsingLight => "A lighter version is ready.",
+            _ => "",
+        };
+        LightBanner = text;
+        LightBannerVisible = text.Length > 0;
+    }
+
+    private static string Place(int n) => n switch { <= 1 => "next", 2 => "2nd", 3 => "3rd", _ => n + "th" };
+
+    private void BeginLight(ItemVm item, PeerVm peer, string originalUrl)
+    {
+        StopLight();
+        _originalUrl = originalUrl;
+        _lightUrl = _main.Api.StreamUrl(peer.Id, item.Id + LightVariant.Suffix, Path.ChangeExtension(item.Name, ".mp4"));
+        _watchedTicks = 0; _stalls = 0; _lightRequested = false; _lightDismissed = false;
+        var ready = item.Dto.Light == LightVariant.Ready && item.Dto.LightSize > 0;
+        UsingLight = ready && !_preferOriginal;
+        LightPercent = 0; LightQueue = 0;
+        LightState = ready ? LightVariant.Ready : item.Dto.Light == LightVariant.Preparing ? LightVariant.Preparing : "none";
+        if (LightState == LightVariant.Preparing) StartLightPolling(); // someone else asked already: follow it
+    }
+
+    private void EndLight()
+    {
+        StopLight();
+        _originalUrl = _lightUrl = null;
+        UsingLight = false; LightState = "none"; LightPercent = 0; LightQueue = 0;
+    }
+
+    private void StopLight() { _lightCts?.Cancel(); _lightCts = null; }
+
+    /// <summary>Every 250 ms while playing: after 30 s on the original, ask the owner for a lighter copy.</summary>
+    private void TickLight()
+    {
+        if (UsingLight || _lightRequested || Peer is null || Item is null) return;
+        if (LightState is LightVariant.Ready or "off") return;
+        if (++_watchedTicks < TicksBeforeRequest) return;
+        _lightRequested = true;
+        StartLightPolling(request: true);
+    }
+
+    private void StartLightPolling(bool request = false)
+    {
+        StopLight();
+        var peer = Peer; var item = Item;
+        if (peer is null || item is null) return;
+        var cts = _lightCts = new CancellationTokenSource();
+        var path = $"/api/peers/{peer.Id}/light/{Uri.EscapeDataString(item.Id)}";
+        _ = Task.Run(async () =>
+        {
+            var ask = request;
+            while (!cts.IsCancellationRequested)
+            {
+                LightStatusDto? st = null;
+                try { st = ask ? await _main.Api.PostAsync<LightStatusDto>(path, null, cts.Token) : await _main.Api.GetAsync<LightStatusDto>(path, cts.Token); }
+                catch (OperationCanceledException) { return; }
+                catch (Exception ex) { Services.AppLog.Warn("Player", "lighter copy: status", ex); }
+                ask = false;
+                if (cts.IsCancellationRequested) return;
+                var state = st?.State ?? "none";
+                await Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    if (cts.IsCancellationRequested) return;
+                    LightPercent = st?.Percent ?? 0; LightQueue = st?.Queue ?? 0;
+                    LightState = state;
+                    if (state == LightVariant.Ready) Services.AppLog.Info("Player", $"lighter copy ready: {item.Name} from {peer.Label}");
+                });
+                if (state is not ("queued" or LightVariant.Preparing)) return;
+                try { await Task.Delay(3000, cts.Token); } catch (OperationCanceledException) { return; }
+            }
+        });
+    }
+
+    [RelayCommand]
+    private void SwitchToLight()
+    {
+        if (!CanSwitchToLight) return;
+        _preferOriginal = false;
+        Switch(_lightUrl!, light: true);
+        Notice = "Switched to the lighter version";
+    }
+
+    [RelayCommand]
+    private void ToggleVariant()
+    {
+        if (!CanToggleVariant) return;
+        if (!UsingLight) { SwitchToLight(); return; }
+        _preferOriginal = true; _lightDismissed = true;
+        Switch(_originalUrl!, light: false);
+        Notice = "Original quality";
+    }
+
+    [RelayCommand]
+    private void DismissLightBanner() { _lightDismissed = true; UpdateBanner(); }
+
+    private void Switch(string url, bool light)
+    {
+        StartAt = PositionSeconds;
+        QuietStart = true;
+        UsingLight = light;
+        Url = url;
+        Generation++; // the view reopens the video and resumes at StartAt
+    }
+
+    /// <summary>The view saw playback stall mid-video; after a couple of stalls the lighter copy takes over.</summary>
+    public void NoteStall(double positionSeconds)
+    {
+        if (positionSeconds < 10 || UsingLight || _lightDismissed) return;
+        if (++_stalls >= 2 && CanSwitchToLight) SwitchToLight();
+    }
 
     // ---- A-B repeat --------------------------------------------------------------------------
     // Click once: A = here. Again: B = here, the segment A-B loops. Again: off.
@@ -133,6 +289,7 @@ public partial class PlayerViewModel : ObservableObject
     /// </summary>
     public void Remember(double position, bool finished = false, bool force = false)
     {
+        TickLight();
         if (_playing is null || _playingPeer is null) return;
         var persist = force || DateTime.UtcNow - _lastSaved > TimeSpan.FromSeconds(5);
         if (persist) _lastSaved = DateTime.UtcNow;
@@ -141,7 +298,9 @@ public partial class PlayerViewModel : ObservableObject
 
     public void Open(ItemVm item, string url, PeerVm peer, double startAt = 0)
     {
-        Item = item; Peer = peer; Url = url; Error = null;
+        Item = item; Peer = peer; Error = null;
+        BeginLight(item, peer, url);
+        Url = UsingLight ? _lightUrl : url;
         _playing = item; _playingPeer = peer; StartAt = Math.Max(0, startAt);
         Services.AppLog.Info("Player", $"play {item.Name} from {peer.Label}" + (StartAt > 0 ? $" at {StartAt:0} s" : ""));
         Title = item.Name;
@@ -156,6 +315,7 @@ public partial class PlayerViewModel : ObservableObject
     /// <summary>Plays one of my own shared videos straight from disk.</summary>
     public void OpenLocal(LocalItemVm item, string shareName)
     {
+        EndLight();
         Item = null; Peer = null; Url = item.Dto.FullPath; Error = null;
         _playing = null; _playingPeer = null; StartAt = 0; // no resume point: it is not another node's video
         Services.AppLog.Info("Player", $"play my own {item.Name}");
@@ -171,6 +331,7 @@ public partial class PlayerViewModel : ObservableObject
     [RelayCommand]
     private void Close()
     {
+        EndLight();
         IsOpen = false; IsFullscreen = false; IsPlaying = false;
         Url = null; Item = null;
     }

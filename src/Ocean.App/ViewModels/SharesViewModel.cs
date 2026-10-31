@@ -47,6 +47,7 @@ public partial class LocalItemVm : ObservableObject
     [ObservableProperty] private bool _isSelected;
     public string SizeText => Format.Bytes(Dto.Size);
     public string DurationText => Format.Duration(Dto.DurationMs);
+    public string LightTag => Dto.Light == LightVariant.Ready ? $"  ·  Light copy {Format.Bytes(Dto.LightSize)}" : Dto.Light == LightVariant.Preparing ? "  ·  Preparing a light copy…" : "";
     public string AddedText => Format.Ago(Dto.AddedAt);
     public string FullPath => Dto.FullPath;
     public ItemAccessMode OverrideMode => Dto.OverrideMode;

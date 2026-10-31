@@ -110,6 +110,10 @@ public static class LocalApi
         });
 
         // The player's requests: own copy or finished download from disk, otherwise through the stream cache.
+        // lighter copy of another node's video: how it is doing, or (POST) ask the owner to make one
+        g.MapMethods("/peers/{peerId}/light/{itemId}", new[] { "GET", "POST" }, async (string peerId, string itemId, HttpContext ctx, PeerService peers) =>
+            Results.Json(await peers.LightAsync(peerId, itemId, HttpMethods.IsPost(ctx.Request.Method), ctx.RequestAborted), Json.Options));
+
         g.MapMethods("/peers/{peerId}/stream/{itemId}/{name?}", new[] { "GET", "HEAD" }, (string peerId, string itemId, HttpContext ctx, PeerMedia media)
             => media.ServeAsync(ctx, peerId, itemId));
 
@@ -219,11 +223,13 @@ public static class LocalApi
         g.MapDelete("/downloads/{id}", (string id, DownloadManager dl) => dl.Remove(id) ? Results.Ok() : Results.NotFound());
 
         // ---------------------------------------------------------------- settings
-        g.MapGet("/settings", (ConfigStore config, FirewallRules firewall, StreamCache cache) =>
+        g.MapGet("/settings", (ConfigStore config, FirewallRules firewall, StreamCache cache, Media.LightCopies light) =>
         {
             var c = config.Current;
             return Results.Json(new SettingsDto
             {
+                LightCopies = c.LightCopies, LightKeepDays = c.LightKeepDays, LightCacheGB = c.LightCacheGB,
+                LightReadyCount = light.ReadyCount, LightUsedBytes = light.UsedBytes, LightAvailable = Media.LightCopies.Ffmpeg is not null,
                 NodeName = c.NodeName, UserName = c.UserName, Secret = c.Secret, DownloadDir = c.DownloadDir,
                 UploadLimitKBps = c.UploadLimitKBps, SharingPaused = c.SharingPaused, NewDays = c.NewDays,
                 MaxConcurrentDownloads = c.MaxConcurrentDownloads, NotifyNewVideos = c.NotifyNewVideos, OfflineKeepHours = c.OfflineKeepHours,
@@ -251,6 +257,9 @@ public static class LocalApi
                 c.OfflineKeepHours = Math.Clamp(dto.OfflineKeepHours, 1, 24 * 30);
                 c.AllowPublicNetworks = dto.AllowPublicNetworks;
                 c.AllowBridging = dto.AllowBridging;
+                c.LightCopies = dto.LightCopies;
+                c.LightKeepDays = Math.Clamp(dto.LightKeepDays, 1, 365);
+                c.LightCacheGB = Math.Clamp(dto.LightCacheGB, 1, 2000);
                 if (Enum.TryParse<NetworkMode>(dto.NetworkMode, true, out var mode)) c.NetworkMode = mode.ToString().ToLowerInvariant();
                 c.StreamCacheGB = Math.Clamp(dto.StreamCacheGB, 0, 500);
             });

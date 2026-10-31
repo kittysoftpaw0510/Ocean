@@ -60,8 +60,9 @@ public sealed class LogFile
                 var sb = new StringBuilder();
                 SummarizeRepeats(now, sb, all: false);
 
-                // Lines that differ only in numbers (times, ports, counts) count as the same line.
-                var key = level + " " + area + ": " + Numbers.Replace(message, "#");
+                // Warnings and debug lines that differ only in numbers (times, ports, counts) count as the same line;
+                // information lines must match exactly (file names carry dates and would collapse into each other).
+                var key = level + " " + area + ": " + (level == "INF" ? message : Numbers.Replace(message, "#"));
                 if (_recent.TryGetValue(key, out var r) && now - r.Last < RepeatWindow)
                 {
                     r.Skipped++;

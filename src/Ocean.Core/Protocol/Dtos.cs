@@ -68,6 +68,9 @@ public class ItemDto
     public int? Height { get; set; }
     public LockInfo? Lock { get; set; }
     public bool Unlocked { get; set; }
+    /// <summary>"preparing" or "ready" when the owner has a lighter copy for watching (see LightVariant); else null.</summary>
+    public string? Light { get; set; }
+    public long LightSize { get; set; }
     /// <summary>Set by the browsing side: added since the user's last visit.</summary>
     public bool IsNew { get; set; }
     /// <summary>Set by the browsing side: the same video (name + size) is in one of my own shares,
@@ -295,6 +298,16 @@ public sealed class SettingsDto
     public bool AllowPublicNetworks { get; set; } = true;
     /// <summary>Let PCs that have no network path to each other reach each other through this one.</summary>
     public bool AllowBridging { get; set; } = true;
+    /// <summary>Make lighter copies (720p) of my heavy videos when someone watches them.</summary>
+    public bool LightCopies { get; set; } = true;
+    /// <summary>Keep a lighter copy this many days after it was last watched.</summary>
+    public int LightKeepDays { get; set; } = 7;
+    /// <summary>Disk space for lighter copies (GB).</summary>
+    public int LightCacheGB { get; set; } = 20;
+    /// <summary>Read-only: copies ready now, their size, and whether ffmpeg was found.</summary>
+    public int LightReadyCount { get; set; }
+    public long LightUsedBytes { get; set; }
+    public bool LightAvailable { get; set; }
     /// <summary>Read-only: false when Ocean runs without administrator rights and can't change Windows Firewall itself.</summary>
     public bool FirewallManaged { get; set; }
     /// <summary>"auto" | "classic" | "fast" (applies when the service restarts).</summary>

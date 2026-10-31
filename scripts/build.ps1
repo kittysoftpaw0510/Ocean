@@ -66,6 +66,11 @@ if ($LASTEXITCODE -ne 0) { throw "app publish failed" }
 
 # ASP.NET leaves an IIS web.config behind; Ocean does not use IIS.
 Remove-Item (Join-Path $out "web.config") -ErrorAction SilentlyContinue
+# ffmpeg makes the lighter copies of videos for watching; shipped next to the service (fetched once into .tools\ffmpeg)
+$ffmpeg = & (Join-Path $PSScriptRoot "get-ffmpeg.ps1")
+Copy-Item $ffmpeg $out
+$ffmpegLicense = Join-Path (Split-Path -Parent $ffmpeg) "LICENSE-ffmpeg.txt"
+if (Test-Path $ffmpegLicense) { Copy-Item $ffmpegLicense $out }
 Copy-Item (Join-Path $PSScriptRoot "install-service.ps1") $out
 Copy-Item (Join-Path $PSScriptRoot "uninstall-service.ps1") $out
 Copy-Item (Join-Path $root "README.md") $out -ErrorAction SilentlyContinue

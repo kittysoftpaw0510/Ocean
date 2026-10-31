@@ -86,6 +86,9 @@ public partial class PlayerView : UserControl
             case nameof(PlayerViewModel.IsOpen):
                 if (!_vm.IsOpen) Stop();
                 break;
+            case nameof(PlayerViewModel.Notice):
+                if (_vm.Notice is { Length: > 0 } notice) ShowOsd(notice);
+                break;
         }
     }
 
@@ -332,8 +335,9 @@ public partial class PlayerView : UserControl
         {
             _vm.PositionSeconds = start;
             BeginSeek(start);
-            if (start == resume) ShowOsd("Resumed at " + Core.Format.Duration(TimeSpan.FromSeconds(start)));
+            if (start == resume && !_vm.QuietStart) ShowOsd("Resumed at " + Core.Format.Duration(TimeSpan.FromSeconds(start)));
         }
+        _vm.QuietStart = false;
         _opened = true;
     }
 
@@ -372,7 +376,12 @@ public partial class PlayerView : UserControl
         SetChrome(true);
     }
 
-    private void Media_BufferingStarted(object sender, RoutedEventArgs e) { if (_vm is not null) _vm.IsBuffering = true; }
+    private void Media_BufferingStarted(object sender, RoutedEventArgs e)
+    {
+        if (_vm is null) return;
+        _vm.IsBuffering = true;
+        if (_opened && _seekTarget is null) _vm.NoteStall(CurrentSeconds()); // a stall mid-video (not a seek): the lighter copy may take over
+    }
     private void Media_BufferingEnded(object sender, RoutedEventArgs e) { if (_vm is not null) _vm.IsBuffering = false; }
 
     private void Media_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

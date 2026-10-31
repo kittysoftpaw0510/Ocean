@@ -20,6 +20,11 @@ and every byte between them travels over mutually authenticated, end-to-end encr
   videos through that PC (shown as "via …" in the list). At most one PC in between. When several PCs can bridge
   the same pair, requests spread over the least busy ones and move to another when one fails. A bridge paces what
   it passes on like its own uploads, keeps a copy so the owner sends each part once, and can opt out in Settings.
+- **Lighter copies for watching**: when someone has watched one of your heavy videos for half a minute, your PC
+  makes a 720p copy at about 1.5 Mbps (with the bundled ffmpeg) and serves that from then on; viewers see
+  "Preparing…" meanwhile and can switch, or are switched when playback keeps stalling. The original is never
+  touched and downloads always get it. Copies are kept for a number of days after the last viewing, within a disk
+  limit; both are set in Settings, where the feature can also be turned off.
 - **Player**: speed control (0.25× to 2×) and A-B repeat with markers on the seek bar.
 - **New videos are highlighted** (since your last visit to that node) and you get a notification
   when a node adds something.
@@ -142,6 +147,12 @@ $env:OCEAN_LOCAL_PORT = 38480; $env:OCEAN_PEER_PORT = 38481
 
 `OCEAN_TEST_DEAF_TO` (comma-separated node id prefixes) makes a node ignore those nodes' beacons, as if they were on
 another network: handy for testing the "via" bridge on one PC.
+
+### ffmpeg
+
+The installer ships `ffmpeg.exe` (a gyan.dev release build, GPL; its licence is in `LICENSE-ffmpeg.txt` next to it)
+beside Ocean's service. It is used only to make the lighter copies described above. `scripts\get-ffmpeg.ps1`
+fetches it once into `.tools\ffmpeg` for the build; a portable build without it simply makes no copies.
 
 ## Supported formats
 

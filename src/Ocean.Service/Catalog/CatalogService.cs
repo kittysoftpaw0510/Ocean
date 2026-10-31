@@ -348,6 +348,7 @@ public sealed class CatalogService : IDisposable
                 h = Fnv.Add(h, dto.Size); h = Fnv.Add(h, dto.ModifiedAt.UtcTicks); h = Fnv.Add(h, dto.AddedAt.UtcTicks);
                 h = Fnv.Add(h, dto.DurationMs ?? -1); h = Fnv.Add(h, dto.Width ?? -1); h = Fnv.Add(h, dto.Height ?? -1);
                 h = Fnv.Add(h, dto.Lock?.Id); h = Fnv.Add(h, (long)(dto.Lock?.Mode ?? AccessMode.Public));
+                h = Fnv.Add(h, dto.Light); h = Fnv.Add(h, dto.LightSize);
                 map[i.Id] = h;
             }
         return map;
@@ -580,6 +581,7 @@ public sealed class CatalogService : IDisposable
         dto.DurationMs = i.DurationMs;
         dto.Width = i.Width;
         dto.Height = i.Height;
+        if (LightLookup is { } light) { (dto.Light, dto.LightSize) = light(i.Id, i); } else { dto.Light = null; dto.LightSize = 0; }
         if (share.Overrides.TryGetValue(i.Id, out var ov) && ov.Mode is ItemAccessMode.Password or ItemAccessMode.Ask)
         {
             dto.Lock = new LockInfo { Id = ItemLock(i.Id), Mode = ov.Mode == ItemAccessMode.Password ? AccessMode.Password : AccessMode.Ask };
@@ -864,31 +866,40 @@ public sealed class CatalogService : IDisposable
             touched.Add(share.Id);
         }
         foreach (var id in touched) if (_shares.TryGetValue(id, out var rt)) PersistIndex(rt);
-        if (touched.Count > 0) BumpForProbe();
+        if (touched.Count > 0) BumpSoon("probe");
     }
 
-    private static readonly TimeSpan ProbeBumpEvery = TimeSpan.FromSeconds(8);
-    private readonly object _probeLock = new();
-    private DateTime _lastProbeBump;
-    private Timer? _probeBumpTimer;
+    /// <summary>Set by the lighter-copies service: whether an item has a lighter copy ("ready" + size, "preparing", or nothing).</summary>
+    public Func<string, ItemRecord, (string? State, long Size)>? LightLookup { get; set; }
+
+    /// <summary>A lighter copy started, finished or went away: other nodes learn it with the next (coalesced) version.</summary>
+    public void NotifyLightChanged() => BumpSoon("light");
+
+    private static readonly TimeSpan BumpSoonEvery = TimeSpan.FromSeconds(8);
+    private readonly object _soonLock = new();
+    private DateTime _lastSoonBump;
+    private Timer? _soonTimer;
+    private string _soonReason = "";
 
     /// <summary>
-    /// A big library is read in batches of 25 for seconds or minutes; every batch would be a new catalog version
-    /// that every other node refetches and redraws. One version every few seconds carries the same information.
+    /// A big library is read in batches of 25 for seconds or minutes, and lighter copies change state twice each;
+    /// every change would be a new catalog version that every other node refetches and redraws. One version every
+    /// few seconds carries the same information.
     /// </summary>
-    private void BumpForProbe()
+    private void BumpSoon(string reason)
     {
-        lock (_probeLock)
+        lock (_soonLock)
         {
-            var since = DateTime.UtcNow - _lastProbeBump;
-            if (since >= ProbeBumpEvery)
+            _soonReason = reason;
+            var since = DateTime.UtcNow - _lastSoonBump;
+            if (since >= BumpSoonEvery)
             {
-                _lastProbeBump = DateTime.UtcNow;
-                Bump("probe");
+                _lastSoonBump = DateTime.UtcNow;
+                Bump(reason);
                 return;
             }
-            _probeBumpTimer ??= new Timer(_ => BumpForProbe(), null, Timeout.Infinite, Timeout.Infinite);
-            _probeBumpTimer.Change(ProbeBumpEvery - since, Timeout.InfiniteTimeSpan);
+            _soonTimer ??= new Timer(_ => { string r; lock (_soonLock) r = _soonReason; BumpSoon(r); }, null, Timeout.Infinite, Timeout.Infinite);
+            _soonTimer.Change(BumpSoonEvery - since, Timeout.InfiniteTimeSpan);
         }
     }
 

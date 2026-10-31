@@ -29,6 +29,11 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _networkInfo = "";
     [ObservableProperty] private bool _firewallManaged = true;
     [ObservableProperty] private bool _allowBridging = true;
+    [ObservableProperty] private bool _lightCopies = true;
+    [ObservableProperty] private int _lightKeepDays = 7;
+    [ObservableProperty] private int _lightCacheGB = 20;
+    [ObservableProperty] private bool _lightAvailable = true;
+    [ObservableProperty] private string _lightStatusText = "";
     [ObservableProperty] private int _streamCacheGB = 5;
     [ObservableProperty] private string _streamCacheUsedText = "";
     [ObservableProperty] private bool _runAtStartup;
@@ -56,6 +61,9 @@ public partial class SettingsViewModel : ObservableObject
     partial void OnNotifyNewVideosChanged(bool value) => MarkDirty();
     partial void OnAllowPublicNetworksChanged(bool value) => MarkDirty();
     partial void OnAllowBridgingChanged(bool value) => MarkDirty();
+    partial void OnLightCopiesChanged(bool value) => MarkDirty();
+    partial void OnLightKeepDaysChanged(int value) => MarkDirty();
+    partial void OnLightCacheGBChanged(int value) => MarkDirty();
     partial void OnNetworkModeChanged(string value) => MarkDirty();
 
     [RelayCommand]
@@ -98,6 +106,9 @@ public partial class SettingsViewModel : ObservableObject
                 NodeName = s.NodeName; UserName = s.UserName; Secret = s.Secret ?? ""; DownloadDir = s.DownloadDir;
                 UploadLimitKBps = s.UploadLimitKBps; NewDays = s.NewDays; MaxConcurrentDownloads = s.MaxConcurrentDownloads; NotifyNewVideos = s.NotifyNewVideos; OfflineKeepHours = s.OfflineKeepHours;
                 AllowPublicNetworks = s.AllowPublicNetworks; FirewallManaged = s.FirewallManaged; AllowBridging = s.AllowBridging;
+                LightCopies = s.LightCopies; LightKeepDays = s.LightKeepDays; LightCacheGB = s.LightCacheGB; LightAvailable = s.LightAvailable;
+                LightStatusText = !s.LightAvailable ? "ffmpeg.exe isn't next to Ocean's service on this PC, so no copies are made here."
+                    : s.LightReadyCount == 0 ? "No lighter copies yet." : $"{s.LightReadyCount} lighter {(s.LightReadyCount == 1 ? "copy" : "copies")} ready, {Format.Bytes(s.LightUsedBytes)} on disk.";
                 NetworkMode = string.IsNullOrEmpty(s.NetworkMode) ? "auto" : s.NetworkMode.ToLowerInvariant();
                 StreamCacheGB = s.StreamCacheGB; StreamCacheUsedText = CacheUsed(s.StreamCacheUsedBytes);
                 _main.DownloadsVm.DownloadDir = s.DownloadDir;
@@ -129,6 +140,7 @@ public partial class SettingsViewModel : ObservableObject
             {
                 NodeName = NodeName.Trim(), UserName = UserName.Trim(), Secret = Secret, DownloadDir = DownloadDir.Trim(),
                 UploadLimitKBps = UploadLimitKBps, NewDays = NewDays, MaxConcurrentDownloads = MaxConcurrentDownloads, OfflineKeepHours = OfflineKeepHours, AllowPublicNetworks = AllowPublicNetworks, AllowBridging = AllowBridging, StreamCacheGB = StreamCacheGB, NetworkMode = NetworkMode,
+                LightCopies = LightCopies, LightKeepDays = LightKeepDays, LightCacheGB = LightCacheGB,
                 NotifyNewVideos = NotifyNewVideos, SharingPaused = _main.SharingPaused,
             });
             Dirty = false;

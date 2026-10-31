@@ -190,7 +190,8 @@ and the requester polls `GET /p/access/{requestId}` every 2 s.
 | POST | `/p/access` | `{lockId, password?}` → granted / wrong_password / pending / denied |
 | GET | `/p/access/{id}` | poll a pending request |
 | GET | `/p/thumb/{itemId}` | JPEG; 403 `{error:"locked", lock}` when not authorized |
-| GET/HEAD | `/p/stream/{itemId}` | `Accept-Ranges: bytes`; rate-limited through a global token bucket when an upload cap is set |
+| GET/HEAD | `/p/stream/{itemId}` | `Accept-Ranges: bytes`; rate-limited through a global token bucket when an upload cap is set; `{itemId}@light` = the lighter copy |
+| GET/POST | `/p/light/{itemId}` | state of the lighter copy; POST asks for one ("I'm watching this") |
 | GET | `/p/neighbors` | nodes this node hears directly, its load and a revision (304 when unchanged); empty when bridging is off |
 | GET/HEAD/POST | `/p/via/{nodeId}/p/…` | carry a signed request on to a node the caller can't reach |
 
@@ -198,6 +199,28 @@ and the requester polls `GET /p/access/{requestId}` every 2 s.
 
 Status, event stream, peers and their catalogs, unlocking, thumbnail/stream proxies, share CRUD and
 per-item policies, pending requests and grants, downloads, settings. See `Api/LocalApi.cs`.
+
+## Lighter copies for watching (`Ocean.Service.Media.LightCopies`)
+
+- A viewer that has watched another node's video for 30 s (`PlayerViewModel`) posts `/p/light/{itemId}` to the
+  owner (through the local `/api/peers/{peer}/light/{item}`). The owner queues the video unless its copy is
+  already ready, failed or skipped for this version of the file (key = modified time + size), bridging is off,
+  or ffmpeg is missing. `GET` returns the state: `none | queued | preparing (+percent) | ready (+size) | off`.
+  Only a player showing the banner polls (every 3 s); nothing is pushed to everyone.
+- One conversion at a time, `ffmpeg` at below-normal priority: `scale=-2:min(720,ih)`, libx264 veryfast,
+  CRF 25 capped at 1.8 Mbps, AAC 96 kbps, `+faststart`. Progress comes from `-progress pipe:1`. Sources under
+  2 Mbps that are not above 720p are skipped, and a copy that is not at least 40 % smaller is dropped.
+- Copies live in `cache\light\{itemId}-{key}.mp4` with `index.json`. A sweep (at start and every 30 min) removes
+  copies whose video changed or left the share, copies not watched for `LightKeepDays`, and the least recently
+  watched beyond `LightCacheGB`. Serving or requesting a copy counts as watching it.
+- The catalog carries `ItemDto.Light` ("preparing" / "ready") and `LightSize`, included in the change-log
+  fingerprint and bumped through the coalesced `BumpSoon` (one version per 8 s at most).
+- Viewers ask for `/p/stream/{itemId}@light`; the owner serves the copy under the original's locks. On the viewing
+  node, `PeerService.FindItem` turns `{id}@light` into an item of its own (own size, `.mp4` name), so the stream
+  cache, downloads-from-cache and bridges treat it like any other video. Downloads use the original id.
+- Player: the original plays while the copy is prepared ("Preparing… 35 %"); when ready, Switch resumes at the
+  same position with the lighter URL, and two stalls after the first 10 s switch automatically. "Watch original"
+  switches back and is remembered for the session.
 
 ## Downloads
 

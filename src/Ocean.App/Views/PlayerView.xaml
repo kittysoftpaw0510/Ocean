@@ -31,6 +31,17 @@
         <!-- buffering -->
         <ProgressBar IsIndeterminate="True" Height="3" VerticalAlignment="Top" Visibility="{Binding IsBuffering, Converter={StaticResource BoolToVis}}"/>
 
+        <!-- lighter copy: being prepared on the owner's PC, or ready to switch to -->
+        <Border Background="#D91E293B" CornerRadius="8" Padding="14,8" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,68,0,0"
+                Visibility="{Binding LightBannerVisible, Converter={StaticResource BoolToVis}}">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="{Binding LightBanner}" VerticalAlignment="Center" Foreground="White" MaxWidth="560" TextWrapping="Wrap"/>
+                <Button Style="{StaticResource BtnPrimary}" Content="Switch" Margin="12,0,0,0" Padding="12,4" Command="{Binding SwitchToLightCommand}"
+                        Visibility="{Binding CanSwitchToLight, Converter={StaticResource BoolToVis}}"/>
+                <Button Style="{StaticResource BtnIcon}" Content="&#xE711;" ToolTip="Hide" Margin="6,0,0,0" Command="{Binding DismissLightBannerCommand}"/>
+            </StackPanel>
+        </Border>
+
         <!-- top bar -->
         <Border x:Name="TopBar" VerticalAlignment="Top" Padding="20,14">
             <Border.Background>
@@ -122,6 +133,12 @@
                         </Button>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <!-- lighter copy / original -->
+                        <Button Style="{StaticResource BtnGhost}" Padding="10,4" Margin="0,0,8,0" Command="{Binding ToggleVariantCommand}"
+                                Visibility="{Binding CanToggleVariant, Converter={StaticResource BoolToVis}}"
+                                ToolTip="The owner's PC has a lighter 720p version of this video, easier on the network">
+                            <TextBlock Text="{Binding VariantButtonText}" FontSize="13" Foreground="White"/>
+                        </Button>
                         <!-- playback speed -->
                         <Button x:Name="SpeedButton" Style="{StaticResource BtnGhost}" Padding="10,4" Margin="0,0,8,0" Click="Speed_Click"
                                 ToolTip="Playback speed (Shift+&gt; faster, Shift+&lt; slower)" AutomationProperties.Name="Playback speed">

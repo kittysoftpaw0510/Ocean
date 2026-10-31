@@ -42,7 +42,7 @@
                     <StackPanel Grid.Column="1" Margin="12,0" VerticalAlignment="Center">
                         <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
                         <TextBlock Style="{StaticResource Dim}">
-                            <Run Text="{Binding SizeText, Mode=OneWay}"/><Run Text="{Binding DurationText, Mode=OneWay, StringFormat='  ·  {0}'}"/><Run Text="{Binding AddedText, Mode=OneWay, StringFormat='  ·  added {0}'}"/>
+                            <Run Text="{Binding SizeText, Mode=OneWay}"/><Run Text="{Binding DurationText, Mode=OneWay, StringFormat='  ·  {0}'}"/><Run Text="{Binding AddedText, Mode=OneWay, StringFormat='  ·  added {0}'}"/><Run Text="{Binding LightTag, Mode=OneWay}"/>
                         </TextBlock>
                     </StackPanel>
                     <Border Grid.Column="2" CornerRadius="10" Background="{StaticResource Bg3}" Padding="8,2" VerticalAlignment="Center" Visibility="{Binding HasOverride, Converter={StaticResource BoolToVis}}">

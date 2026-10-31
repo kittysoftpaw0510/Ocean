@@ -241,7 +241,7 @@
                     <StackPanel Grid.Row="1" Margin="2,8,2,0">
                         <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" MaxHeight="36" LineHeight="18" TextTrimming="CharacterEllipsis"/>
                         <TextBlock Style="{StaticResource Dim}" Margin="0,3,0,0">
-                            <Run Text="{Binding SizeText, Mode=OneWay}"/><Run Text="  ·  "/><Run Text="{Binding AddedText, Mode=OneWay}"/>
+                            <Run Text="{Binding SizeText, Mode=OneWay}"/><Run Text="  ·  "/><Run Text="{Binding AddedText, Mode=OneWay}"/><Run Text="{Binding LightTag, Mode=OneWay}"/>
                         </TextBlock>
                         <TextBlock Style="{StaticResource Dim}" Text="{Binding Folder}" Visibility="{Binding Folder, Converter={StaticResource NullToVis}}" Margin="0,1,0,0"/>
                     </StackPanel>

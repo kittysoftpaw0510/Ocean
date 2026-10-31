@@ -232,6 +232,31 @@
                                             ToolTip="Delete the cached video bytes now"/>
                                 </StackPanel>
                             </Grid>
+                            <Border Style="{StaticResource Divider}"/>
+                            <Grid Style="{StaticResource Row}">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                    <TextBlock Text="Make lighter copies of my videos for watching" Style="{StaticResource RowTitle}"/>
+                                    <TextBlock Style="{StaticResource RowHint}"
+                                               Text="When someone has been watching one of your heavy videos for half a minute, this PC makes a 720p copy at about 1.5 Mbps and serves that to viewers from then on: the same picture for screen recordings, a fraction of the network. Your original file is never touched, and downloads always get the original. Made one at a time at low priority; viewers see 'Preparing…' meanwhile."/>
+                                    <TextBlock Text="{Binding LightStatusText}" Style="{StaticResource RowHint}" Margin="0,4,0,0"/>
+                                </StackPanel>
+                                <CheckBox Grid.Column="1" Style="{StaticResource Switch}" IsChecked="{Binding LightCopies}" IsEnabled="{Binding LightAvailable}" AutomationProperties.Name="Make lighter copies of my videos for watching"/>
+                            </Grid>
+                            <Border Style="{StaticResource Divider}"/>
+                            <Grid Style="{StaticResource Row}" IsEnabled="{Binding LightCopies}">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                    <TextBlock Text="Keep lighter copies" Style="{StaticResource RowTitle}"/>
+                                    <TextBlock Style="{StaticResource RowHint}" Text="A copy is deleted this many days after it was last watched, and when the original changes or leaves the share. The disk limit removes the least recently watched copies first."/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBox Text="{Binding LightKeepDays, UpdateSourceTrigger=PropertyChanged}" Width="56" HorizontalContentAlignment="Center" AutomationProperties.Name="Days to keep lighter copies"/>
+                                    <TextBlock Text="days" Style="{StaticResource Muted}" VerticalAlignment="Center" Margin="10,0,18,0"/>
+                                    <TextBox Text="{Binding LightCacheGB, UpdateSourceTrigger=PropertyChanged}" Width="56" HorizontalContentAlignment="Center" AutomationProperties.Name="Disk space for lighter copies in GB"/>
+                                    <TextBlock Text="GB at most" Style="{StaticResource Muted}" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                                </StackPanel>
+                            </Grid>
                         </StackPanel>
                     </Border>
 

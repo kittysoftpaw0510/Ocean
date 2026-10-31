@@ -88,6 +88,8 @@ builder.Services.AddSingleton<PeerClient>();
 builder.Services.AddSingleton<PeerService>();
 builder.Services.AddSingleton<StreamCache>();
 builder.Services.AddSingleton<PeerMedia>();
+builder.Services.AddSingleton<Ocean.Service.Media.LightCopies>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Ocean.Service.Media.LightCopies>());
 builder.Services.AddSingleton<DownloadManager>();
 builder.Services.AddSingleton(new UploadScheduler { BytesPerSecond = cfg.UploadLimitKBps * 1024L });
 builder.Services.AddSingleton<MeshService>();

@@ -153,13 +153,25 @@ public static class PeerApi
             return Results.File(path, "image/jpeg", lastModified: item.ModifiedAt, entityTag: new EntityTagHeaderValue($"\"{item.Id}-{item.ModifiedAt.UtcTicks}\""));
         });
 
-        g.MapMethods("/stream/{itemId}", new[] { "GET", "HEAD" }, (HttpContext ctx, string itemId, CatalogService catalog, AccessService access, UploadScheduler uploads, ConfigStore config) =>
+        // ---- lighter copies for watching (see LightCopies): how one is doing, or (POST) "I'm watching this, make one" ----
+        g.MapMethods("/light/{itemId}", new[] { "GET", "POST" }, (HttpContext ctx, string itemId, CatalogService catalog, AccessService access, Media.LightCopies light) =>
         {
-            if (config.Current.SharingPaused) return Results.StatusCode(503);
             if (!catalog.TryGetItem(itemId, out var share, out var item)) return Results.NotFound();
             var pc = PeerContext.Get(ctx);
             if (!catalog.IsItemAccessible(share, item, access.Checker(pc.ClientId, pc.Grants))) return Locked(share, item);
-            var full = catalog.FullPath(share, item);
+            return Results.Json(light.Request(itemId, enqueue: HttpMethods.IsPost(ctx.Request.Method)), Json.Options);
+        });
+
+        g.MapMethods("/stream/{itemId}", new[] { "GET", "HEAD" }, (HttpContext ctx, string itemId, CatalogService catalog, AccessService access, UploadScheduler uploads, ConfigStore config, Media.LightCopies light) =>
+        {
+            if (config.Current.SharingPaused) return Results.StatusCode(503);
+            // "{id}@light": the lighter copy instead of the original (same locks)
+            var wantLight = LightVariant.Split(itemId, out var baseId);
+            if (!catalog.TryGetItem(baseId, out var share, out var item)) return Results.NotFound();
+            var pc = PeerContext.Get(ctx);
+            if (!catalog.IsItemAccessible(share, item, access.Checker(pc.ClientId, pc.Grants))) return Locked(share, item);
+            var full = wantLight ? light.PathFor(baseId, item) : catalog.FullPath(share, item);
+            if (full is null) return Results.NotFound();
             // Saving a copy can wait; watching can't. Downloads beyond a few at once are asked to come back shortly.
             var kind = string.Equals(ctx.Request.Headers[PeerHeaders.Purpose], PeerHeaders.Download, StringComparison.OrdinalIgnoreCase)
                 ? UploadKind.Download : UploadKind.Stream;

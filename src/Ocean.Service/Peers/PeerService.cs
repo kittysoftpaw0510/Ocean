@@ -220,8 +220,32 @@ public sealed class PeerService : IDisposable
 
     public CatalogDto? Cached(string peerId) => _catalogs.TryGetValue(peerId, out var c) ? c : null;
 
+    /// <summary>An item of a node's catalog; "{id}@light" gives its lighter copy as an item when the owner has one.</summary>
     public ItemDto? FindItem(string peerId, string itemId)
-        => Cached(peerId)?.Shares.SelectMany(s => s.Items).FirstOrDefault(i => i.Id == itemId);
+    {
+        var light = LightVariant.Split(itemId, out var baseId);
+        var item = Cached(peerId)?.Shares.SelectMany(s => s.Items).FirstOrDefault(i => i.Id == baseId);
+        if (item is null || !light) return item;
+        return item.Light == LightVariant.Ready && item.LightSize > 0 ? LightVariant.Of(item) : null;
+    }
+
+    /// <summary>How the lighter copy of another node's video is doing; with <paramref name="request"/>, asks for one.</summary>
+    public async Task<LightStatusDto> LightAsync(string peerId, string itemId, bool request, CancellationToken ct)
+    {
+        try
+        {
+            var peer = OnlinePeer(peerId);
+            var req = _client.Build(peer, request ? HttpMethod.Post : HttpMethod.Get, "/p/light/" + Uri.EscapeDataString(itemId), GrantsFor(peerId));
+            using var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseContentRead, ct);
+            if (resp.StatusCode == HttpStatusCode.NotFound) return new LightStatusDto { State = "off" }; // an older Ocean there
+            if (!resp.IsSuccessStatusCode) return new LightStatusDto { State = "none" };
+            return await resp.Content.ReadFromJsonAsync<LightStatusDto>(Json.Options, ct) ?? new LightStatusDto();
+        }
+        catch (Exception ex) when (ex is PeerUnavailableException or HttpRequestException or OperationCanceledException or System.Text.Json.JsonException)
+        {
+            return new LightStatusDto { State = "none" };
+        }
+    }
 
     private void ScheduleFetch(string peerId)
     {

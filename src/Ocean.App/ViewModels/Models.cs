@@ -102,6 +102,8 @@ public partial class ItemVm : ObservableObject
     public bool IsNew => Dto.IsNew;
     public bool IsMine => Dto.IsMine;
     public string LockText => Dto.Lock?.Mode == AccessMode.Password ? "Password protected" : Dto.Lock?.Mode == AccessMode.Ask ? "Owner approval required" : "";
+    /// <summary>"  ·  Light" when the owner has a lighter copy for watching, "  ·  Preparing…" while it is being made.</summary>
+    public string LightTag => Dto.Light == LightVariant.Ready ? "  ·  Light" : Dto.Light == LightVariant.Preparing ? "  ·  Preparing…" : "";
     public string Tooltip => $"{Dto.Name}\n{ShareName}{(Folder.Length > 0 ? "  ›  " + Folder : "")}\n{SizeText}{(DurationText.Length > 0 ? "  ·  " + DurationText : "")}{(ResolutionText.Length > 0 ? "  ·  " + ResolutionText : "")}\nAdded {AddedFull}";
 
     [ObservableProperty] private bool _isSelected;
