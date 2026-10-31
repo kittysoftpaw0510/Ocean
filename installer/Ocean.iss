@@ -12,7 +12,7 @@
 ;   - uninstall removes the service, firewall rules and shortcuts, and offers to remove settings/caches
 
 #ifndef AppVersion
-  #define AppVersion "1.0.6"
+  #define AppVersion "1.0.7"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\dist\setup\Ocean"
@@ -145,6 +145,7 @@ begin
     Sc('create {#ServiceName} ' + Bin + ' start= auto DisplayName= "{#ServiceDisplayName}"');
   Sc('description {#ServiceName} "Shares and streams videos with other Ocean PCs on the local network."');
   Sc('failure {#ServiceName} reset= 86400 actions= restart/5000/restart/10000/restart/30000');
+  Sc('failureflag {#ServiceName} 1'); // a deliberate exit with a failure code (restart from Settings) is restarted too
   Sc('sdset {#ServiceName} ' + ServiceSddl);
   if Sc('start {#ServiceName}') <> 0 then
     Log('Service did not start immediately; Ocean will start it on first launch.');
