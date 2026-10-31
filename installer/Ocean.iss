@@ -44,6 +44,8 @@ WizardSmallImageFile={#Assets}\wizard-small-100.bmp,{#Assets}\wizard-small-125.b
 Compression=lzma2/ultra64
 SolidCompression=yes
 LZMANumBlockThreads=4
+; compress in a separate (64-bit on 64-bit Windows) process: the bundled ffmpeg pushes the 32-bit compiler out of memory
+LZMAUseSeparateProcess=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
