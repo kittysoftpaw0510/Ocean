@@ -8,7 +8,7 @@ public static class OceanDefaults
     public const int PeerPort = 38471;       // LAN HTTPS (mutual TLS) API consumed by other nodes
     public const int DiscoveryPort = 38472;  // UDP beacon port
     public const string ServiceName = "OceanService";
-    public const string AppVersion = "1.1.0";
+    public const string AppVersion = "1.1.1";
 
     /// <summary>Data directory. Override with OCEAN_DATA_DIR (handy for running two nodes on one PC).</summary>
     public static string DataDir
