@@ -77,7 +77,7 @@ public partial class DownloadsViewModel : ObservableObject
             foreach (var d in list) Jobs.Add(new DownloadVm(d));
             Recount();
         }
-        catch (Exception ex) { _main.Toast("Could not load downloads", ex.Message, "error"); }
+        catch (Exception ex) { _main.Error("Could not load downloads", ex); }
     }
 
     public void Upsert(DownloadJobDto d)
@@ -110,27 +110,27 @@ public partial class DownloadsViewModel : ObservableObject
     private async Task Cancel(DownloadVm? job)
     {
         if (job is null) return;
-        try { await _main.Api.PostAsync($"/api/downloads/{job.Id}/cancel"); } catch (Exception ex) { _main.Toast("Could not cancel", ex.Message, "error"); }
+        try { await _main.Api.PostAsync($"/api/downloads/{job.Id}/cancel"); } catch (Exception ex) { _main.Error("Could not cancel", ex); }
     }
 
     [RelayCommand]
     private async Task Retry(DownloadVm? job)
     {
         if (job is null) return;
-        try { await _main.Api.PostAsync($"/api/downloads/{job.Id}/retry"); } catch (Exception ex) { _main.Toast("Could not retry", ex.Message, "error"); }
+        try { await _main.Api.PostAsync($"/api/downloads/{job.Id}/retry"); } catch (Exception ex) { _main.Error("Could not retry", ex); }
     }
 
     [RelayCommand]
     private async Task Remove(DownloadVm? job)
     {
         if (job is null) return;
-        try { await _main.Api.DeleteAsync($"/api/downloads/{job.Id}"); RemoveJob(job.Id); } catch (Exception ex) { _main.Toast("Could not remove", ex.Message, "error"); }
+        try { await _main.Api.DeleteAsync($"/api/downloads/{job.Id}"); RemoveJob(job.Id); } catch (Exception ex) { _main.Error("Could not remove", ex); }
     }
 
     [RelayCommand]
     private async Task ClearCompleted()
     {
-        try { await _main.Api.PostAsync("/api/downloads/clear"); await LoadAsync(); } catch (Exception ex) { _main.Toast("Could not clear", ex.Message, "error"); }
+        try { await _main.Api.PostAsync("/api/downloads/clear"); await LoadAsync(); } catch (Exception ex) { _main.Error("Could not clear", ex); }
     }
 
     [RelayCommand]
@@ -138,7 +138,7 @@ public partial class DownloadsViewModel : ObservableObject
     {
         if (job is null || !job.IsDone) return;
         try { Process.Start(new ProcessStartInfo(job.Destination) { UseShellExecute = true }); }
-        catch (Exception ex) { _main.Toast("Could not open", ex.Message, "error"); }
+        catch (Exception ex) { _main.Error("Could not open", ex); }
     }
 
     [RelayCommand]

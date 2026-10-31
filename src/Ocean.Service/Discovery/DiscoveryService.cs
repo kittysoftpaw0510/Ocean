@@ -28,6 +28,10 @@ public sealed class DiscoveryService : BackgroundService
     private UdpClient? _udp;
     private readonly SemaphoreSlim _announce = new(0);
     private long _seq;
+    /// <summary>Beacon type of a direct answer to a node's broadcast. Older nodes treat it as a hello.</summary>
+    private const string ReplyType = "reply";
+    private const long ReplyEveryMs = 8000;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _lastReply = new();
 
     private readonly Net.RelayHub _relay;
     private readonly Net.RelayWorker _relayWorker;
@@ -52,6 +56,12 @@ public sealed class DiscoveryService : BackgroundService
             AnnounceNow();
         };
         _registry.Changed += (p, change) => _events.Publish("peer", new { id = p.Id, change = change.ToString().ToLowerInvariant(), name = p.Name, user = p.User, version = p.CatalogVersion });
+        _registry.Changed += (p, change) =>
+        {
+            if (change == PeerChange.Offline)
+                _log.LogInformation("peer offline: {Name} ({User}), last heard {Ago:0}s ago", p.Name, p.User, (DateTimeOffset.UtcNow - p.LastSeen).TotalSeconds);
+            if (change is PeerChange.Offline or PeerChange.Removed) _lastReply.TryRemove(p.Id, out _);
+        };
     }
 
     public void AnnounceNow()
@@ -127,21 +137,23 @@ public sealed class DiscoveryService : BackgroundService
                 // Reverse connection, serving side: this node can't reach us and asks us to connect out to it.
                 if (b.Want is { Count: > 0 } && b.Want.Contains(_identity.NodeId)) _relayWorker.Wanted(b.Id);
 
-                // Reverse connection, requesting side: we can't reach this node. Answer its broadcast right away:
-                // Windows Firewall lets a unicast reply to a broadcast in (for ~3 s) even when it blocks everything
-                // else, so our request to connect back arrives even through a strict firewall.
-                if (_relay.IsWanted(b.Id))
-                {
-                    var reply = Build("hello");
-                    try { _udp!.Send(reply, reply.Length, new IPEndPoint(r.RemoteEndPoint.Address, r.RemoteEndPoint.Port)); } catch { }
-                }
-                if (change is PeerChange.Added or PeerChange.Online)
-                {
+                var isNew = change is PeerChange.Added or PeerChange.Online;
+                if (isNew)
                     _log.LogInformation("peer {State}: {Name} ({User}@{Host}) {Addr}", change == PeerChange.Added ? "online" : "back online",
                         b.Name, b.User, b.Host, r.RemoteEndPoint.Address);
-                    // answer directly so the newcomer learns about us without waiting for our next broadcast
-                    var hello = Build("hello");
-                    try { _udp!.Send(hello, hello.Length, new IPEndPoint(r.RemoteEndPoint.Address, _config.Current.DiscoveryPort)); } catch { }
+
+                // Answer directly ("reply", never answered itself). Broadcasts are fragile: Wi-Fi drops them without
+                // retrying, and a firewall may block them while it still lets a unicast reply to the node's own
+                // broadcast in (for ~3 s). Replying to each node's broadcasts (at most every few seconds) means a node
+                // only drops out of a list when both directions fail, and a newcomer learns about us right away.
+                // Also carries our request to connect back (Want) to a node we can't reach.
+                var due = isNew || _relay.IsWanted(b.Id)
+                          || (b.T != ReplyType && Environment.TickCount64 - _lastReply.GetValueOrDefault(b.Id) >= ReplyEveryMs);
+                if (due)
+                {
+                    _lastReply[b.Id] = Environment.TickCount64;
+                    var reply = Build(ReplyType);
+                    try { _udp!.Send(reply, reply.Length, new IPEndPoint(r.RemoteEndPoint.Address, r.RemoteEndPoint.Port)); } catch { }
                 }
             }
             catch (Exception ex) { _log.LogDebug(ex, "beacon parse"); }

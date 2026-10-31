@@ -198,7 +198,7 @@ public partial class SharesViewModel : ObservableObject
             else _ = LoadItemsAsync();
             await RefreshGrantsAsync();
         }
-        catch (Exception ex) { _main.Toast("Could not load shares", ex.Message, "error"); }
+        catch (Exception ex) { _main.Error("Could not load shares", ex); }
     }
 
     public void ScheduleReload()
@@ -233,7 +233,7 @@ public partial class SharesViewModel : ObservableObject
             _allItems = vms;
             ApplyItemFilter();
         }
-        catch (Exception ex) { _main.Toast("Could not load items", ex.Message, "error"); }
+        catch (Exception ex) { _main.Error("Could not load items", ex); }
         finally { ItemsLoading = false; }
     }
 
@@ -270,7 +270,7 @@ public partial class SharesViewModel : ObservableObject
             });
             await LoadAsync();
         }
-        catch (Exception ex) { _main.Toast("Could not rename", ex.Message, "error"); }
+        catch (Exception ex) { _main.Error("Could not rename", ex); }
     }
 
     [RelayCommand]
@@ -304,7 +304,7 @@ public partial class SharesViewModel : ObservableObject
             await Task.Delay(800); // let the scan pick them up
             await LoadAsync();
         }
-        catch (Exception ex) { _main.Toast("Could not add", ex.Message, "error"); }
+        catch (Exception ex) { _main.Error("Could not add", ex); }
     }
 
     // ------------------------------------------------------------------ folders (organize)
@@ -422,7 +422,7 @@ public partial class SharesViewModel : ObservableObject
             await LoadAsync(); // refreshes folders and items
             return true;
         }
-        catch (Exception ex) { _main.Toast("Could not organize", ex.Message, "error"); return false; }
+        catch (Exception ex) { _main.Error("Could not organize", ex); return false; }
     }
 
     private Task<BitmapImage?> LoadThumbAsync(LocalItemVm item) => _main.Thumbs.GetAsync(_main.Api.LocalThumbPath(item.Id));
@@ -498,7 +498,7 @@ public partial class SharesViewModel : ObservableObject
         if (share is null) return;
         if (!await _main.Dialogs.ConfirmAsync($"Remove “{share.Name}”?", "It disappears from My shares and from the network. Your files on disk are not deleted.", "Remove", danger: true)) return;
         try { await _main.Api.DeleteAsync($"/api/shares/{share.Id}"); await LoadAsync(); }
-        catch (Exception ex) { _main.Toast("Could not remove share", ex.Message, "error"); }
+        catch (Exception ex) { _main.Error("Could not remove share", ex); }
     }
 
     [RelayCommand]
@@ -507,7 +507,7 @@ public partial class SharesViewModel : ObservableObject
         share ??= Selected;
         if (share is null) return;
         try { share.Scanning = true; await _main.Api.PostAsync($"/api/shares/{share.Id}/rescan"); }
-        catch (Exception ex) { _main.Toast("Could not rescan", ex.Message, "error"); }
+        catch (Exception ex) { _main.Error("Could not rescan", ex); }
     }
 
     [RelayCommand]
@@ -542,7 +542,7 @@ public partial class SharesViewModel : ObservableObject
             await _main.Api.PutAsync($"/api/shares/{Selected!.Id}/items/{item.Id}/policy", new ItemOverrideUpsertDto { Mode = mode, Password = password });
             await LoadItemsAsync();
         }
-        catch (Exception ex) { _main.Toast("Could not change policy", ex.Message, "error"); }
+        catch (Exception ex) { _main.Error("Could not change policy", ex); }
     }
 
     [RelayCommand]
@@ -550,6 +550,6 @@ public partial class SharesViewModel : ObservableObject
     {
         if (grant is null) return;
         try { await _main.Api.DeleteAsync($"/api/access/grants/{grant.Id}"); await RefreshGrantsAsync(); }
-        catch (Exception ex) { _main.Toast("Could not revoke", ex.Message, "error"); }
+        catch (Exception ex) { _main.Error("Could not revoke", ex); }
     }
 }

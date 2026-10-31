@@ -45,8 +45,12 @@
 ## Discovery (UDP 38472)
 
 Every 4 s each node broadcasts a signed JSON `hello` (to `255.255.255.255` and to each interface's
-directed broadcast). On hearing a new node it answers with a unicast `hello`, so a newcomer sees everybody
-within one round trip. A `bye` is sent on shutdown; silent nodes expire after 16 s. The beacon carries
+directed broadcast). Each node answers other nodes' broadcasts with a unicast `reply` (right away for a
+newcomer, then at most every 8 s per node; a `reply` is never answered). Broadcasts are fragile: Wi-Fi
+drops them without retrying, and a firewall may block incoming broadcasts while still letting a unicast
+reply to the node's own broadcast in. With replies, a node only drops out of a list when both directions
+fail. Older nodes treat `reply` like `hello`. A `bye` is sent on shutdown; nodes silent for 16 s go
+offline (logged), and stay listed as offline for a while. The beacon carries
 the catalog version and share count, so browsing nodes refetch a catalog only when it changed.
 
 Beacon: `{v, t, id, pk, name, user, host, port, realm, cat, shares, ts, sig}`.

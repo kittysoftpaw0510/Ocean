@@ -176,7 +176,7 @@ public partial class PlayerViewModel : ObservableObject
             await _main.Api.PostAsync("/api/downloads", new Core.Protocol.DownloadRequestDto { PeerId = Peer.Id, ItemIds = new List<string> { Item.Id } });
             _main.Toast("Download started", Item.Name, "success", () => _main.ShowDownloadsCommand.Execute(null));
         }
-        catch (Exception ex) { _main.Toast("Download failed to start", ex.Message, "error"); }
+        catch (Exception ex) { _main.Error("Download failed to start", ex); }
     }
 
     /// <summary>Opens the stream in VLC when installed (best format coverage), otherwise with the system default handler.</summary>

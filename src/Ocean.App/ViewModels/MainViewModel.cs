@@ -176,17 +176,61 @@ public partial class MainViewModel : ObservableObject
                         try { var c = await ServiceConnector.ConnectAsync(null, cts.Token); r = (c.Api, c.Status); } catch { }
                     }
                     if (r is not null)
-                    {
-                        await Application.Current.Dispatcher.InvokeAsync(async () =>
-                        {
-                            Api = r.Value.Api; Thumbs = new ThumbCache(Api);
-                            ApplyStatus(r.Value.Status); Connected = true; UpdateStatusText();
-                            await RefreshPeersAsync(); await SharesVm.LoadAsync(); await DownloadsVm.LoadAsync();
-                        });
-                    }
+                        await Application.Current.Dispatcher.InvokeAsync(() => ReconnectedAsync(r.Value.Api, r.Value.Status)).Task.Unwrap();
                 }
             }
         });
+    }
+
+    // ------------------------------------------------------------------ losing the service for a moment
+
+    private int _recovering;
+
+    /// <summary>
+    /// Errors from the app's own service. When the service merely can't be reached (it is restarting, being
+    /// updated, or the PC just woke up), there is nothing for the user to do: show "Reconnecting…" in the status
+    /// line instead of an error, and reload everything once it answers again.
+    /// </summary>
+    public void Error(string title, Exception ex)
+    {
+        if (ApiClient.IsServiceUnreachable(ex)) { ConnectionLost(); return; }
+        Toast(title, ex.Message, "error");
+    }
+
+    public void ConnectionLost()
+    {
+        Connected = false;
+        UpdateStatusText();
+        if (Interlocked.Exchange(ref _recovering, 1) == 1) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                for (var attempt = 1; ; attempt++)
+                {
+                    await Task.Delay(Math.Min(10000, 1000 * attempt));
+                    var r = await ServiceConnector.TryConnectAsync(CancellationToken.None);
+                    if (r is null) continue;
+                    await Application.Current.Dispatcher.InvokeAsync(() => ReconnectedAsync(r.Value.Api, r.Value.Status)).Task.Unwrap();
+                    return;
+                }
+            }
+            catch { }
+            finally { Interlocked.Exchange(ref _recovering, 0); }
+        });
+    }
+
+    /// <summary>The service answers again: refresh everything that may have been missed meanwhile.</summary>
+    private async Task ReconnectedAsync(ApiClient api, NodeStatusDto status)
+    {
+        Api = api; Thumbs = new ThumbCache(Api);
+        ApplyStatus(status); Connected = true; UpdateStatusText();
+        await ClaimUserNameAsync(status); // may have been missed if the service was away when the app started
+        await RefreshPeersAsync();
+        RefreshResumeCard();
+        await SharesVm.LoadAsync();
+        await DownloadsVm.LoadAsync();
+        await LoadPendingAsync();
     }
 
     public void Shutdown() => _eventsCts?.Cancel();
@@ -347,7 +391,7 @@ public partial class MainViewModel : ObservableObject
             Toast("Removed", $"{peer.Label} was removed from the list. It shows up again if it comes back online.", "success");
         }
         catch (ApiException ex) when (ex.StatusCode == 404) { Peers.Remove(peer); }
-        catch (Exception ex) { Toast("Could not remove", ex.Message, "error"); }
+        catch (Exception ex) { Error("Could not remove", ex); }
     }
 
     /// <summary>The Network ↻ button: announce ourselves now, re-check every online node, then reload the list.</summary>
@@ -542,7 +586,7 @@ public partial class MainViewModel : ObservableObject
             await ReloadStatusAsync();
             Toast(SharingPaused ? "Sharing paused" : "Sharing resumed", SharingPaused ? "Your shares are hidden until you resume." : "Your shares are visible again.", "info");
         }
-        catch (Exception ex) { Toast("Could not change sharing", ex.Message, "error"); }
+        catch (Exception ex) { Error("Could not change sharing", ex); }
     }
 
     // ------------------------------------------------------------------ access requests
@@ -574,7 +618,7 @@ public partial class MainViewModel : ObservableObject
             Toast(decision == "deny" ? "Declined" : "Access granted", decision == "deny" ? $"{req.Who} was declined." : $"{req.Who} can now open {req.What}{(decision == "once" ? " for 8 hours" : "")}.", decision == "deny" ? "warn" : "success");
         }
         catch (ApiException ex) when (ex.StatusCode == 404) { Pending.Remove(req); }
-        catch (Exception ex) { Toast("Could not answer request", ex.Message, "error"); }
+        catch (Exception ex) { Error("Could not answer request", ex); }
         finally { req.Busy = false; }
     }
 

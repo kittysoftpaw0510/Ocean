@@ -64,7 +64,7 @@ public partial class SettingsViewModel : ObservableObject
             StreamCacheUsedText = CacheUsed(0);
             _main.Toast("Video cache cleared", "Videos you watch next are fetched again.", "success");
         }
-        catch (Exception ex) { _main.Toast("Could not clear the cache", ex.Message, "error"); }
+        catch (Exception ex) { _main.Error("Could not clear the cache", ex); }
     }
     partial void OnRunAtStartupChanged(bool value) { if (!_loading) ApplyRunAtStartup(value); }
     private void MarkDirty() { if (!_loading) { Dirty = true; SavedMessage = null; } }
@@ -93,7 +93,7 @@ public partial class SettingsViewModel : ObservableObject
             RunAtStartup = ReadRunAtStartup();
             Dirty = false;
         }
-        catch (Exception ex) { _main.Toast("Could not load settings", ex.Message, "error"); }
+        catch (Exception ex) { _main.Error("Could not load settings", ex); }
         finally { _loading = false; }
     }
 
@@ -151,6 +151,6 @@ public partial class SettingsViewModel : ObservableObject
             if (on) k.SetValue(RunName, $"\"{Environment.ProcessPath}\" --minimized");
             else k.DeleteValue(RunName, false);
         }
-        catch (Exception ex) { _main.Toast("Startup setting failed", ex.Message, "error"); }
+        catch (Exception ex) { _main.Error("Startup setting failed", ex); }
     }
 }

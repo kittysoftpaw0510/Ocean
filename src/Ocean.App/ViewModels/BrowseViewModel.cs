@@ -296,7 +296,7 @@ public partial class BrowseViewModel : ObservableObject
             Rebuild();
             _main.RecountNew();
         }
-        catch (Exception ex) { _main.Toast("Could not mark as seen", ex.Message, "error"); }
+        catch (Exception ex) { _main.Error("Could not mark as seen", ex); }
     }
 
     [RelayCommand]
@@ -387,7 +387,7 @@ public partial class BrowseViewModel : ObservableObject
                     n == 0 ? $"{label}: already downloaded or in progress." : $"{label} → Downloads", n == 0 ? "info" : "success",
                     () => _main.ShowDownloadsCommand.Execute(null));
         }
-        catch (Exception ex) { _main.Toast("Download failed to start", ex.Message, "error"); }
+        catch (Exception ex) { _main.Error("Download failed to start", ex); }
     }
 
     [RelayCommand]
@@ -435,7 +435,7 @@ public partial class BrowseViewModel : ObservableObject
                     return false;
             }
         }
-        catch (Exception ex) { _main.Toast("Could not unlock", ex.Message, "error"); return false; }
+        catch (Exception ex) { _main.Error("Could not unlock", ex); return false; }
     }
 
     private async Task<bool> WaitForApprovalAsync(string requestId, string label, ShareChipVm? chip)
@@ -468,7 +468,7 @@ public partial class BrowseViewModel : ObservableObject
             return false;
         }
         catch (OperationCanceledException) { return false; }
-        catch (Exception ex) { _main.Toast("Could not unlock", ex.Message, "error"); return false; }
+        catch (Exception ex) { _main.Error("Could not unlock", ex); return false; }
         finally
         {
             if (chip is not null) chip.IsPending = false;

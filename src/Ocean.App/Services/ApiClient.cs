@@ -10,6 +10,17 @@ namespace Ocean.App.Services;
 /// <summary>Typed client for the service's loopback API, including the Server-Sent Events stream.</summary>
 public sealed class ApiClient
 {
+    /// <summary>
+    /// True when the app's own service could not be reached at all (stopped, restarting, being updated). Errors the
+    /// service reports itself (including problems reaching other PCs) arrive as <see cref="ApiException"/> instead.
+    /// </summary>
+    public static bool IsServiceUnreachable(Exception ex) => ex switch
+    {
+        HttpRequestException { HttpRequestError: HttpRequestError.ConnectionError or HttpRequestError.ResponseEnded } => true,
+        HttpRequestException { InnerException: System.Net.Sockets.SocketException or IOException } => true,
+        _ => false,
+    };
+
     public string BaseUrl { get; }
     public string Token { get; }
     private readonly HttpClient _http;
