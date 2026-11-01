@@ -3,7 +3,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <Version>1.2.1</Version>
+    <Version>1.2.2</Version>
     <Company>Ocean</Company>
     <Product>Ocean LAN Video Sharing</Product>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
