@@ -174,28 +174,30 @@
                 </Grid.RowDefinitions>
                 <StackPanel>
                     <TextBlock Text="My shares" Style="{StaticResource H1}" Margin="24,20,24,4"/>
-                    <!-- my multicast -->
-                    <Border Margin="24,6,24,0" Background="#26E11D48" BorderBrush="#66FB7185" BorderThickness="1" CornerRadius="8" Padding="12,8"
+                    <!-- my multicast: the text above, the buttons on their own row (the column is narrow) -->
+                    <Border Margin="24,6,24,0" Background="#26E11D48" BorderBrush="#66FB7185" BorderThickness="1" CornerRadius="8" Padding="12,10"
                             Visibility="{Binding IsCasting, Converter={StaticResource BoolToVis}}">
-                        <DockPanel>
-                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
-                                <Button Style="{StaticResource BtnGhost}" Content="Open player" Command="{Binding OpenCastPlayerCommand}" ToolTip="{Binding OpenCastPlayerTip}"/>
-                                <Button Style="{StaticResource BtnGhost}" Content="Stop multicast" Margin="6,0,0,0" Command="{Binding StopCastCommand}"/>
-                            </StackPanel>
-                            <Ellipse Width="9" Height="9" Fill="#FB7185" Margin="2,0,12,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="{Binding MyCastText}" TextWrapping="Wrap" VerticalAlignment="Center"/>
-                        </DockPanel>
+                        <StackPanel>
+                            <DockPanel>
+                                <Ellipse Width="9" Height="9" Fill="#FB7185" Margin="2,5,10,0" VerticalAlignment="Top"/>
+                                <TextBlock Text="{Binding MyCastText}" TextWrapping="Wrap"/>
+                            </DockPanel>
+                            <WrapPanel Margin="17,8,0,0">
+                                <Button Style="{StaticResource BtnGhost}" Content="Open player" Margin="0,0,6,0" Command="{Binding OpenCastPlayerCommand}" ToolTip="{Binding OpenCastPlayerTip}"/>
+                                <Button Style="{StaticResource BtnGhost}" Content="Stop multicast" Command="{Binding StopCastCommand}"/>
+                            </WrapPanel>
+                        </StackPanel>
                     </Border>
                     <!-- many viewers on one video: multicast would send it once -->
-                    <Border Margin="24,6,24,0" Background="{StaticResource AccentSoft}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" CornerRadius="8" Padding="12,8"
+                    <Border Margin="24,6,24,0" Background="{StaticResource AccentSoft}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" CornerRadius="8" Padding="12,10"
                             Visibility="{Binding HasCastHint, Converter={StaticResource BoolToVis}}">
-                        <DockPanel>
-                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
-                                <Button Style="{StaticResource BtnPrimary}" Content="Start multicast" Command="{Binding StartCastHintCommand}"/>
-                                <Button Style="{StaticResource BtnIcon}" Content="&#xE711;" Margin="4,0,0,0" ToolTip="Not now" Command="{Binding DismissCastHintCommand}"/>
-                            </StackPanel>
-                            <TextBlock Text="{Binding CastHint}" TextWrapping="Wrap" VerticalAlignment="Center"/>
-                        </DockPanel>
+                        <StackPanel>
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Style="{StaticResource BtnIcon}" Content="&#xE711;" Margin="6,-4,-4,0" VerticalAlignment="Top" ToolTip="Not now" Command="{Binding DismissCastHintCommand}"/>
+                                <TextBlock Text="{Binding CastHint}" TextWrapping="Wrap"/>
+                            </DockPanel>
+                            <Button Style="{StaticResource BtnPrimary}" Content="Start multicast" HorizontalAlignment="Left" Margin="0,8,0,0" Command="{Binding StartCastHintCommand}"/>
+                        </StackPanel>
                     </Border>
                 </StackPanel>
                 <WrapPanel Grid.Row="1" Margin="22,6,14,6">
