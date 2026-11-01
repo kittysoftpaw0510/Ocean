@@ -70,6 +70,8 @@ var cfg = config.Current;
 // Decide classic vs fast networking before anything opens a socket (see NetworkCompat).
 NetworkCompat.Configure(Enum.TryParse<NetworkMode>(cfg.NetworkMode, true, out var netMode) ? netMode : NetworkMode.Auto);
 
+// whatever still runs 5 s after a stop request is cut off (the default 30 s outlasts an installer's patience)
+builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(5));
 builder.Services.AddSingleton(config);
 builder.Services.AddSingleton(identity);
 builder.Services.AddSingleton(localAuth);
@@ -144,6 +146,17 @@ builder.WebHost.ConfigureKestrel(k =>
 var app = builder.Build();
 var log = app.Services.GetRequiredService<ILogger<Program>>();
 foreach (var w in identityWarnings) log.LogWarning("{Warning}", w);
+// Stopping (Windows stopping the service, an update): requests that never end by themselves (the app's event feed,
+// long polls, video streams) end at once, so the service stops in a second instead of waiting them out. An update
+// that has to wait too long kills the service, and Windows would then restart it in the middle of the update.
+var stopping = app.Lifetime.ApplicationStopping;
+app.Use((ctx, next) =>
+{
+    var linked = CancellationTokenSource.CreateLinkedTokenSource(ctx.RequestAborted, stopping);
+    ctx.RequestAborted = linked.Token;
+    ctx.Response.RegisterForDispose(linked);
+    return next(ctx);
+});
 app.UseResponseCompression();
 
 // Gate: which listener + which credential each route family requires.

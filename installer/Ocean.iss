@@ -8,7 +8,8 @@
 ;     many home/office LANs Public). The service keeps the public rule in line with its "Allow connections on
 ;     Public networks" setting.
 ;   - Start menu shortcut, optional desktop shortcut, optional "open in tray at sign-in"
-;   - upgrades in place (stops the service and app first, keeps settings)
+;   - upgrades in place over a running Ocean: closes the tray apps and the service by itself (no prompts), keeps
+;     settings, and puts the old version back to work if the update is cancelled
 ;   - uninstall removes the service, firewall rules and shortcuts, and offers to remove settings/caches
 
 #ifndef AppVersion
@@ -117,23 +118,75 @@ begin
   Result := Run(ExpandConstant('{cmd}'), '/C ""' + ExpandConstant('{sys}\sc.exe') + '" query {#ServiceName} | "' + ExpandConstant('{sys}\find.exe') + '" "STOPPED" >nul"') = 0;
 end;
 
+var
+  RecoveryOff: Boolean;   // the service's restart-on-failure is switched off for the update
+  SetupDone: Boolean;     // files are in place (otherwise the old version is put back to work at the end)
+
+function OceanRunning: Boolean;
+begin
+  // find returns 0 when the text is present
+  Result := Run(ExpandConstant('{cmd}'), '/C ""' + ExpandConstant('{sys}\tasklist.exe') + '" /FI "IMAGENAME eq Ocean.Service.exe" /NH | "' +
+                ExpandConstant('{sys}\find.exe') + '" /I "Ocean.Service.exe" >nul"') = 0;
+  if not Result then
+    Result := Run(ExpandConstant('{cmd}'), '/C ""' + ExpandConstant('{sys}\tasklist.exe') + '" /FI "IMAGENAME eq Ocean.exe" /NH | "' +
+                  ExpandConstant('{sys}\find.exe') + '" /I "Ocean.exe" >nul"') = 0;
+end;
+
+procedure KillOceanPrograms;
+var
+  Dir: String;
+begin
+  // Every program running from Ocean's folder, in every user's session: tray apps, a portable background service,
+  // ffmpeg making a lighter copy (matched by its folder, so other programs' ffmpeg is left alone).
+  Dir := ExpandConstant('{app}');
+  Run(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith(''' +
+      Dir + '\'', [StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force"');
+  // the same by name, in case PowerShell is unavailable
+  Run(ExpandConstant('{sys}\taskkill.exe'), '/F /IM Ocean.exe');
+  Run(ExpandConstant('{sys}\taskkill.exe'), '/F /IM Ocean.Service.exe');
+end;
+
+{ Gets every Ocean program out of the way without asking anyone to close anything. The order matters:
+  1. Windows' "restart the service when it fails" is switched off first, so stopping it by force can't bring it back
+     in the middle of the update (it would lock the new files: "DeleteFile failed; code 5").
+  2. The tray apps close next, so none of them starts the service again or keeps a connection open.
+  3. The service is asked to stop (versions before 1.2.2 take up to 30 s), and whatever is still running after that
+     is ended. }
 procedure StopServiceAndApps;
 var
   i: Integer;
 begin
   if ServiceExists then
   begin
+    if Sc('failure {#ServiceName} reset= 0 actions= ""') = 0 then RecoveryOff := True;
+  end;
+  Run(ExpandConstant('{sys}\taskkill.exe'), '/F /IM Ocean.exe');
+  if ServiceExists then
+  begin
     Sc('stop {#ServiceName}');
-    for i := 1 to 40 do
+    for i := 1 to 70 do
     begin
       if ServiceStopped then Break;
       Sleep(500);
     end;
   end;
-  // Tray apps of signed-in users and any portable background service.
-  Run(ExpandConstant('{sys}\taskkill.exe'), '/F /IM Ocean.exe');
-  Run(ExpandConstant('{sys}\taskkill.exe'), '/F /IM Ocean.Service.exe');
-  Sleep(500);
+  KillOceanPrograms;
+  for i := 1 to 20 do
+  begin
+    if not OceanRunning then Break;
+    Sleep(500);
+    if i mod 4 = 0 then KillOceanPrograms;
+  end;
+  Sleep(300);
+end;
+
+{ The update was cancelled or failed: the old version goes back to work as it was. }
+procedure DeinitializeSetup;
+begin
+  if SetupDone or not RecoveryOff or not ServiceExists then Exit;
+  Sc('failure {#ServiceName} reset= 86400 actions= restart/5000/restart/10000/restart/30000');
+  Sc('start {#ServiceName}');
 end;
 
 procedure InstallOrUpdateService;
@@ -181,7 +234,11 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
+  WizardForm.PreparingLabel.Caption := 'Closing the running Ocean (it starts again when the update is done)...';
+  WizardForm.PreparingLabel.Visible := True;
+  WizardForm.Repaint;
   StopServiceAndApps;
+  WizardForm.PreparingLabel.Visible := False;
   Result := '';
 end;
 
@@ -189,6 +246,7 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
+    SetupDone := True;
     WizardForm.StatusLabel.Caption := 'Configuring Windows Firewall...';
     ConfigureFirewall;
     WizardForm.StatusLabel.Caption := 'Starting the Ocean service...';
