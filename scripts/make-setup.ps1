@@ -16,7 +16,7 @@ $root = Split-Path -Parent $PSScriptRoot
 # --- version from Directory.Build.props --------------------------------------------------------
 [xml]$props = Get-Content (Join-Path $root "Directory.Build.props")
 $version = ($props.Project.PropertyGroup | Where-Object { $_.Version } | Select-Object -First 1).Version
-if (-not $version) { $version = "1.2.2" }
+if (-not $version) { $version = "1.3.2" }
 
 # --- artwork -------------------------------------------------------------------------------------
 if (-not (Test-Path (Join-Path $root "assets\ocean.ico"))) {
