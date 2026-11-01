@@ -289,6 +289,38 @@ public sealed class PeerRegistry
             var quiet = !p.HeardDirectly && p.LiveBridges().Count > 0 ? BridgedSilence : silence;
             if (p.Online && p.LastSeen < now - quiet) MarkOffline(p.Id);
             else if (!p.Online && (p.OfflineSince ?? p.LastSeen) < now - keepOffline) Remove(p.Id);
+            else if (!p.Online && SuccessorOf(p) is { } successor)
+            {
+                Replaced?.Invoke(p, successor);
+                Remove(p.Id);
+            }
         }
+    }
+
+    /// <summary>An offline node was replaced by this one (the same PC under a new identity); its entry is gone.</summary>
+    public event Action<Peer, Peer>? Replaced;
+
+    /// <summary>
+    /// The same PC came back under a new identity (its key file was lost or reset, or Ocean was reinstalled without
+    /// its data): an online node with the same computer name and user, on one of the old one's addresses (or, when
+    /// either is reached through a bridge, the same bridge-side name), that first appeared after the old one went
+    /// quiet. Two different PCs never share a computer name and an address at the same time, and a PC that is
+    /// online keeps its entry, so nothing that is really there is merged away.
+    /// </summary>
+    private Peer? SuccessorOf(Peer old)
+    {
+        if (string.IsNullOrWhiteSpace(old.Host)) return null;
+        foreach (var p in _peers.Values)
+        {
+            if (p.Id == old.Id || !p.Online) continue;
+            if (!string.Equals(p.Host, old.Host, StringComparison.OrdinalIgnoreCase) || !string.Equals(p.User, old.User, StringComparison.OrdinalIgnoreCase)) continue;
+            if (p.FirstSeen < old.LastSeen - TimeSpan.FromMinutes(1)) continue; // they were around together: two PCs
+            var oldAddrs = old.Addresses.Keys.Append(old.Address).Where(a => !a.Equals(IPAddress.None)).ToHashSet();
+            var newAddrs = p.Addresses.Keys.Append(p.Address).Where(a => !a.Equals(IPAddress.None)).ToHashSet();
+            var sameAddress = oldAddrs.Overlaps(newAddrs);
+            var bridged = oldAddrs.Count == 0 || newAddrs.Count == 0; // reached through a bridge: no address to compare
+            if (sameAddress || bridged) return p;
+        }
+        return null;
     }
 }

@@ -67,6 +67,9 @@ public sealed class DiscoveryService : BackgroundService
                 _log.LogInformation("peer offline: {Name} ({User}), last heard {Ago:0}s ago", p.Name, p.User, (DateTimeOffset.UtcNow - p.LastSeen).TotalSeconds);
             if (change is PeerChange.Offline or PeerChange.Removed) _lastReply.TryRemove(p.Id, out _);
         };
+        _registry.Replaced += (old, now) =>
+            _log.LogInformation("peer {Name} ({User}) is back under a new identity {New} (was {Old}): the old entry is removed",
+                now.Name, now.User, NodeIdentity.ShortId(now.Id), NodeIdentity.ShortId(old.Id));
     }
 
     public void AnnounceNow()

@@ -63,7 +63,8 @@ builder.Logging.AddFilter("System", LogLevel.Warning);
 builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Information);
 
 var config = new ConfigStore(dataDir);
-var identity = NodeIdentity.LoadOrCreate(Path.Combine(dataDir, "node.pfx"));
+var identityWarnings = new List<string>(); // logged once the logger exists
+var identity = NodeIdentity.LoadOrCreate(Path.Combine(dataDir, "node.pfx"), identityWarnings.Add);
 var localAuth = new LocalAuth();
 var cfg = config.Current;
 // Decide classic vs fast networking before anything opens a socket (see NetworkCompat).
@@ -142,6 +143,7 @@ builder.WebHost.ConfigureKestrel(k =>
 
 var app = builder.Build();
 var log = app.Services.GetRequiredService<ILogger<Program>>();
+foreach (var w in identityWarnings) log.LogWarning("{Warning}", w);
 app.UseResponseCompression();
 
 // Gate: which listener + which credential each route family requires.
