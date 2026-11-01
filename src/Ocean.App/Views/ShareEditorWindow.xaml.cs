@@ -67,11 +67,16 @@ public partial class ShareEditorWindow : Window
     }
 
     private void Password_Changed(object sender, RoutedEventArgs e) => _vm.Password = PasswordBox.Password;
+    private void PasswordConfirm_Changed(object sender, RoutedEventArgs e) => _vm.PasswordConfirm = PasswordConfirmBox.Password;
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
         var dto = _vm.Build();
-        if (dto is null) return;
+        if (dto is null)
+        {
+            if (_vm.Password.Length > 0 && _vm.Password != _vm.PasswordConfirm) { PasswordConfirmBox.Clear(); PasswordConfirmBox.Focus(); }
+            return;
+        }
         Result = dto;
         DialogResult = true;
     }

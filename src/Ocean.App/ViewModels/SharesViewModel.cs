@@ -130,6 +130,8 @@ public partial class ShareEditorViewModel : ObservableObject
     [ObservableProperty] private string _name = "";
     [ObservableProperty] private AccessMode _mode = AccessMode.Public;
     [ObservableProperty] private string _password = "";
+    /// <summary>The password typed again: it must match, so a typo can't lock the share.</summary>
+    [ObservableProperty] private string _passwordConfirm = "";
     [ObservableProperty] private bool _hasExistingPassword;
     [ObservableProperty] private string? _error;
     public ObservableCollection<string> Roots { get; } = new();
@@ -145,6 +147,7 @@ public partial class ShareEditorViewModel : ObservableObject
         if (Roots.Count == 0 && IsNew && string.IsNullOrWhiteSpace(Name)) { Error = "Add a folder or video files, or at least give it a name."; return null; }
         var name = string.IsNullOrWhiteSpace(Name) ? SuggestName() : Name.Trim();
         if (Mode == AccessMode.Password && Password.Length == 0 && !HasExistingPassword) { Error = "Enter a password for this share."; return null; }
+        if (Mode == AccessMode.Password && Password.Length > 0 && Password != PasswordConfirm) { Error = "The two passwords don't match. Type them again."; return null; }
         return new ShareUpsertDto
         {
             Id = Id, Name = name, Mode = Mode, Roots = Roots.ToList(),
@@ -636,7 +639,7 @@ public partial class SharesViewModel : ObservableObject
         string? password = null;
         if (mode == ItemAccessMode.Password)
         {
-            password = await _main.Dialogs.AskPasswordAsync($"Password for “{item.Name}”", "Others will need this password to watch or download this video.");
+            password = await _main.Dialogs.NewPasswordAsync($"Password for “{item.Name}”", "Others will need this password to watch or download this video.");
             if (password is null) return;
         }
         try

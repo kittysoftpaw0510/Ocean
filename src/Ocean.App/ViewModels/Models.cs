@@ -12,6 +12,8 @@ public enum SortMode { Newest, Name, Size, Duration, Folder }
 public interface IDialogs
 {
     Task<string?> AskPasswordAsync(string title, string subtitle);
+    /// <summary>A new password for one of my videos: typed twice, never empty ("Set password"). Null = cancelled.</summary>
+    Task<string?> NewPasswordAsync(string title, string subtitle);
     Task<bool> ConfirmAsync(string title, string message, string okLabel = "OK", bool danger = false);
     /// <summary>Two ways forward and Cancel: 1 = <paramref name="okLabel"/>, 2 = <paramref name="altLabel"/>, 0 = cancelled.</summary>
     Task<int> ChooseAsync(string title, string message, string okLabel, string altLabel, bool altDanger = false);

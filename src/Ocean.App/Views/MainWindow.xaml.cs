@@ -92,6 +92,9 @@ public partial class MainWindow : Window, IDialogs
     public Task<string?> AskPasswordAsync(string title, string subtitle)
         => Task.FromResult(PasswordWindow.Show(Owner_, title, subtitle));
 
+    public Task<string?> NewPasswordAsync(string title, string subtitle)
+        => Task.FromResult(PasswordWindow.Show(Owner_, title, subtitle, "Set password", confirm: true));
+
     public Task<bool> ConfirmAsync(string title, string message, string okLabel = "OK", bool danger = false)
         => Task.FromResult(ConfirmWindow.Show(Owner_, title, message, okLabel, "Cancel", danger));
 
