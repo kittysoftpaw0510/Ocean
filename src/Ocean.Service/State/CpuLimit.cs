@@ -20,6 +20,7 @@ public static class CpuLimit
     private static readonly object Lock = new();
     private static IntPtr _job;
     private static int _percent = 100;
+    private static bool _capped; // a rate was set on the job (Windows refuses "no rate" on a job that never had one)
 
     /// <summary>The cap in force (100 = none).</summary>
     public static int Percent => Volatile.Read(ref _percent);
@@ -38,7 +39,8 @@ public static class CpuLimit
                     if (!AssignProcessToJobObject(job, GetCurrentProcess())) throw new Win32Exception(Marshal.GetLastWin32Error());
                     _job = job;
                 }
-                SetRate(_job, percent);
+                if (percent < 100 || _capped) SetRate(_job, percent);
+                _capped = percent < 100;
                 _percent = percent;
                 log.LogInformation("CPU limit: Ocean uses at most {Pct}% of this PC ({Cores} cores){Ffmpeg}", percent, Environment.ProcessorCount,
                     percent < 100 ? $", lighter copies at most {FfmpegPercent(percent)}%" : "");
@@ -110,7 +112,7 @@ public static class CpuLimit
         var rate = new JOBOBJECT_CPU_RATE_CONTROL_INFORMATION
         {
             ControlFlags = percent >= 100 ? 0u : JOB_OBJECT_CPU_RATE_CONTROL_ENABLE | JOB_OBJECT_CPU_RATE_CONTROL_HARD_CAP,
-            CpuRate = (uint)(Math.Clamp(percent, 1, 100) * 100), // in 1/100 of a percent of the whole PC
+            CpuRate = percent >= 100 ? 0u : (uint)(Math.Clamp(percent, 1, 99) * 100), // in 1/100 of a percent of the whole PC (0 with no cap)
         };
         if (!SetInformationJobObject(job, JobObjectCpuRateControlInformation, ref rate, (uint)Marshal.SizeOf<JOBOBJECT_CPU_RATE_CONTROL_INFORMATION>()))
             throw new Win32Exception(Marshal.GetLastWin32Error());

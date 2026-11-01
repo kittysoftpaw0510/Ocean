@@ -69,6 +69,102 @@ public sealed class StreamCache
 
     public long UsedBytes { get { lock (_lock) return _entries.Values.Sum(e => e.Bytes); } }
 
+    // ------------------------------------------------------------------ external feeds (multicast)
+
+    private readonly Dictionary<string, ExternalFeed> _feeds = new();
+
+    /// <summary>Lets a multicast receiver write a video's bytes straight into its cache entry (see <see cref="ExternalFeed"/>).</summary>
+    public ExternalFeed? OpenFeed(string peerId, ItemDto item)
+    {
+        if (!Enabled) return null;
+        var entry = Open(Key(peerId, item), item.Size, create: true);
+        if (entry is null) return null;
+        try
+        {
+            var feed = new ExternalFeed(this, entry);
+            lock (_lock) _feeds[entry.Key] = feed;
+            return feed;
+        }
+        catch (Exception ex) { Close(entry); _log.LogDebug(ex, "stream cache: feed"); return null; }
+    }
+
+    /// <summary>
+    /// Bytes arriving out of band (a multicast) for one video. Writes land in the sparse file; a block counts as cached
+    /// once every byte of it arrived. <see cref="HighWater"/> is the furthest byte written, which tells a reader
+    /// whether a missing block is still on its way or was lost.
+    /// </summary>
+    public sealed class ExternalFeed : IDisposable
+    {
+        private readonly StreamCache _owner;
+        private readonly Entry _entry;
+        private readonly SafeFileHandle _file;
+        private readonly Dictionary<int, List<(long Start, long End)>> _partial = new();
+        private readonly object _lock = new();
+        private int _closed;
+
+        internal ExternalFeed(StreamCache owner, Entry entry)
+        {
+            _owner = owner; _entry = entry;
+            _file = File.OpenHandle(entry.DataPath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+        }
+
+        public long HighWater { get; private set; }
+        public bool Closed => Volatile.Read(ref _closed) == 1;
+
+        /// <summary>
+        /// Due from the feed within seconds (just ahead of what has arrived, and not passed by more than a block), so a
+        /// reader should wait for it rather than fetch it; blocks far ahead or already passed are fetched directly.
+        /// </summary>
+        public bool ExpectedSoon(int block) => !Closed && _entry.BlockEnd(block) >= HighWater - BlockSize && (long)block * BlockSize <= HighWater + 3 * BlockSize;
+
+        public void Write(long offset, ReadOnlySpan<byte> data)
+        {
+            if (Closed || data.Length == 0 || offset < 0 || offset + data.Length > _entry.Size) return;
+            lock (_lock)
+            {
+                if (Closed) return;
+                RandomAccess.Write(_file, data, offset);
+                if (offset + data.Length > HighWater) HighWater = offset + data.Length;
+                var pos = offset; var end = offset + data.Length - 1;
+                while (pos <= end) // a packet may straddle two blocks
+                {
+                    var b = (int)(pos / BlockSize);
+                    var blockEnd = _entry.BlockEnd(b);
+                    var pieceEnd = Math.Min(end, blockEnd);
+                    if (!_entry.Has(b)) Cover(b, pos, pieceEnd, blockEnd);
+                    pos = pieceEnd + 1;
+                }
+            }
+        }
+
+        private void Cover(int b, long start, long end, long blockEnd)
+        {
+            if (!_partial.TryGetValue(b, out var ranges)) _partial[b] = ranges = new List<(long, long)>();
+            ranges.Add((start, end));
+            ranges.Sort((x, y) => x.Start.CompareTo(y.Start));
+            var merged = new List<(long Start, long End)>();
+            foreach (var r in ranges)
+            {
+                if (merged.Count > 0 && r.Start <= merged[^1].End + 1) merged[^1] = (merged[^1].Start, Math.Max(merged[^1].End, r.End));
+                else merged.Add(r);
+            }
+            _partial[b] = merged;
+            if (merged.Count == 1 && merged[0].Start <= (long)b * BlockSize && merged[0].End >= blockEnd)
+            {
+                _partial.Remove(b);
+                if (_entry.Mark(b) % PersistEvery == 0) _owner.Save(_entry);
+            }
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _closed, 1) == 1) return;
+            lock (_lock) _file.Dispose();
+            lock (_owner._lock) _owner._feeds.Remove(_entry.Key);
+            _owner.Close(_entry); // saves the block map
+        }
+    }
+
     // ------------------------------------------------------------------ reading
 
     /// <summary>
@@ -112,6 +208,19 @@ public sealed class StreamCache
                 var last = (int)(to / BlockSize);
                 var k = b;
                 while (k <= last && !(entry?.Has(k) ?? false)) k++;
+                // a multicast feed is filling this video: wait a moment for a block the sender is about to send, and
+                // otherwise fetch just one block (the rest keeps arriving on its own)
+                ExternalFeed? feed = null;
+                if (entry is not null) lock (_lock) _feeds.TryGetValue(entry.Key, out feed);
+                if (feed is not null && entry is not null)
+                {
+                    if (feed.ExpectedSoon(b))
+                    {
+                        for (var waited = 0; waited < 15 && !entry.Has(b) && !feed.Closed; waited++) await Task.Delay(100, ct); // 1.5 s at most
+                        if (entry.Has(b)) continue;
+                    }
+                    k = Math.Min(k, b + 1);
+                }
                 var runEnd = Math.Min(to, (long)k * BlockSize - 1);
                 // when storing, fetch whole blocks so they can be marked complete
                 var keep = fill && entry is not null;
@@ -305,7 +414,7 @@ public sealed class StreamCache
         public DateTime LastAccess { get; set; }
     }
 
-    private sealed class Entry
+    internal sealed class Entry
     {
         private readonly bool[] _have;
         private int _count;

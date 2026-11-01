@@ -131,6 +131,13 @@ public partial class SharesView : UserControl
         if (sender is MenuItem { DataContext: LocalItemVm item }) Vm?.PlayCommand.Execute(item);
     }
 
+    private void StartCast_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { DataContext: LocalItemVm item }) Vm?.StartCastCommand.Execute(item);
+    }
+
+    private void StopCast_Click(object sender, RoutedEventArgs e) => Vm?.StopCastCommand.Execute(null);
+
     private void ItemsList_KeyDown(object sender, KeyEventArgs e)
     {
         if (Vm is null) return;

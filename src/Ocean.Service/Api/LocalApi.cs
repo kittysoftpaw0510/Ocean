@@ -3,6 +3,7 @@ using Ocean.Core;
 using Ocean.Core.Crypto;
 using Ocean.Core.Protocol;
 using Ocean.Service.Access;
+using Ocean.Service.Cast;
 using Ocean.Service.Catalog;
 using Ocean.Service.Discovery;
 using Ocean.Service.Downloads;
@@ -110,6 +111,35 @@ public static class LocalApi
         });
 
         // The player's requests: own copy or finished download from disk, otherwise through the stream cache.
+        // ---- multicast: mine (host) ----
+        g.MapGet("/cast", (CastHost cast) => Results.Json(cast.Status(), Json.Options));
+        g.MapGet("/cast/limit", (CastHost cast) => Results.Json(cast.Limit(), Json.Options));
+        g.MapPost("/cast/start", async (HttpContext ctx, CastHost cast) =>
+        {
+            var req = await ctx.Request.ReadFromJsonAsync<CastStartDto>(Json.Options, ctx.RequestAborted);
+            if (req is null || string.IsNullOrEmpty(req.ItemId)) return Results.BadRequest();
+            var st = cast.Start(req.ItemId, req.PreferLight);
+            return Results.Json(st, Json.Options); // Error says why it could not start
+        });
+        g.MapPost("/cast/stop", (CastHost cast) => { cast.Stop(); return Results.Ok(); });
+        g.MapPost("/cast/state", async (HttpContext ctx, CastHost cast) =>
+        {
+            var st = await ctx.Request.ReadFromJsonAsync<CastHostStateDto>(Json.Options, ctx.RequestAborted);
+            if (st is null) return Results.BadRequest();
+            cast.UpdateState(st.Position, st.Playing);
+            return Results.Ok();
+        });
+        // ---- multicast: the one I'm watching (viewer) ----
+        g.MapGet("/cast/view", (CastReceiver rx) => Results.Json(rx.Status() ?? new CastViewDto(), Json.Options));
+        g.MapPost("/peers/{peerId}/cast/{sessionId}/join", async (string peerId, string sessionId, HttpContext ctx, CastReceiver rx) =>
+        {
+            try { return Results.Json(await rx.JoinAsync(peerId, sessionId, ctx.RequestAborted), Json.Options); }
+            catch (PeerStatusException ex) when (ex.Status == HttpStatusCode.Forbidden) { return Results.Json(new ErrorDto { Error = ex.Error ?? "locked", Message = ex.Message }, Json.Options, statusCode: 403); }
+            catch (Exception ex) when (ex is PeerUnavailableException or HttpRequestException or InvalidOperationException or PeerStatusException)
+            { return Results.Json(new ErrorDto { Error = "cast", Message = ex.Message }, Json.Options, statusCode: 409); }
+        });
+        g.MapPost("/cast/leave", async (CastReceiver rx) => { await rx.LeaveAsync(); return Results.Ok(); });
+
         // lighter copy of another node's video: how it is doing, or (POST) ask the owner to make one
         g.MapMethods("/peers/{peerId}/light/{itemId}", new[] { "GET", "POST" }, async (string peerId, string itemId, HttpContext ctx, PeerService peers) =>
             Results.Json(await peers.LightAsync(peerId, itemId, HttpMethods.IsPost(ctx.Request.Method), ctx.RequestAborted), Json.Options));

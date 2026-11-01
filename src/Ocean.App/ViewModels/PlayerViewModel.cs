@@ -32,6 +32,94 @@ public partial class PlayerViewModel : ObservableObject
     /// <summary>The next (re)open keeps quiet about resuming (switching between the original and the lighter copy).</summary>
     public bool QuietStart { get; set; }
 
+    // ---- multicast ---------------------------------------------------------------------------
+    // Host: this player drives everyone who joined (its position goes to the service every second and at once on
+    // play/pause/seek). Follower: the view keeps the player in step with the host, a little behind; controls are locked.
+
+    public enum CastRoles { None, Host, Follower }
+    [ObservableProperty] private CastRoles _castRole;
+    [ObservableProperty] private string _castBanner = "";
+    [ObservableProperty] private bool _castBannerVisible;
+    [ObservableProperty] private bool _controlsLocked;
+    [ObservableProperty] private int _castViewers;
+    public bool IsCastHost => CastRole == CastRoles.Host;
+    public bool IsCastFollower => CastRole == CastRoles.Follower;
+    partial void OnCastRoleChanged(CastRoles value) { OnPropertyChanged(nameof(IsCastHost)); OnPropertyChanged(nameof(IsCastFollower)); UpdateCastBanner(); }
+    private int _castMulticast;
+    private bool _multicastWorking = true;
+    private string _hostName = "";
+    private long _lastReportMs;
+
+    /// <summary>Follower: where the host was at <see cref="FollowReceivedMs"/> (this PC's clock).</summary>
+    public bool FollowValid { get; private set; }
+    public double FollowPosition { get; private set; }
+    public bool FollowPlaying { get; private set; }
+    public long FollowReceivedMs { get; private set; }
+    /// <summary>Where this player should be now: the host's position carried forward, 1.5 s behind so the data is here.</summary>
+    public double FollowTarget() => FollowPlaying ? FollowPosition + (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - FollowReceivedMs) / 1000.0 - 1.5 : FollowPosition;
+
+    public void BeginHost(MyCastDto st) { CastRole = CastRoles.Host; ControlsLocked = false; _lastReportMs = 0; HostUpdate(st); }
+
+    public void HostUpdate(MyCastDto st)
+    {
+        if (CastRole != CastRoles.Host) return;
+        CastViewers = st.Viewers; _castMulticast = st.ViewersMulticast;
+        UpdateCastBanner();
+    }
+
+    public void BeginFollow(CastViewDto v) { CastRole = CastRoles.Follower; ControlsLocked = true; _hostName = v.HostName; FollowUpdate(v); }
+
+    public void FollowUpdate(CastViewDto v)
+    {
+        if (CastRole != CastRoles.Follower) return;
+        if (v.Ended || !v.Active)
+        {
+            EndCast();
+            Notice = $"{(string.IsNullOrEmpty(v.HostName) ? _hostName : v.HostName)} ended the multicast";
+            return;
+        }
+        FollowPosition = v.Position; FollowPlaying = v.Playing; FollowReceivedMs = v.ReceivedAtMs; FollowValid = true;
+        CastViewers = v.Viewers; _multicastWorking = v.MulticastWorking; _hostName = v.HostName;
+        UpdateCastBanner();
+    }
+
+    public void EndCast() { CastRole = CastRoles.None; ControlsLocked = false; FollowValid = false; }
+    public void EndCastIf(CastRoles role) { if (CastRole == role) { EndCast(); Notice = "Multicast ended"; } }
+
+    /// <summary>Host: the view reports where it is (every second, and at once on play/pause/seek).</summary>
+    public void ReportHost(double position, bool playing, bool force)
+    {
+        if (CastRole != CastRoles.Host) return;
+        var now = Environment.TickCount64;
+        if (!force && now - _lastReportMs < 1000) return;
+        _lastReportMs = now;
+        _ = _main.Api.PostAsync("/api/cast/state", new CastHostStateDto { Position = position, Playing = playing });
+    }
+
+    private void UpdateCastBanner()
+    {
+        var text = CastRole switch
+        {
+            CastRoles.Host => CastViewers == 0 ? "Multicasting: waiting for viewers to join…"
+                : $"Multicasting to {CastViewers} PC{(CastViewers == 1 ? "" : "s")}" + (_castMulticast < CastViewers ? $"  ·  {_castMulticast} by multicast, the rest by direct stream" : ""),
+            CastRoles.Follower => $"Watching with {_hostName}  ·  {CastViewers} watching  ·  the host controls playback" + (_multicastWorking ? "" : "  ·  direct stream (no multicast reaches this PC)"),
+            _ => "",
+        };
+        CastBanner = text;
+        CastBannerVisible = text.Length > 0;
+    }
+
+    [RelayCommand] private Task StopCast() => _main.StopCastAsync();
+    [RelayCommand] private Task LeaveCast() => _main.LeaveCastAsync();
+
+    /// <summary>Opening another video while in a multicast leaves it (a host stops it).</summary>
+    private void LeaveCastForNewVideo()
+    {
+        if (CastRole == CastRoles.Host) _ = _main.StopCastAsync();
+        else if (CastRole == CastRoles.Follower) _ = _main.LeaveCastAsync();
+        EndCast();
+    }
+
     public PlayerViewModel(MainViewModel main) { _main = main; }
 
     // ---- lighter copy ----------------------------------------------------------------------
@@ -109,7 +197,7 @@ public partial class PlayerViewModel : ObservableObject
     /// <summary>Every 250 ms while playing: after 30 s on the original, ask the owner for a lighter copy.</summary>
     private void TickLight()
     {
-        if (UsingLight || _lightRequested || Peer is null || Item is null) return;
+        if (UsingLight || _lightRequested || Peer is null || Item is null || CastRole != CastRoles.None) return;
         if (LightState is LightVariant.Ready or "off") return;
         if (++_watchedTicks < TicksBeforeRequest) return;
         _lightRequested = true;
@@ -296,11 +384,12 @@ public partial class PlayerViewModel : ObservableObject
         _main.RememberPlayback(_playing, _playingPeer, position, DurationSeconds, finished, persist);
     }
 
-    public void Open(ItemVm item, string url, PeerVm peer, double startAt = 0)
+    public void Open(ItemVm item, string url, PeerVm peer, double startAt = 0, bool exactUrl = false)
     {
+        LeaveCastForNewVideo();
         Item = item; Peer = peer; Error = null;
-        BeginLight(item, peer, url);
-        Url = UsingLight ? _lightUrl : url;
+        if (exactUrl) { EndLight(); Url = url; } // a multicast: the host decides which copy is sent
+        else { BeginLight(item, peer, url); Url = UsingLight ? _lightUrl : url; }
         _playing = item; _playingPeer = peer; StartAt = Math.Max(0, startAt);
         Services.AppLog.Info("Player", $"play {item.Name} from {peer.Label}" + (StartAt > 0 ? $" at {StartAt:0} s" : ""));
         Title = item.Name;
@@ -315,6 +404,7 @@ public partial class PlayerViewModel : ObservableObject
     /// <summary>Plays one of my own shared videos straight from disk.</summary>
     public void OpenLocal(LocalItemVm item, string shareName)
     {
+        LeaveCastForNewVideo();
         EndLight();
         Item = null; Peer = null; Url = item.Dto.FullPath; Error = null;
         _playing = null; _playingPeer = null; StartAt = 0; // no resume point: it is not another node's video
@@ -331,6 +421,7 @@ public partial class PlayerViewModel : ObservableObject
     [RelayCommand]
     private void Close()
     {
+        LeaveCastForNewVideo();
         EndLight();
         IsOpen = false; IsFullscreen = false; IsPlaying = false;
         Url = null; Item = null;

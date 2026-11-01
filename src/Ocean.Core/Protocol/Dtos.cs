@@ -32,6 +32,8 @@ public sealed class CatalogDto
     /// </summary>
     public long? DeltaFrom { get; set; }
     public List<string>? RemovedItems { get; set; }
+    /// <summary>The multicast this node is hosting right now, if any.</summary>
+    public CastInfoDto? Cast { get; set; }
 }
 
 public sealed class ShareDto
@@ -155,6 +157,8 @@ public sealed class PeerDto
     public string? Via { get; set; }
     /// <summary>How many nodes can bridge to it right now (requests spread over them).</summary>
     public int ViaCount { get; set; }
+    /// <summary>The multicast it is hosting right now, if any.</summary>
+    public CastInfoDto? Cast { get; set; }
 }
 
 public sealed class ItemOverrideDto
@@ -198,6 +202,8 @@ public sealed class ShareUpsertDto
 public sealed class LocalItemDto : ItemDto
 {
     public string FullPath { get; set; } = "";
+    /// <summary>PCs watching this video right now.</summary>
+    public int Viewers { get; set; }
     public ItemAccessMode OverrideMode { get; set; }
 }
 

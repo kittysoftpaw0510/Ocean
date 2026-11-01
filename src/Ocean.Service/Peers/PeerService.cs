@@ -195,6 +195,7 @@ public sealed class PeerService : IDisposable
         {
             Id = p.Id, Name = p.Name, User = p.User, Host = p.Host, Port = p.Port,
             Address = p.Bridged ? "" : p.DisplayAddress.ToString(), Via = p.Via, ViaCount = p.Bridged ? p.LiveBridges().Count : 0,
+            Cast = p.Online ? cat?.Cast : null,
             CatalogVersion = p.CatalogVersion, LastSeen = p.LastSeen, FirstSeen = p.FirstSeen, Online = p.Online, OfflineSince = p.OfflineSince,
             ShareCount = p.ShareCount,
             ItemCount = cat?.Shares.Sum(s => s.ItemCount) ?? 0,
@@ -220,9 +221,15 @@ public sealed class PeerService : IDisposable
 
     public CatalogDto? Cached(string peerId) => _catalogs.TryGetValue(peerId, out var c) ? c : null;
 
+    // the item a multicast I'm watching streams (its size and time may be newer than the catalog I hold)
+    private readonly ConcurrentDictionary<string, ItemDto> _castItems = new(StringComparer.Ordinal);
+    public void RegisterCastItem(string peerId, ItemDto item) => _castItems[peerId + "|" + item.Id] = item;
+    public void UnregisterCastItem(string peerId, string itemId) => _castItems.TryRemove(peerId + "|" + itemId, out _);
+
     /// <summary>An item of a node's catalog; "{id}@light" gives its lighter copy as an item when the owner has one.</summary>
     public ItemDto? FindItem(string peerId, string itemId)
     {
+        if (_castItems.TryGetValue(peerId + "|" + itemId, out var casting)) return casting;
         var light = LightVariant.Split(itemId, out var baseId);
         var item = Cached(peerId)?.Shares.SelectMany(s => s.Items).FirstOrDefault(i => i.Id == baseId);
         if (item is null || !light) return item;
@@ -328,7 +335,9 @@ public sealed class PeerService : IDisposable
                     return await FetchCatalogAsync(peerId, ct, fullOnly: true);
                 }
                 var changedItems = cat.Shares.Sum(s => s.Items.Count);
+                var deltaCast = cat.Cast;
                 cat = MergeDelta(previous, cat);
+                cat.Cast = deltaCast;
                 _log.LogDebug("catalog v{Version} from {Peer}: {Changed} changed, {Removed} removed since v{From}",
                     cat.Version, peer.Name, changedItems, cat.RemovedItems?.Count ?? 0, from);
                 cat.RemovedItems = null;
@@ -338,6 +347,8 @@ public sealed class PeerService : IDisposable
             Annotate(peerId, cat);
             _catalogs[peerId] = cat;
             SaveSnapshot(peer, cat);
+            if (previous?.Cast?.SessionId != cat.Cast?.SessionId)
+                _events.Publish("peerCast", new { peerId, peerName = DisplayNames.Of(cat.UserName, cat.NodeName), cast = cat.Cast });
             var itemCount = cat.Shares.Sum(s => s.ItemCount);
             var newCount = cat.Shares.Sum(s => s.Items.Count(i => i.IsNew));
             _events.Publish("peerCatalog", new { peerId, version = cat.Version, newCount, itemCount });
@@ -457,7 +468,7 @@ public sealed class PeerService : IDisposable
 
     // ------------------------------------------------------------------ grants / unlocking
 
-    private Dictionary<string, string> GrantsFor(string peerId)
+    public Dictionary<string, string> GrantsFor(string peerId)
     {
         var st = State(peerId);
         lock (st) return st.Grants.Where(g => g.Value.IsValid).ToDictionary(g => g.Key, g => g.Value.Token);

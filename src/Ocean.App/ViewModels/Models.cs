@@ -39,6 +39,11 @@ public partial class PeerVm : ObservableObject
     /// <summary>Name of the PC it is reached through (no network path from here), or null.</summary>
     [ObservableProperty] private string? _via;
     [ObservableProperty] private int _viaCount;
+    /// <summary>The multicast this node hosts right now (null when none).</summary>
+    [ObservableProperty] private CastInfoDto? _cast;
+    public bool IsLive => Cast is not null && Online;
+    public string LiveText => Cast is null ? "" : $"Multicasting “{Cast.ItemName}”";
+    partial void OnCastChanged(CastInfoDto? value) { OnPropertyChanged(nameof(IsLive)); OnPropertyChanged(nameof(LiveText)); }
 
     public PeerVm(PeerDto d) { Id = d.Id; Update(d); }
 
@@ -64,9 +69,20 @@ public partial class PeerVm : ObservableObject
     {
         Name = d.Name; User = d.User; Host = d.Host; Address = d.Address;
         NewCount = d.NewCount; ItemCount = d.ItemCount; ShareCount = d.ShareCount; CatalogLoaded = d.CatalogLoaded; FirstSeen = d.FirstSeen;
-        Online = d.Online; OfflineSince = d.OfflineSince; Via = d.Via; ViaCount = d.ViaCount;
-        OnPropertyChanged(nameof(Initials)); OnPropertyChanged(nameof(Subtitle)); OnPropertyChanged(nameof(Label)); OnPropertyChanged(nameof(OfflineText));
+        Online = d.Online; OfflineSince = d.OfflineSince; Via = d.Via; ViaCount = d.ViaCount; Cast = d.Cast;
+        OnPropertyChanged(nameof(Initials)); OnPropertyChanged(nameof(Subtitle)); OnPropertyChanged(nameof(Label)); OnPropertyChanged(nameof(OfflineText)); OnPropertyChanged(nameof(IsLive));
     }
+}
+
+/// <summary>A multicast on the network, for the home page's "Live now" list.</summary>
+public sealed class LiveCastVm
+{
+    public LiveCastVm(PeerVm peer, CastInfoDto cast) { Peer = peer; Cast = cast; }
+    public PeerVm Peer { get; }
+    public CastInfoDto Cast { get; }
+    public string Title => Cast.ItemName;
+    public string Who => $"{Peer.Label} is multicasting";
+    public string Meta => $"{Cast.Viewers} watching  ·  started {Format.Ago(Cast.StartedAt)}" + (Cast.Light ? "  ·  lighter copy" : "");
 }
 
 public partial class ItemVm : ObservableObject

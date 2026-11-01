@@ -4,6 +4,7 @@ using Ocean.Core.Crypto;
 using Ocean.Core.Media;
 using Ocean.Core.Protocol;
 using Ocean.Service.Access;
+using Ocean.Service.Cast;
 using Ocean.Service.Catalog;
 using Ocean.Service.Net;
 using Ocean.Service.Peers;
@@ -85,7 +86,7 @@ public static class PeerApi
                 {
                     NodeId = cat.NodeId, NodeName = cat.NodeName, UserName = cat.UserName, Host = cat.Host,
                     Version = changes.Version, GeneratedAt = cat.GeneratedAt, DeltaFrom = baseVersion,
-                    RemovedItems = changes.Removed.ToList(),
+                    RemovedItems = changes.Removed.ToList(), Cast = cat.Cast,
                 };
                 foreach (var s in cat.Shares)
                     delta.Shares.Add(new ShareDto
@@ -141,6 +142,25 @@ public static class PeerApi
 
         g.MapMethods("/via/{target}/{**rest}", new[] { "GET", "HEAD", "POST" }, (HttpContext ctx, ViaForwarder via) => via.ServeAsync(ctx));
 
+        // ---- multicast (see CastHost): join under the video's own access rule, report in, leave ----
+        g.MapPost("/cast/{sessionId}/join", (HttpContext ctx, string sessionId, CastHost cast, CatalogService catalog, AccessService access) =>
+        {
+            var itemId = cast.ItemIdOf(sessionId);
+            if (itemId is null || !catalog.TryGetItem(itemId, out var share, out var item)) return Results.NotFound();
+            var pc = PeerContext.Get(ctx);
+            if (!catalog.IsItemAccessible(share, item, access.Checker(pc.ClientId, pc.Grants))) return Locked(share, item);
+            var join = cast.Join(sessionId, pc.ClientId, DisplayNames.Of(pc.User, pc.Name));
+            return join is null ? Results.NotFound() : Results.Json(join, Json.Options);
+        });
+        g.MapPost("/cast/{sessionId}/beat", async (HttpContext ctx, string sessionId, CastHost cast) =>
+        {
+            var beat = await ctx.Request.ReadFromJsonAsync<CastBeatDto>(Json.Options, ctx.RequestAborted) ?? new CastBeatDto();
+            var state = cast.Beat(sessionId, PeerContext.Get(ctx).ClientId, beat);
+            return state is null ? Results.NotFound() : Results.Json(state, Json.Options);
+        });
+        g.MapPost("/cast/{sessionId}/leave", (HttpContext ctx, string sessionId, CastHost cast) => { cast.Leave(sessionId, PeerContext.Get(ctx).ClientId); return Results.Ok(); });
+        g.MapGet("/cast/{sessionId}/state", (string sessionId, CastHost cast) => Results.Json(cast.State(sessionId), Json.Options));
+
         g.MapGet("/thumb/{itemId}", async (HttpContext ctx, string itemId, CatalogService catalog, AccessService access, ThumbnailService thumbs, ConfigStore config) =>
         {
             if (config.Current.SharingPaused) return Results.StatusCode(503);
@@ -162,7 +182,7 @@ public static class PeerApi
             return Results.Json(light.Request(itemId, enqueue: HttpMethods.IsPost(ctx.Request.Method)), Json.Options);
         });
 
-        g.MapMethods("/stream/{itemId}", new[] { "GET", "HEAD" }, (HttpContext ctx, string itemId, CatalogService catalog, AccessService access, UploadScheduler uploads, ConfigStore config, Media.LightCopies light) =>
+        g.MapMethods("/stream/{itemId}", new[] { "GET", "HEAD" }, (HttpContext ctx, string itemId, CatalogService catalog, AccessService access, UploadScheduler uploads, ConfigStore config, Media.LightCopies light, ViewerTracker viewers) =>
         {
             if (config.Current.SharingPaused) return Results.StatusCode(503);
             // "{id}@light": the lighter copy instead of the original (same locks)
@@ -172,6 +192,7 @@ public static class PeerApi
             if (!catalog.IsItemAccessible(share, item, access.Checker(pc.ClientId, pc.Grants))) return Locked(share, item);
             var full = wantLight ? light.PathFor(baseId, item) : catalog.FullPath(share, item);
             if (full is null) return Results.NotFound();
+            if (HttpMethods.IsGet(ctx.Request.Method)) ctx.Response.RegisterForDispose(viewers.Track(baseId, pc.ClientId)); // "3 watching" on my side
             // Saving a copy can wait; watching can't. Downloads beyond a few at once are asked to come back shortly.
             var kind = string.Equals(ctx.Request.Headers[PeerHeaders.Purpose], PeerHeaders.Download, StringComparison.OrdinalIgnoreCase)
                 ? UploadKind.Download : UploadKind.Stream;

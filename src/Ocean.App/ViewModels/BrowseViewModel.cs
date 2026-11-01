@@ -400,7 +400,7 @@ public partial class BrowseViewModel : ObservableObject
     public async Task<bool> UnlockShareAsync(ShareChipVm chip)
         => await UnlockAsync(chip.LockId, chip.Mode, chip.Name, chip);
 
-    private async Task<bool> UnlockItemAsync(ItemVm item)
+    public async Task<bool> UnlockItemAsync(ItemVm item)
         => item.Dto.Lock is null || await UnlockAsync(item.Dto.Lock.Id, item.Dto.Lock.Mode, item.Name, null);
 
     private async Task<bool> UnlockAsync(string lockId, AccessMode mode, string label, ShareChipVm? chip)

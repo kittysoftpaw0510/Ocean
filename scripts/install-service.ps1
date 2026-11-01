@@ -31,12 +31,14 @@ if ($existing) {
 }
 sc.exe failure $name reset= 86400 actions= restart/5000/restart/10000/restart/30000 | Out-Null
 
-# Allow the peer HTTPS port and discovery port through Windows Firewall (private/domain profiles).
-$peerPort = 38471; $discPort = 38472
+# Allow the peer HTTPS port, the discovery port and the multicast port through Windows Firewall (private/domain profiles).
+$peerPort = 38471; $discPort = 38472; $castPort = 38473
 Remove-NetFirewallRule -DisplayName "Ocean (peer TLS)" -ErrorAction SilentlyContinue
 Remove-NetFirewallRule -DisplayName "Ocean (discovery)" -ErrorAction SilentlyContinue
+Remove-NetFirewallRule -DisplayName "Ocean (multicast)" -ErrorAction SilentlyContinue
 New-NetFirewallRule -DisplayName "Ocean (peer TLS)" -Direction Inbound -Protocol TCP -LocalPort $peerPort -Action Allow -Profile Private,Domain | Out-Null
 New-NetFirewallRule -DisplayName "Ocean (discovery)" -Direction Inbound -Protocol UDP -LocalPort $discPort -Action Allow -Profile Private,Domain | Out-Null
+New-NetFirewallRule -DisplayName "Ocean (multicast)" -Direction Inbound -Protocol UDP -LocalPort $castPort -Action Allow -Profile Private,Domain | Out-Null
 
 Start-Service $name
 Write-Host "OceanService installed and started. Open Ocean.exe to manage shares." -ForegroundColor Green

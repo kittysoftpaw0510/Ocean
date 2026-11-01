@@ -90,6 +90,9 @@ builder.Services.AddSingleton<StreamCache>();
 builder.Services.AddSingleton<PeerMedia>();
 builder.Services.AddSingleton<Ocean.Service.Media.LightCopies>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Ocean.Service.Media.LightCopies>());
+builder.Services.AddSingleton<Ocean.Service.Cast.ViewerTracker>();
+builder.Services.AddSingleton<Ocean.Service.Cast.CastHost>();
+builder.Services.AddSingleton<Ocean.Service.Cast.CastReceiver>();
 builder.Services.AddSingleton<DownloadManager>();
 builder.Services.AddSingleton(new UploadScheduler { BytesPerSecond = cfg.UploadLimitKBps * 1024L });
 builder.Services.AddSingleton<MeshService>();
@@ -216,6 +219,8 @@ LocalApi.Map(app);
 // Warm up singletons that subscribe to events (access service hooks catalog lock changes, etc.)
 app.Services.GetRequiredService<AccessService>();
 app.Services.GetRequiredService<PeerService>();
+app.Services.GetRequiredService<Ocean.Service.Cast.ViewerTracker>(); // counts viewers for my listing
+app.Services.GetRequiredService<Ocean.Service.Cast.CastHost>();      // puts my multicast in my catalog
 
 log.LogInformation("Ocean {Version} starting as {Mode}; node {Node} ({Name}); data {Dir}; local {Local}, peers {Peer}, discovery {Disc}",
     OceanDefaults.AppVersion, isService ? "Windows service" : "background process", NodeIdentity.ShortId(identity.NodeId), cfg.NodeName,

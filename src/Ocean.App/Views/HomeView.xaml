@@ -10,6 +10,27 @@
             <TextBlock Style="{StaticResource Muted}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="14"
                        Text="Pick a node on the left to browse and watch what it shares. Add your own videos under My shares, and everyone on this network will see them."/>
 
+            <!-- Live now: multicasts on the network, one card each -->
+            <ItemsControl ItemsSource="{Binding Live}" Margin="0,28,0,0" Visibility="{Binding AnyLive, Converter={StaticResource BoolToVis}}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Style="{StaticResource Card}" Padding="12" Margin="0,0,0,8" AutomationProperties.Name="Live now">
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Style="{StaticResource BtnPrimary}" Content="Join" Margin="12,0,0,0" VerticalAlignment="Center"
+                                        ToolTip="Watch together; the host controls playback"
+                                        Command="{Binding DataContext.JoinLiveCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                <Ellipse DockPanel.Dock="Left" Width="10" Height="10" Fill="#FB7185" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Who}" Style="{StaticResource Muted}"/>
+                                    <TextBlock Text="{Binding Title}" Style="{StaticResource H2}" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{Binding Meta}" Style="{StaticResource Dim}"/>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
             <!-- Continue watching: the last video played and where it stopped -->
             <Border Style="{StaticResource Card}" Margin="0,28,0,0" Padding="12" DataContext="{Binding Resume}"
                     Visibility="{Binding Converter={StaticResource NullToVis}}"

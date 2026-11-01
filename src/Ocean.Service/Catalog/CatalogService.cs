@@ -550,6 +550,7 @@ public sealed class CatalogService : IDisposable
             {
                 FullPath = FullPath(def, i),
                 OverrideMode = ov?.Mode ?? ItemAccessMode.Inherit,
+                Viewers = ViewerLookup?.Invoke(i.Id) ?? 0,
             };
             Fill(dto, def, i, _ => true);
             return dto;
@@ -595,7 +596,7 @@ public sealed class CatalogService : IDisposable
         var cat = new CatalogDto
         {
             NodeId = nodeId, NodeName = nodeName, UserName = userName, Host = Environment.MachineName,
-            Version = Version, GeneratedAt = DateTimeOffset.UtcNow,
+            Version = Version, GeneratedAt = DateTimeOffset.UtcNow, Cast = CastLookup?.Invoke(),
         };
         if (paused) return cat;
         foreach (var share in Shares)
@@ -874,6 +875,13 @@ public sealed class CatalogService : IDisposable
 
     /// <summary>A lighter copy started, finished or went away: other nodes learn it with the next (coalesced) version.</summary>
     public void NotifyLightChanged() => BumpSoon("light");
+
+    /// <summary>Set by the multicast host: what I'm multicasting now, carried in my catalog.</summary>
+    public Func<CastInfoDto?>? CastLookup { get; set; }
+    /// <summary>Set by the viewer tracker: how many PCs watch an item right now (for my own listing).</summary>
+    public Func<string, int>? ViewerLookup { get; set; }
+    /// <summary>A multicast started or ended: everyone should learn it at once.</summary>
+    public void NotifyCastChanged() => Bump("cast");
 
     private static readonly TimeSpan BumpSoonEvery = TimeSpan.FromSeconds(8);
     private readonly object _soonLock = new();

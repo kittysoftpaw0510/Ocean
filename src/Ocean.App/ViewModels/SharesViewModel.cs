@@ -40,7 +40,14 @@ public partial class LocalItemVm : ObservableObject
     private BitmapImage? _thumb;
     private bool _loading;
     public LocalItemDto Dto { get; private set; }
-    public LocalItemVm(LocalItemDto dto, Func<LocalItemVm, Task<BitmapImage?>> loader) { Dto = dto; _thumbLoader = loader; }
+    public LocalItemVm(LocalItemDto dto, Func<LocalItemVm, Task<BitmapImage?>> loader) { Dto = dto; _thumbLoader = loader; Viewers = dto.Viewers; }
+    /// <summary>PCs watching this video from me right now.</summary>
+    [ObservableProperty] private int _viewers;
+    /// <summary>I'm multicasting this video.</summary>
+    [ObservableProperty] private bool _isCasting;
+    public bool HasViewers => Viewers > 0;
+    public string ViewersText => Viewers == 1 ? "1 watching" : $"{Viewers} watching";
+    partial void OnViewersChanged(int value) { OnPropertyChanged(nameof(HasViewers)); OnPropertyChanged(nameof(ViewersText)); }
     public string Id => Dto.Id;
     public string Name => Dto.Name;
     public string Folder => FolderPath.Display(Dto.Folder);
@@ -72,7 +79,7 @@ public partial class LocalItemVm : ObservableObject
         }
         catch { _loading = false; }
     }
-    public void Update(LocalItemDto dto) { Dto = dto; OnPropertyChanged(string.Empty); }
+    public void Update(LocalItemDto dto) { Dto = dto; Viewers = dto.Viewers; OnPropertyChanged(string.Empty); }
 }
 
 /// <summary>A folder in "My shares" (owner side): open, rename, delete, drop videos onto it.</summary>
@@ -518,6 +525,81 @@ public partial class SharesViewModel : ObservableObject
         var root = share?.Dto.Roots.FirstOrDefault();
         if (root is null) return;
         try { Process.Start(new ProcessStartInfo("explorer.exe", File.Exists(root) ? $"/select,\"{root}\"" : $"\"{root}\"") { UseShellExecute = true }); } catch { }
+    }
+
+    // ---- viewers and multicast ---------------------------------------------------------------
+
+    [ObservableProperty] private string _castHint = "";
+    [ObservableProperty] private LocalItemVm? _castHintItem;
+    [ObservableProperty] private MyCastDto? _myCast;
+    private readonly Dictionary<string, DateTime> _castSuggested = new(StringComparer.Ordinal);
+    public bool HasCastHint => CastHint.Length > 0;
+    partial void OnCastHintChanged(string value) => OnPropertyChanged(nameof(HasCastHint));
+    public bool IsCasting => MyCast?.Active == true;
+    public string MyCastText => MyCast is null ? "" : $"You're multicasting “{MyCast.ItemName}” to {MyCast.Viewers} PC{(MyCast.Viewers == 1 ? "" : "s")}.";
+
+    /// <summary>Live "N watching" counts from the service, by item id.</summary>
+    public void ApplyViewers(Dictionary<string, int> counts)
+    {
+        foreach (var (id, vm) in _itemVms) vm.Viewers = counts.GetValueOrDefault(id);
+        UpdateCastHint();
+    }
+
+    public void ApplyMyCast(MyCastDto? cast)
+    {
+        MyCast = cast?.Active == true ? cast : null;
+        foreach (var (id, vm) in _itemVms) vm.IsCasting = MyCast?.ItemId == id;
+        OnPropertyChanged(nameof(IsCasting)); OnPropertyChanged(nameof(MyCastText));
+        UpdateCastHint();
+    }
+
+    /// <summary>Several PCs watch the same video from me: suggest sending it once instead (once per video per 10 min).</summary>
+    private void UpdateCastHint()
+    {
+        var busiest = _itemVms.Values.Where(v => v.Viewers >= 3).OrderByDescending(v => v.Viewers).FirstOrDefault();
+        if (busiest is null || IsCasting) { CastHint = ""; CastHintItem = null; return; }
+        CastHintItem = busiest;
+        CastHint = $"{busiest.Viewers} PCs are watching “{busiest.Name}” from you, {busiest.Viewers}× the bandwidth. Multicast sends it once to everyone.";
+        if (_castSuggested.TryGetValue(busiest.Id, out var last) && DateTime.UtcNow - last < TimeSpan.FromMinutes(10)) return;
+        _castSuggested[busiest.Id] = DateTime.UtcNow;
+        _main.Toast("Many viewers on one video", CastHint + " Click to start.", "info", () => _ = StartCastAsync(busiest));
+    }
+
+    [RelayCommand] private Task StartCastHint() => CastHintItem is null ? Task.CompletedTask : StartCastAsync(CastHintItem);
+    [RelayCommand] private void DismissCastHint() { if (CastHintItem is not null) _castSuggested[CastHintItem.Id] = DateTime.UtcNow.AddHours(1); CastHint = ""; CastHintItem = null; }
+    [RelayCommand] private Task StartCast(LocalItemVm? item) => item is null ? Task.CompletedTask : StartCastAsync(item);
+    [RelayCommand] private Task StopCast() => _main.StopCastAsync();
+
+    [RelayCommand]
+    private void OpenCastPlayer()
+    {
+        if (MyCast is null || Selected is null || !_itemVms.TryGetValue(MyCast.ItemId ?? "", out var vm)) return;
+        _main.Player.OpenLocal(vm, Selected.Name);
+        _main.Player.BeginHost(MyCast);
+    }
+
+    /// <summary>Start multicasting one of my videos: the player opens and drives everyone who joins.</summary>
+    public async Task StartCastAsync(LocalItemVm item)
+    {
+        if (Selected is null) return;
+        if (IsCasting && MyCast?.ItemId != item.Id)
+        {
+            if (!await _main.Dialogs.ConfirmAsync("Stop the current multicast?",
+                    $"You're multicasting “{MyCast!.ItemName}”. Only one video can be multicast at a time. Stop it and start “{item.Name}”?", "Switch")) return;
+            await _main.StopCastAsync();
+        }
+        if (!File.Exists(item.Dto.FullPath)) { _main.Toast("File not found", item.Dto.FullPath, "warn"); return; }
+        try
+        {
+            var st = await _main.Api.PostAsync<MyCastDto>("/api/cast/start", new CastStartDto { ItemId = item.Id, PreferLight = true });
+            if (st is null || st.Error is not null || !st.Active) { _main.Toast("Can't start the multicast", st?.Error ?? "Unknown error", "warn"); return; }
+            ApplyMyCast(st);
+            _main.Player.OpenLocal(item, Selected.Name);
+            _main.Player.BeginHost(st);
+            Services.AppLog.Info("Cast", $"multicast started: {item.Name}" + (st.Light ? " (lighter copy)" : ""));
+        }
+        catch (Services.ApiException ex) { _main.Toast("Can't start the multicast", ex.Message, "warn"); }
+        catch (Exception ex) { _main.Error("Can't start the multicast", ex); }
     }
 
     /// <summary>Watch one of my own shared videos in the built-in player (double-click, Enter, or the row menu).</summary>

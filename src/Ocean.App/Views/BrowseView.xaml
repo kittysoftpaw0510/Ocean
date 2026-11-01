@@ -474,6 +474,20 @@
                 </DockPanel>
             </Border>
 
+            <!-- this node is multicasting: watch together -->
+            <Border Margin="24,2,24,8" Background="#26E11D48" BorderBrush="#66FB7185" BorderThickness="1" CornerRadius="8" Padding="12,8"
+                    Visibility="{Binding Peer.IsLive, Converter={StaticResource BoolToVis}}">
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Style="{StaticResource BtnPrimary}" Content="Join" Margin="12,0,0,0" VerticalAlignment="Center"
+                            ToolTip="Watch together; the host controls playback"
+                            Command="{Binding DataContext.JoinPeerCastCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Peer}"/>
+                    <Ellipse Width="9" Height="9" Fill="#FB7185" Margin="2,0,12,0" VerticalAlignment="Center"/>
+                    <TextBlock VerticalAlignment="Center" TextWrapping="Wrap">
+                        <Run Text="{Binding Peer.Label, Mode=OneWay}"/><Run Text=" is multicasting "/><Run Text="{Binding Peer.Cast.ItemName, Mode=OneWay}" FontWeight="SemiBold"/><Run Text=". Everyone who joins watches the same moment."/>
+                    </TextBlock>
+                </DockPanel>
+            </Border>
+
             <!-- breadcrumb: where am I inside the share -->
             <Border Margin="24,2,24,4" Visibility="{Binding FolderMode, Converter={StaticResource BoolToVis}}">
                 <StackPanel Orientation="Horizontal">

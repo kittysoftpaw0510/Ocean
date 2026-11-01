@@ -39,7 +39,8 @@ public static class Via
     public static bool IsRelayable(string path)
         => path.StartsWith("/p/catalog", StringComparison.Ordinal) || path.StartsWith("/p/stream/", StringComparison.Ordinal)
            || path.StartsWith("/p/thumb/", StringComparison.Ordinal) || path.StartsWith("/p/access", StringComparison.Ordinal)
-           || path.StartsWith("/p/ping", StringComparison.Ordinal) || path.StartsWith("/p/light/", StringComparison.Ordinal);
+           || path.StartsWith("/p/ping", StringComparison.Ordinal) || path.StartsWith("/p/light/", StringComparison.Ordinal)
+           || path.StartsWith("/p/cast/", StringComparison.Ordinal);
 
     /// <summary>Splits "/p/via/{target}/p/…" into the target node id and the path meant for it.</summary>
     public static bool TryParse(string rawTarget, out string targetId, out string inner)

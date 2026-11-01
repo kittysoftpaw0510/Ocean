@@ -18,6 +18,7 @@ public partial class PlayerView : UserControl
     private bool _pressed;  // the mouse is down on the seek bar: leave the bar where the user put it
     private bool _opened;   // the current video opened (a resume point read before that would be 0)
     private bool _ended;    // reached the end and rewound: keep "watched" instead of recording 0
+    private bool _syncing;  // a multicast follower being kept in step (not the user seeking)
 
     // A jump the player hasn't carried out yet. Over a network stream the player can drop a position change (it
     // arrives while it is still opening or fetching another part), so the jump is checked and repeated until the
@@ -89,6 +90,9 @@ public partial class PlayerView : UserControl
             case nameof(PlayerViewModel.Notice):
                 if (_vm.Notice is { Length: > 0 } notice) ShowOsd(notice);
                 break;
+            case nameof(PlayerViewModel.ControlsLocked):
+                Seek.IsEnabled = !_vm.ControlsLocked;
+                break;
         }
     }
 
@@ -150,6 +154,8 @@ public partial class PlayerView : UserControl
                 if (d > 0 && Math.Abs(d - _vm.DurationSeconds) > 0.5) _vm.DurationSeconds = d;
             }
             var pos = Media.Position.TotalSeconds;
+            if (_vm.CastRole == PlayerViewModel.CastRoles.Host) _vm.ReportHost(pos, _vm.IsPlaying, force: false);
+            else if (_vm.CastRole == PlayerViewModel.CastRoles.Follower && _vm.FollowValid && _opened) FollowHost(pos);
             if (_seekTarget is { } target && !CheckSeek(pos, target))
             {
                 _vm.PositionSeconds = target; // not there yet: keep the bar at the target
@@ -164,6 +170,28 @@ public partial class PlayerView : UserControl
             if (_opened && _vm.IsPlaying) _vm.Remember(pos);
         }
         catch { }
+    }
+
+    /// <summary>Multicast follower: keep in step with the host, a little behind so the data is already here.</summary>
+    private void FollowHost(double pos)
+    {
+        if (_vm is null) return;
+        var target = Math.Max(0, _vm.FollowTarget());
+        _syncing = true;
+        try
+        {
+            if (_vm.FollowPlaying)
+            {
+                if (!_vm.IsPlaying && !_ended) { Media.Play(); _vm.IsPlaying = true; ApplySpeed(); }
+                if (_seekTarget is null && Math.Abs(pos - target) > 2.5) SeekTo(target);
+            }
+            else
+            {
+                if (_vm.IsPlaying) { Media.Pause(); _vm.IsPlaying = false; }
+                if (_seekTarget is null && Math.Abs(pos - target) > 1.5) SeekTo(target);
+            }
+        }
+        finally { _syncing = false; }
     }
 
     /// <summary>Saves where the current video stands (on stop, close, or switching to another video).</summary>
@@ -219,6 +247,7 @@ public partial class PlayerView : UserControl
     private void TogglePlay()
     {
         if (_vm is null) return;
+        if (_vm.ControlsLocked && !_syncing) { ShowOsd("The host controls playback"); return; }
         if (_vm.IsPlaying) { Media.Pause(); _vm.IsPlaying = false; }
         else
         {
@@ -227,6 +256,7 @@ public partial class PlayerView : UserControl
             _ended = false;
             ApplySpeed(); // MediaElement may reset the rate when playback restarts
         }
+        _vm.ReportHost(CurrentSeconds(), _vm.IsPlaying, force: true);
     }
 
     // ---- speed ---------------------------------------------------------------------
@@ -267,12 +297,14 @@ public partial class PlayerView : UserControl
     private void SeekTo(double seconds)
     {
         if (_vm is null) return;
+        if (_vm.ControlsLocked && !_syncing) { ShowOsd("The host controls playback"); return; }
         var d = _vm.DurationSeconds;
         seconds = Math.Max(0, d > 0 ? Math.Min(seconds, d) : seconds);
         // A deliberate jump out of the A-B range ends the repeat instead of snapping back to A.
         if (_vm.EndLoopIfOutside(seconds)) ShowOsd("Repeat off");
         _ended = false;
         _vm.PositionSeconds = seconds;
+        if (!_syncing) _vm.ReportHost(seconds, _vm.IsPlaying, force: true);
         if (!_opened) { _queuedSeek = seconds; return; } // still opening: the player would ignore it now
         BeginSeek(seconds);
     }

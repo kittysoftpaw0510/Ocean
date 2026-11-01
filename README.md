@@ -25,6 +25,12 @@ and every byte between them travels over mutually authenticated, end-to-end encr
   "Preparing…" meanwhile and can switch, or are switched when playback keeps stalling. The original is never
   touched and downloads always get it. Copies are kept for a number of days after the last viewing, within a disk
   limit; both are set in Settings, where the feature can also be turned off.
+- **Who is watching**: under My shares each video shows how many PCs are streaming it right now.
+- **Multicast**: send one of your videos once onto the network instead of once per viewer. You control play, pause
+  and seek; everyone who joins watches the same moment (the home page and the node list show "LIVE"). Joining follows
+  the video's own access rule. The app suggests it when three or more PCs watch the same video from you; at most 30 %
+  of the PCs on a network can multicast at once. Packets are encrypted with a per-session key; where multicast
+  doesn't arrive (some Wi-Fi, VPN adapters, bridged PCs) the viewer fetches from you directly instead.
 - **Light on the PC**: Ocean's service, including making lighter copies, never uses more than 25 % of the processor
   (Windows enforces it; adjustable in Settings). The player in the app is not limited.
 - **Player**: speed control (0.25× to 2×) and A-B repeat with markers on the seek bar.
@@ -79,7 +85,7 @@ To share even when nobody is signed in, install the Windows service (as administ
 
 ```powershell
 cd dist\Ocean
-.\install-service.ps1     # creates "OceanService", opens firewall ports 38471/tcp and 38472/udp
+.\install-service.ps1     # creates "OceanService", opens firewall ports 38471/tcp, 38472/udp and 38473/udp (multicast)
 .\uninstall-service.ps1
 ```
 

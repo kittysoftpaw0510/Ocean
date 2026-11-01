@@ -192,6 +192,7 @@ and the requester polls `GET /p/access/{requestId}` every 2 s.
 | GET | `/p/thumb/{itemId}` | JPEG; 403 `{error:"locked", lock}` when not authorized |
 | GET/HEAD | `/p/stream/{itemId}` | `Accept-Ranges: bytes`; rate-limited through a global token bucket when an upload cap is set; `{itemId}@light` = the lighter copy |
 | GET/POST | `/p/light/{itemId}` | state of the lighter copy; POST asks for one ("I'm watching this") |
+| POST | `/p/cast/{id}/join`, `/beat`, `/leave`; GET `/state` | multicast: join (key + group), heartbeat with stats (returns the host's state), leave |
 | GET | `/p/neighbors` | nodes this node hears directly, its load and a revision (304 when unchanged); empty when bridging is off |
 | GET/HEAD/POST | `/p/via/{nodeId}/p/…` | carry a signed request on to a node the caller can't reach |
 
@@ -221,6 +222,36 @@ per-item policies, pending requests and grants, downloads, settings. See `Api/Lo
 - Player: the original plays while the copy is prepared ("Preparing… 35 %"); when ready, Switch resumes at the
   same position with the lighter URL, and two stalls after the first 10 s switch automatically. "Watch original"
   switches back and is remembered for the session.
+
+## Multicast (`Ocean.Service.Cast`)
+
+- **Viewer counts.** `ViewerTracker` holds one entry per open `/p/stream` response (item → client → count);
+  `LocalItemDto.Viewers` and the `viewers` event give the owner's app "N watching" live (debounced 500 ms).
+- **Hosting.** `CastHost` keeps one session per node: a random 32-byte key, the video (the lighter copy when one
+  is ready), the host's position (taken at a time stamp, so it extrapolates while playing), viewers (by heartbeat,
+  15 s timeout) and a sender thread. `CatalogDto.Cast` / `PeerDto.Cast` carry it to everyone (`Bump("cast")` on
+  start and stop, so the "LIVE" marks appear at once); `peerCast` events tell the app. Starting is refused while
+  `active ≥ max(1, floor(0.3 × online nodes incl. me))`, with the reason in `MyCastDto.Error`.
+- **Packets** (`CastWire`): `OCST` + session id + type + sequence, then an AES-GCM-sealed payload (nonce = type +
+  sequence): data = offset + bytes (1200), control = position/playing/host time/viewers/ended every 500 ms. Every
+  8 data packets a parity packet (XOR of their sealed payloads) recovers one loss per group; the receiver judges a
+  group 32 packets after its parity, since copies sent on several adapters arrive in any order and are deduplicated
+  by sequence. Sent to 239.255.77.1:38473 on every real IPv4 adapter, TTL 1, loopback on.
+- **Pacing.** The sender streams the file in byte order from the host's position: 4 × the bitrate while within 5 s
+  of the position (start, seek), 1.5 × beyond, never more than 20 s ahead. A seek moves the cursor to the position
+  minus 1 s.
+- **Viewing.** `CastReceiver` joins through `POST /p/cast/{id}/join` (the video's own locks apply; the key only
+  travels on the TLS channel), opens a `StreamCache.ExternalFeed` for the stream item (registered with
+  `PeerService.RegisterCastItem`, so the player's usual `/api/peers/{host}/stream/{id}` reads it from the cache),
+  and writes packets into the sparse file; a block counts as cached when all its bytes arrived. `CopyAsync` waits
+  up to 6 s for a block the feed is about to deliver (between HighWater − 1 MB and HighWater + 3 MB) and fetches
+  only one block at a time otherwise, so what the multicast brings is never fetched twice and what it doesn't
+  (lost, far ahead, or nothing at all on this network) comes directly. Heartbeats every 5 s carry stats and bring
+  the host's state back when no control packet arrives (`MulticastWorking` false → "direct stream").
+- **Player.** Host: the view posts its position every second and at once on play/pause/seek. Follower: the view
+  keeps the player at the host's position carried forward on this PC's clock, 1.5 s behind, seeking when more than
+  2.5 s off and pausing with the host; controls are locked ("The host controls playback"); Leave or the host's end
+  unlocks them and the cached bytes stay, so the video can go on as a normal stream.
 
 ## CPU limit (`Ocean.Service.State.CpuLimit`)
 

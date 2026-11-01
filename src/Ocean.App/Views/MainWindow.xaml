@@ -137,6 +137,7 @@
                                         <ColumnDefinition Width="Auto"/>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
                                     <Grid>
                                         <Border x:Name="Avatar" Width="34" Height="34" CornerRadius="17" Background="{Binding Id, Converter={StaticResource InitialsBrush}}">
@@ -150,11 +151,16 @@
                                         <TextBlock Text="{Binding Label}" FontWeight="SemiBold" Foreground="{StaticResource Text}"/>
                                         <TextBlock x:Name="Sub" Style="{StaticResource Dim}" Text="{Binding Subtitle}"/>
                                     </StackPanel>
-                                    <Border x:Name="NewBadge" Grid.Column="2" Style="{StaticResource Badge}" Visibility="{Binding NewCount, Converter={StaticResource CountToVis}}" ToolTip="New videos since your last visit">
+                                    <!-- hosting a multicast right now -->
+                                    <Border Grid.Column="2" Background="#E11D48" CornerRadius="4" Padding="5,1" Margin="0,0,4,0" VerticalAlignment="Center"
+                                            Visibility="{Binding IsLive, Converter={StaticResource BoolToVis}}" ToolTip="{Binding LiveText}">
+                                        <TextBlock Text="LIVE" FontSize="10" FontWeight="Bold" Foreground="White"/>
+                                    </Border>
+                                    <Border x:Name="NewBadge" Grid.Column="3" Style="{StaticResource Badge}" Visibility="{Binding NewCount, Converter={StaticResource CountToVis}}" ToolTip="New videos since your last visit">
                                         <TextBlock Text="{Binding NewCount}" FontSize="11" FontWeight="SemiBold" Foreground="#042F2E"/>
                                     </Border>
                                     <!-- offline nodes can be removed from the list at any time -->
-                                    <Button x:Name="RemoveBtn" Grid.Column="2" Style="{StaticResource BtnIcon}" Width="24" Height="24" FontSize="10" Content="&#xE711;"
+                                    <Button x:Name="RemoveBtn" Grid.Column="3" Style="{StaticResource BtnIcon}" Width="24" Height="24" FontSize="10" Content="&#xE711;"
                                             ToolTip="Remove from the list (it reappears if it comes back online)" AutomationProperties.Name="Remove from the list" Visibility="Collapsed"
                                             Command="{Binding DataContext.RemovePeerCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                 </Grid>

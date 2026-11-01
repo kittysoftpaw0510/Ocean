@@ -12,6 +12,11 @@
                         <MenuItem Header="Play" Click="Play_Click">
                             <MenuItem.Icon><TextBlock Text="&#xE768;" Style="{StaticResource Icon}"/></MenuItem.Icon>
                         </MenuItem>
+                        <MenuItem Header="Start multicast" Click="StartCast_Click" Visibility="{Binding IsCasting, Converter={StaticResource InvBoolToVis}}"
+                                  ToolTip="Send this video once to everyone who joins; you control playback">
+                            <MenuItem.Icon><TextBlock Text="&#xE93E;" Style="{StaticResource Icon}"/></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Header="Stop multicast" Click="StopCast_Click" Visibility="{Binding IsCasting, Converter={StaticResource BoolToVis}}"/>
                         <Separator/>
                         <MenuItem Header="Move to…" Click="MoveTo_Click">
                             <MenuItem.Icon><TextBlock Text="&#xE8DE;" Style="{StaticResource Icon}"/></MenuItem.Icon>
@@ -45,12 +50,28 @@
                             <Run Text="{Binding SizeText, Mode=OneWay}"/><Run Text="{Binding DurationText, Mode=OneWay, StringFormat='  ·  {0}'}"/><Run Text="{Binding AddedText, Mode=OneWay, StringFormat='  ·  added {0}'}"/><Run Text="{Binding LightTag, Mode=OneWay}"/>
                         </TextBlock>
                     </StackPanel>
-                    <Border Grid.Column="2" CornerRadius="10" Background="{StaticResource Bg3}" Padding="8,2" VerticalAlignment="Center" Visibility="{Binding HasOverride, Converter={StaticResource BoolToVis}}">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="{Binding PolicyGlyph}" Style="{StaticResource Icon}" FontSize="11" Foreground="{StaticResource Warn}" Margin="0,0,6,0"/>
-                            <TextBlock Text="{Binding PolicyText}" FontSize="12"/>
-                        </StackPanel>
-                    </Border>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <!-- I'm multicasting this one -->
+                        <Border CornerRadius="10" Background="#33E11D48" Padding="8,2" Margin="0,0,6,0" Visibility="{Binding IsCasting, Converter={StaticResource BoolToVis}}" ToolTip="You are multicasting this video">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Width="7" Height="7" Fill="#FB7185" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <TextBlock Text="LIVE" FontSize="11" FontWeight="Bold" Foreground="#FB7185"/>
+                            </StackPanel>
+                        </Border>
+                        <!-- who is watching it right now -->
+                        <Border CornerRadius="10" Background="{StaticResource AccentSoft}" Padding="8,2" Margin="0,0,6,0" Visibility="{Binding HasViewers, Converter={StaticResource BoolToVis}}" ToolTip="PCs streaming this video from you right now">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE7B3;" Style="{StaticResource Icon}" FontSize="11" Foreground="{StaticResource Accent}" Margin="0,0,6,0"/>
+                                <TextBlock Text="{Binding ViewersText}" FontSize="12"/>
+                            </StackPanel>
+                        </Border>
+                        <Border CornerRadius="10" Background="{StaticResource Bg3}" Padding="8,2" Visibility="{Binding HasOverride, Converter={StaticResource BoolToVis}}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding PolicyGlyph}" Style="{StaticResource Icon}" FontSize="11" Foreground="{StaticResource Warn}" Margin="0,0,6,0"/>
+                                <TextBlock Text="{Binding PolicyText}" FontSize="12"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
                     <Button Grid.Column="3" Style="{StaticResource BtnIcon}" Content="&#xE712;" ToolTip="Options" Margin="6,0,0,0" Click="RowMenu_Click" AutomationProperties.Name="Options"/>
                 </Grid>
             </Border>
@@ -147,7 +168,32 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
-                <TextBlock Text="My shares" Style="{StaticResource H1}" Margin="24,20,24,4"/>
+                <StackPanel>
+                    <TextBlock Text="My shares" Style="{StaticResource H1}" Margin="24,20,24,4"/>
+                    <!-- my multicast -->
+                    <Border Margin="24,6,24,0" Background="#26E11D48" BorderBrush="#66FB7185" BorderThickness="1" CornerRadius="8" Padding="12,8"
+                            Visibility="{Binding IsCasting, Converter={StaticResource BoolToVis}}">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
+                                <Button Style="{StaticResource BtnGhost}" Content="Open player" Command="{Binding OpenCastPlayerCommand}" ToolTip="Your player drives the multicast"/>
+                                <Button Style="{StaticResource BtnGhost}" Content="Stop multicast" Margin="6,0,0,0" Command="{Binding StopCastCommand}"/>
+                            </StackPanel>
+                            <Ellipse Width="9" Height="9" Fill="#FB7185" Margin="2,0,12,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding MyCastText}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                        </DockPanel>
+                    </Border>
+                    <!-- many viewers on one video: multicast would send it once -->
+                    <Border Margin="24,6,24,0" Background="{StaticResource AccentSoft}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" CornerRadius="8" Padding="12,8"
+                            Visibility="{Binding HasCastHint, Converter={StaticResource BoolToVis}}">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
+                                <Button Style="{StaticResource BtnPrimary}" Content="Start multicast" Command="{Binding StartCastHintCommand}"/>
+                                <Button Style="{StaticResource BtnIcon}" Content="&#xE711;" Margin="4,0,0,0" ToolTip="Not now" Command="{Binding DismissCastHintCommand}"/>
+                            </StackPanel>
+                            <TextBlock Text="{Binding CastHint}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                        </DockPanel>
+                    </Border>
+                </StackPanel>
                 <WrapPanel Grid.Row="1" Margin="22,6,14,6">
                     <Button Style="{StaticResource BtnPrimary}" Command="{Binding AddFolderCommand}" Margin="0,0,8,6" ToolTip="Share a folder from your disk (its sub-folders come along)">
                         <StackPanel Orientation="Horizontal">

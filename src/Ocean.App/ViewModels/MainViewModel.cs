@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Text.Json;
 using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -17,6 +18,9 @@ public partial class HomeViewModel : ObservableObject
     [ObservableProperty] private int _totalNew;
     /// <summary>"Continue watching": the last video played (null until something was played).</summary>
     [ObservableProperty] private ResumeVm? _resume;
+    /// <summary>Multicasts running on the network right now.</summary>
+    public ObservableCollection<LiveCastVm> Live { get; } = new();
+    [ObservableProperty] private bool _anyLive;
 }
 
 /// <summary>Application shell: navigation, peers, live events from the service, toasts and access requests.</summary>
@@ -40,6 +44,9 @@ public partial class MainViewModel : ObservableObject
     public SettingsViewModel SettingsVm { get; }
     public PlayerViewModel Player { get; }
     public HomeViewModel Home { get; } = new();
+    /// <summary>My multicast (null when none) and the one I'm watching (null when none).</summary>
+    [ObservableProperty] private MyCastDto? _myCast;
+    [ObservableProperty] private CastViewDto? _castView;
 
     [ObservableProperty] private NodeStatusDto? _status;
     [ObservableProperty] private string _nav = "home";
@@ -80,6 +87,7 @@ public partial class MainViewModel : ObservableObject
         Connected = true;
         await ClaimUserNameAsync(status);
         await RefreshPeersAsync();
+        await ResetCastAsync();
         _initialPeersLoaded = true;
         RefreshResumeCard();
         await SharesVm.LoadAsync();
@@ -264,6 +272,7 @@ public partial class MainViewModel : ObservableObject
         ApplyStatus(status); Connected = true; UpdateStatusText();
         await ClaimUserNameAsync(status); // may have been missed if the service was away when the app started
         await RefreshPeersAsync();
+        await ResetCastAsync();
         RefreshResumeCard();
         await SharesVm.LoadAsync();
         await DownloadsVm.LoadAsync();
@@ -393,6 +402,46 @@ public partial class MainViewModel : ObservableObject
                 case "settings":
                     _ = ReloadStatusAsync();
                     break;
+                case "viewers":
+                {
+                    using var doc = JsonDocument.Parse(data);
+                    var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+                    if (doc.RootElement.TryGetProperty("counts", out var c))
+                        foreach (var prop in c.EnumerateObject()) counts[prop.Name] = prop.Value.GetInt32();
+                    SharesVm.ApplyViewers(counts);
+                    break;
+                }
+                case "myCast":
+                {
+                    var st = Json.Deserialize<MyCastDto>(data);
+                    MyCast = st?.Active == true ? st : null;
+                    SharesVm.ApplyMyCast(MyCast);
+                    if (MyCast is not null) Player.HostUpdate(MyCast); else Player.EndCastIf(PlayerViewModel.CastRoles.Host);
+                    break;
+                }
+                case "castView":
+                {
+                    var v = Json.Deserialize<CastViewDto>(data);
+                    CastView = v?.Active == true ? v : null;
+                    if (v is not null) Player.FollowUpdate(v);
+                    break;
+                }
+                case "peerCast":
+                {
+                    using var doc = JsonDocument.Parse(data);
+                    var id = doc.RootElement.GetProperty("peerId").GetString() ?? "";
+                    var cast = doc.RootElement.TryGetProperty("cast", out var ce) && ce.ValueKind == JsonValueKind.Object ? Json.Deserialize<CastInfoDto>(ce.GetRawText()) : null;
+                    var p = Peers.FirstOrDefault(x => x.Id == id);
+                    if (p is not null) p.Cast = cast;
+                    RefreshLive();
+                    if (cast is not null && p is not null && _initialPeersLoaded)
+                    {
+                        AppLog.Info("Cast", $"{p.Label} started multicasting {cast.ItemName}");
+                        Toast("Multicast started", $"{p.Label} is multicasting “{cast.ItemName}”. Click to join and watch together.", "info", () => _ = JoinCastAsync(p, cast));
+                        TrayNotify?.Invoke("Multicast started", $"{p.Label}: {cast.ItemName}", () => _ = JoinCastAsync(p, cast));
+                    }
+                    break;
+                }
             }
         }
         catch (Exception ex)
@@ -472,6 +521,7 @@ public partial class MainViewModel : ObservableObject
             RefreshResumeCard();
             RecountNew();
             UpdateStatusText();
+            RefreshLive();
         }
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
     }
@@ -496,6 +546,79 @@ public partial class MainViewModel : ObservableObject
     }
 
     // ------------------------------------------------------------------ navigation
+
+    // ------------------------------------------------------------------ multicast
+
+    public void RefreshLive()
+    {
+        var live = Peers.Where(p => p.Online && p.Cast is not null).Select(p => new LiveCastVm(p, p.Cast!)).ToList();
+        Home.Live.Clear();
+        foreach (var l in live) Home.Live.Add(l);
+        Home.AnyLive = live.Count > 0;
+    }
+
+    [RelayCommand] private Task JoinLive(LiveCastVm? live) => live is null ? Task.CompletedTask : JoinCastAsync(live.Peer, live.Cast);
+    [RelayCommand] private Task JoinPeerCast(PeerVm? peer) => peer?.Cast is null ? Task.CompletedTask : JoinCastAsync(peer, peer.Cast);
+
+    /// <summary>Join a node's multicast: same access rule as the video (password / approval), then follow the host.</summary>
+    public async Task JoinCastAsync(PeerVm peer, CastInfoDto cast)
+    {
+        try
+        {
+            var cat = await Api.GetAsync<CatalogDto>($"/api/peers/{peer.Id}/catalog");
+            var share = cat?.Shares.FirstOrDefault(s => s.Items.Any(i => i.Id == cast.ItemId));
+            var dto = share?.Items.First(i => i.Id == cast.ItemId);
+            if (share is null || dto is null) { Toast("Can't join", $"“{cast.ItemName}” isn't in {peer.Label}'s list anymore.", "warn"); return; }
+            var item = new ItemVm(dto, peer.Id, share.Name, null);
+            if (item.IsLocked && !await BrowseFor(peer).UnlockItemAsync(item)) return;
+            var view = await Api.PostAsync<CastViewDto>($"/api/peers/{peer.Id}/cast/{cast.SessionId}/join", null);
+            if (view is null || !view.Active) { Toast("Can't join", "That multicast has ended.", "warn"); return; }
+            CastView = view;
+            AppLog.Info("Cast", $"joined {peer.Label}'s multicast of {cast.ItemName}");
+            var name = view.ItemId.EndsWith(LightVariant.Suffix, StringComparison.Ordinal) ? Path.ChangeExtension(item.Name, ".mp4") : item.Name;
+            Player.Open(item, Api.StreamUrl(peer.Id, view.ItemId, name), peer, exactUrl: true);
+            Player.BeginFollow(view);
+        }
+        catch (ApiException ex) { Toast("Can't join the multicast", ex.Message, "warn"); }
+        catch (Exception ex) { Error("Can't join the multicast", ex); }
+    }
+
+    public async Task LeaveCastAsync()
+    {
+        try { await Api.PostAsync("/api/cast/leave"); } catch (Exception ex) { AppLog.Warn("Cast", "leave", ex); }
+        CastView = null;
+        Player.EndCast();
+    }
+
+    public async Task StopCastAsync()
+    {
+        try { await Api.PostAsync("/api/cast/stop"); } catch (Exception ex) { AppLog.Warn("Cast", "stop", ex); }
+        MyCast = null;
+        SharesVm.ApplyMyCast(null);
+        Player.EndCast();
+    }
+
+    /// <summary>At start and after a reconnect: a multicast can't go on without its player, so a leftover one ends.</summary>
+    private async Task ResetCastAsync()
+    {
+        try
+        {
+            var mine = await Api.GetAsync<MyCastDto>("/api/cast");
+            if (mine?.Active == true && Player.CastRole != PlayerViewModel.CastRoles.Host) await Api.PostAsync("/api/cast/stop");
+            var view = await Api.GetAsync<CastViewDto>("/api/cast/view");
+            if (view?.Active == true && Player.CastRole != PlayerViewModel.CastRoles.Follower) await Api.PostAsync("/api/cast/leave");
+        }
+        catch (Exception ex) { AppLog.Warn("Cast", "reset", ex); }
+        RefreshLive();
+    }
+
+    private BrowseViewModel BrowseFor(PeerVm peer)
+    {
+        if (_browse.TryGetValue(peer.Id, out var vm) && ReferenceEquals(vm.Peer, peer)) return vm;
+        vm = new BrowseViewModel(this, peer);
+        _browse[peer.Id] = vm;
+        return vm;
+    }
 
     [RelayCommand]
     public void SelectPeer(PeerVm? peer)

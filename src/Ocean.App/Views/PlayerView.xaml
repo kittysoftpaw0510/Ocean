@@ -42,6 +42,19 @@
             </StackPanel>
         </Border>
 
+        <!-- multicast: hosting (viewers, Stop) or following (the host drives, Leave) -->
+        <Border Background="#D9881337" CornerRadius="8" Padding="14,8" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,112,0,0"
+                Visibility="{Binding CastBannerVisible, Converter={StaticResource BoolToVis}}">
+            <StackPanel Orientation="Horizontal">
+                <Ellipse Width="9" Height="9" Fill="#FB7185" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                <TextBlock Text="{Binding CastBanner}" VerticalAlignment="Center" Foreground="White" MaxWidth="620" TextWrapping="Wrap"/>
+                <Button Style="{StaticResource BtnPrimary}" Content="Stop multicast" Margin="12,0,0,0" Padding="12,4" Command="{Binding StopCastCommand}"
+                        Visibility="{Binding IsCastHost, Converter={StaticResource BoolToVis}}"/>
+                <Button Style="{StaticResource BtnGhost}" Content="Leave" Margin="12,0,0,0" Padding="12,4" Command="{Binding LeaveCastCommand}"
+                        Visibility="{Binding IsCastFollower, Converter={StaticResource BoolToVis}}"/>
+            </StackPanel>
+        </Border>
+
         <!-- top bar -->
         <Border x:Name="TopBar" VerticalAlignment="Top" Padding="20,14">
             <Border.Background>
