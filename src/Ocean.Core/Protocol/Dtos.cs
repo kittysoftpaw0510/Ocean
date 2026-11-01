@@ -70,6 +70,15 @@ public class ItemDto
     public int? Height { get; set; }
     public LockInfo? Lock { get; set; }
     public bool Unlocked { get; set; }
+    /// <summary>The owner's tags (null when none).</summary>
+    public List<string>? Tags { get; set; }
+    /// <summary>Votes and "watched to the end" counts, kept by the owner; Score ranks "Top on the network".</summary>
+    public int Up { get; set; }
+    public int Down { get; set; }
+    public int Finished { get; set; }
+    public double Score { get; set; }
+    /// <summary>Set by the browsing side: my own vote on it (+1, −1, 0).</summary>
+    public int MyVote { get; set; }
     /// <summary>"preparing" or "ready" when the owner has a lighter copy for watching (see LightVariant); else null.</summary>
     public string? Light { get; set; }
     public long LightSize { get; set; }
@@ -304,6 +313,7 @@ public sealed class SettingsDto
     public bool AllowPublicNetworks { get; set; } = true;
     /// <summary>Let PCs that have no network path to each other reach each other through this one.</summary>
     public bool AllowBridging { get; set; } = true;
+    public bool CheckUpdates { get; set; } = true;
     /// <summary>Make lighter copies (720p) of my heavy videos when someone watches them.</summary>
     public bool LightCopies { get; set; } = true;
     /// <summary>Keep a lighter copy this many days after it was last watched.</summary>

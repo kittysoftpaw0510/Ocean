@@ -10,6 +10,22 @@
             <TextBlock Style="{StaticResource Muted}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="14"
                        Text="Pick a node on the left to browse and watch what it shares. Add your own videos under My shares, and everyone on this network will see them."/>
 
+            <!-- a newer Ocean is downloaded -->
+            <Border Style="{StaticResource Card}" Padding="14,12" Margin="0,28,0,0" BorderBrush="{StaticResource Accent}" Visibility="{Binding UpdateBanner, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Update ready">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Left" Text="&#xE896;" Style="{StaticResource Icon}" FontSize="20" Foreground="{StaticResource Accent}" VerticalAlignment="Center" Margin="0,0,14,0"/>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                        <Button Style="{StaticResource BtnPrimary}" Content="Install now" Command="{Binding DataContext.InstallUpdateCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                        <Button Style="{StaticResource BtnGhost}" Content="Later" Margin="6,0,0,0" Command="{Binding DataContext.DismissUpdateCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                    </StackPanel>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="{Binding UpdateTitle}" Style="{StaticResource H2}"/>
+                        <TextBlock Text="{Binding UpdateHint}" Style="{StaticResource Dim}" TextWrapping="Wrap"/>
+                        <TextBlock Margin="0,2,0,0"><Hyperlink Command="{Binding DataContext.OpenReleaseNotesCommand, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{StaticResource Accent}">What's new</Hyperlink></TextBlock>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
             <!-- Live now: multicasts on the network, one card each -->
             <ItemsControl ItemsSource="{Binding Live}" Margin="0,28,0,0" Visibility="{Binding AnyLive, Converter={StaticResource BoolToVis}}">
                 <ItemsControl.ItemTemplate>
@@ -98,6 +114,107 @@
                                 Command="{Binding DataContext.ForgetLastCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
                     </StackPanel>
                 </Grid>
+            </Border>
+
+            <!-- Top on the network: best-rated videos of everyone, filtered by tag -->
+            <Border Style="{StaticResource Card}" Margin="0,28,0,0" Padding="12" Visibility="{Binding AnyTop, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Top on the network">
+                <StackPanel>
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Left" Text="&#xE735;" Style="{StaticResource Icon}" FontSize="13" Foreground="{StaticResource Accent}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock Text="TOP ON THE NETWORK" Style="{StaticResource Dim}" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"
+                                   ToolTip="Videos people liked or watched to the end, best first. Votes fade with time, so new favourites rise."/>
+                    </DockPanel>
+                    <ItemsControl ItemsSource="{Binding TopTags}" Margin="0,8,0,0" Visibility="{Binding TopTags.Count, Converter={StaticResource CountToVis}}">
+                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Button Margin="0,0,6,6" Padding="10,3" Command="{Binding DataContext.SelectTopTagCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource BtnGhost}">
+                                            <Setter Property="BorderBrush" Value="{StaticResource Border}"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                    <Setter Property="Foreground" Value="{StaticResource Accent}"/>
+                                                    <Setter Property="Background" Value="{StaticResource AccentSoft}"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding Label}" FontSize="12" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                                        <TextBlock Text="{Binding Count}" Style="{StaticResource Dim}" FontSize="11" Margin="5,0,0,0" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Text="{Binding TopEmptyText}" Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="{Binding TopEmptyText, Converter={StaticResource NullToVis}}"/>
+                    <ItemsControl ItemsSource="{Binding Top}" Margin="0,6,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border x:Name="Row" CornerRadius="8" Padding="6" Margin="0,2" Background="Transparent" Cursor="Hand" ToolTip="{Binding Tooltip}"
+                                        AutomationProperties.Name="{Binding Title}">
+                                    <Border.InputBindings>
+                                        <MouseBinding MouseAction="LeftDoubleClick" Command="{Binding DataContext.PlayNetCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                    </Border.InputBindings>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="22"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Rank}" Style="{StaticResource Dim}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                        <Button Grid.Column="1" Command="{Binding DataContext.PlayNetCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Cursor="Hand" Focusable="False" ToolTip="Play">
+                                            <Button.Template>
+                                                <ControlTemplate TargetType="Button">
+                                                    <Grid Width="96" Height="54">
+                                                        <Border CornerRadius="6" Background="{StaticResource Bg3}" ClipToBounds="True">
+                                                            <Grid>
+                                                                <TextBlock Text="&#xE714;" Style="{StaticResource Icon}" FontSize="20" Foreground="{StaticResource TextDim}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                                <Image Source="{Binding Item.Thumb}" Stretch="UniformToFill"/>
+                                                            </Grid>
+                                                        </Border>
+                                                        <Border x:Name="PlayBadge" Width="30" Height="30" CornerRadius="15" Background="#B0000000" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.85">
+                                                            <TextBlock Text="&#xE768;" Style="{StaticResource Icon}" FontSize="12" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="2,0,0,0"/>
+                                                        </Border>
+                                                    </Grid>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter TargetName="PlayBadge" Property="Opacity" Value="1"/>
+                                                            <Setter TargetName="PlayBadge" Property="Background" Value="{StaticResource Accent}"/>
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Button.Template>
+                                        </Button>
+                                        <StackPanel Grid.Column="2" Margin="12,0" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Style="{StaticResource Dim}" TextTrimming="CharacterEllipsis">
+                                                <Hyperlink Command="{Binding DataContext.BrowseNetCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Foreground="{StaticResource TextMuted}" TextDecorations="None" ToolTip="Open this node's list">
+                                                    <Run Text="{Binding Who, Mode=OneWay}"/>
+                                                </Hyperlink>
+                                                <Run Text="  ·  "/><Run Text="{Binding Meta, Mode=OneWay}"/>
+                                            </TextBlock>
+                                            <ContentPresenter Content="{Binding Item}" ContentTemplate="{StaticResource SocialLine}"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Button Style="{StaticResource LikeBtn}" Content="&#xE8E1;" ToolTip="{Binding LikeMenu}" Visibility="{Binding CanVote, Converter={StaticResource BoolToVis}}"
+                                                    Command="{Binding DataContext.VoteNetUpCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                            <Button Style="{StaticResource DislikeBtn}" Content="&#xE8E0;" ToolTip="{Binding DislikeMenu}" Visibility="{Binding CanVote, Converter={StaticResource BoolToVis}}"
+                                                    Command="{Binding DataContext.VoteNetDownCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                            <Button Style="{StaticResource BtnPrimary}" Content="{Binding ActionText}" Margin="8,0,0,0" ToolTip="Play"
+                                                    Command="{Binding DataContext.PlayNetCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                                <DataTemplate.Triggers>
+                                    <Trigger SourceName="Row" Property="IsMouseOver" Value="True"><Setter TargetName="Row" Property="Background" Value="{StaticResource Bg2}"/></Trigger>
+                                </DataTemplate.Triggers>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
             </Border>
 
             <Border Style="{StaticResource Card}" Margin="0,28,0,0" Visibility="{Binding PeerCount, Converter={StaticResource ZeroToVis}}">

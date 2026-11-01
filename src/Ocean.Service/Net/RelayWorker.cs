@@ -48,7 +48,7 @@ public sealed class RelayWorker : IDisposable
                     cert is not null && NodeIdentity.ComputeNodeId(new X509Certificate2(cert)) == identity.NodeId,
             },
         };
-        if (NetworkCompat.Classic) handler.ConnectCallback = NetworkCompat.ConnectAsync; // blocking sockets on threads (see NetworkCompat)
+        handler.ConnectCallback = LanOnly.ConnectAsync; // loopback passes; local network only (blocking sockets in classic mode)
         _self = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
     }
 

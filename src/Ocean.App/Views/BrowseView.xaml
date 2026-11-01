@@ -65,6 +65,15 @@
             <MenuItem Header="Copy stream link" Command="{Binding PlacementTarget.Tag.CopyLinkCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}">
                 <MenuItem.Icon><TextBlock Text="&#xE71B;" Style="{StaticResource Icon}"/></MenuItem.Icon>
             </MenuItem>
+            <Separator Visibility="{Binding CanVote, Converter={StaticResource BoolToVis}}"/>
+            <MenuItem Header="{Binding LikeMenu}" Visibility="{Binding CanVote, Converter={StaticResource BoolToVis}}"
+                      Command="{Binding PlacementTarget.Tag.VoteUpCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}">
+                <MenuItem.Icon><TextBlock Text="&#xE8E1;" Style="{StaticResource Icon}"/></MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="{Binding DislikeMenu}" Visibility="{Binding CanVote, Converter={StaticResource BoolToVis}}"
+                      Command="{Binding PlacementTarget.Tag.VoteDownCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}">
+                <MenuItem.Icon><TextBlock Text="&#xE8E0;" Style="{StaticResource Icon}"/></MenuItem.Icon>
+            </MenuItem>
         </ContextMenu>
 
         <!-- context menu for a folder (DataContext = FolderVm, PlacementTarget.Tag = BrowseViewModel) -->
@@ -244,6 +253,7 @@
                             <Run Text="{Binding SizeText, Mode=OneWay}"/><Run Text="  ·  "/><Run Text="{Binding AddedText, Mode=OneWay}"/><Run Text="{Binding LightTag, Mode=OneWay}"/>
                         </TextBlock>
                         <TextBlock Style="{StaticResource Dim}" Text="{Binding Folder}" Visibility="{Binding Folder, Converter={StaticResource NullToVis}}" Margin="0,1,0,0"/>
+                        <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource SocialLine}"/>
                     </StackPanel>
                 </Grid>
             </Border>
@@ -271,6 +281,7 @@
                     <StackPanel Grid.Row="1" Margin="1,6,1,0">
                         <TextBlock Text="{Binding Name}" FontSize="12" TextWrapping="Wrap" MaxHeight="32" LineHeight="16" TextTrimming="CharacterEllipsis"/>
                         <TextBlock Style="{StaticResource Dim}" Text="{Binding SizeText}" Margin="0,2,0,0"/>
+                        <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource SocialLine}"/>
                     </StackPanel>
                 </Grid>
             </Border>
@@ -302,11 +313,16 @@
                     <StackPanel Grid.Column="1" Margin="12,0" VerticalAlignment="Center">
                         <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
                         <TextBlock Style="{StaticResource Dim}" Text="{Binding Location}"/>
+                        <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource SocialLine}"/>
                     </StackPanel>
                     <TextBlock Grid.Column="2" Text="{Binding SizeText}" Style="{StaticResource Muted}" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="3" Text="{Binding DurationText}" Style="{StaticResource Muted}" VerticalAlignment="Center"/>
                     <TextBlock Grid.Column="4" Text="{Binding AddedText}" Style="{StaticResource Muted}" VerticalAlignment="Center"/>
                     <StackPanel Grid.Column="5" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button Style="{StaticResource LikeBtn}" Content="&#xE8E1;" ToolTip="{Binding LikeMenu}" Visibility="{Binding CanVote, Converter={StaticResource BoolToVis}}"
+                                Command="{Binding DataContext.VoteUpCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
+                        <Button Style="{StaticResource DislikeBtn}" Content="&#xE8E0;" ToolTip="{Binding DislikeMenu}" Visibility="{Binding CanVote, Converter={StaticResource BoolToVis}}"
+                                Command="{Binding DataContext.VoteDownCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
                         <Button Style="{StaticResource BtnIcon}" Content="&#xE768;" ToolTip="Play" Command="{Binding DataContext.PlayCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
                         <Button Style="{StaticResource BtnIcon}" Content="&#xE896;" ToolTip="Download" Command="{Binding DataContext.DownloadCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
                     </StackPanel>
@@ -330,6 +346,7 @@
 
     <Grid>
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -389,8 +406,29 @@
             </ItemsControl>
         </ScrollViewer>
 
+        <!-- tag chips: the owner's tags across this node's videos; one selected = only those videos -->
+        <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled" Margin="24,6,24,0" PreviewMouseWheel="Chips_MouseWheel"
+                      Visibility="{Binding AnyTags, Converter={StaticResource BoolToVis}}">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="&#xE8EC;" Style="{StaticResource Icon}" FontSize="12" Foreground="{StaticResource TextDim}" VerticalAlignment="Center" Margin="4,0,10,0" ToolTip="Tags given by the owner"/>
+                <ItemsControl ItemsSource="{Binding Tags}">
+                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Button Style="{StaticResource ChipBtn}" Padding="10,3" Command="{Binding DataContext.SelectTagCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Label}" FontSize="12" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" MaxWidth="200"/>
+                                    <TextBlock Text="{Binding Count}" Style="{StaticResource Dim}" FontSize="11" Margin="5,0,0,0" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </ScrollViewer>
+
         <!-- toolbar -->
-        <Grid Grid.Row="2" Margin="24,10,24,6">
+        <Grid Grid.Row="3" Margin="24,10,24,6">
             <StackPanel Orientation="Horizontal">
                 <Border Background="{StaticResource Bg1}" CornerRadius="7" Padding="2" BorderBrush="{StaticResource Border}" BorderThickness="1">
                     <StackPanel Orientation="Horizontal">
@@ -461,7 +499,7 @@
             </StackPanel>
         </Grid>
 
-        <StackPanel Grid.Row="3">
+        <StackPanel Grid.Row="4">
             <!-- offline node: last known shares -->
             <Border Margin="24,2,24,8" Background="#1F9CA3AF" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" CornerRadius="8" Padding="12,8"
                     Visibility="{Binding IsOffline, Converter={StaticResource BoolToVis}}">
@@ -528,7 +566,7 @@
         </StackPanel>
 
         <!-- content -->
-        <Grid Grid.Row="4">
+        <Grid Grid.Row="5">
             <ProgressBar IsIndeterminate="True" Height="3" VerticalAlignment="Top" Margin="24,0" Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}}"/>
 
             <ListBox x:Name="List" ItemsSource="{Binding Entries}" SelectionMode="Extended" Margin="18,4,18,0"

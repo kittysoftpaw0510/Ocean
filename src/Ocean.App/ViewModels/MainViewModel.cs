@@ -21,6 +21,35 @@ public partial class HomeViewModel : ObservableObject
     /// <summary>Multicasts running on the network right now.</summary>
     public ObservableCollection<LiveCastVm> Live { get; } = new();
     [ObservableProperty] private bool _anyLive;
+
+    /// <summary>"Top on the network": the best-rated videos of everyone (mine included), optionally for one tag.</summary>
+    public ObservableCollection<NetItemVm> Top { get; } = new();
+    public ObservableCollection<TagChipVm> TopTags { get; } = new();
+    [ObservableProperty] private bool _anyTop;
+    [ObservableProperty] private string? _topTag;
+    [ObservableProperty] private string _topEmptyText = "";
+
+    /// <summary>A newer Ocean is downloaded and waits for "Install now" (hidden again with "Later").</summary>
+    [ObservableProperty] private bool _updateBanner;
+    [ObservableProperty] private string _updateTitle = "";
+    [ObservableProperty] private string _updateHint = "";
+
+    public void ApplyTop(TopDto top, MainViewModel main)
+    {
+        // keep the row objects (and their thumbnails) for videos that stay in the list
+        var byKey = Top.ToDictionary(t => t.Key, StringComparer.Ordinal);
+        var rows = top.Items.Select(d => byKey.TryGetValue(NetItemVm.KeyOf(d), out var vm) ? vm.Update(d) : new NetItemVm(d, main)).ToList();
+        Top.Clear();
+        foreach (var r in rows) { r.Rank = Top.Count + 1; Top.Add(r); }
+
+        TopTags.Clear();
+        foreach (var t in top.Tags)
+            TopTags.Add(new TagChipVm(t.Tag, t.Count) { IsSelected = TopTag is not null && string.Equals(t.Tag, TopTag, StringComparison.CurrentCultureIgnoreCase) });
+        if (TopTag is not null && !TopTags.Any(t => t.IsSelected)) TopTag = null;
+        AnyTop = rows.Count > 0 || TopTags.Count > 0;
+        TopEmptyText = rows.Count > 0 ? "" : TopTag is null ? "Nothing has been liked yet. Thumbs up a video you enjoyed and it shows up here."
+                                                            : $"No liked videos tagged #{TopTag} yet.";
+    }
 }
 
 /// <summary>Application shell: navigation, peers, live events from the service, toasts and access requests.</summary>
@@ -42,6 +71,16 @@ public partial class MainViewModel : ObservableObject
     public SharesViewModel SharesVm { get; }
     public DownloadsViewModel DownloadsVm { get; }
     public SettingsViewModel SettingsVm { get; }
+    public SearchViewModel SearchVm { get; }
+    /// <summary>What the service knows about newer versions (null until asked).</summary>
+    [ObservableProperty] private UpdateStatusDto? _update;
+    private string _updateDismissed = "";
+    private string _updateAnnounced = "";
+    private readonly System.ComponentModel.ICollectionView _peersView;
+    /// <summary>The video search (top of the content area); typing opens the search page, clearing it goes back.</summary>
+    [ObservableProperty] private string _videoQuery = "";
+    private CancellationTokenSource? _queryCts;
+    private (object Page, string Nav, PeerVm? Peer)? _beforeSearch;
     public PlayerViewModel Player { get; }
     public HomeViewModel Home { get; } = new();
     /// <summary>My multicast (null when none) and the one I'm watching (null when none).</summary>
@@ -73,7 +112,10 @@ public partial class MainViewModel : ObservableObject
         SharesVm = new SharesViewModel(this);
         DownloadsVm = new DownloadsViewModel(this);
         SettingsVm = new SettingsViewModel(this);
+        SearchVm = new SearchViewModel(this);
         Player = new PlayerViewModel(this);
+        _peersView = System.Windows.Data.CollectionViewSource.GetDefaultView(Peers);
+        _peersView.Filter = o => o is PeerVm p && PeerMatches(p, SearchText);
         Page = Home;
         if (LastPlayedStore.Load() is { } last) ShowResumeCard(last);
     }
@@ -95,6 +137,7 @@ public partial class MainViewModel : ObservableObject
         await SettingsVm.LoadAsync();
         await LoadPendingAsync();
         StartEventLoop();
+        _ = LoadUpdateAsync();
         AppLog.Info("Main", $"ready: {Peers.Count} nodes known ({Peers.Count(p => p.Online)} online)");
         UpdateStatusText();
     }
@@ -334,6 +377,8 @@ public partial class MainViewModel : ObservableObject
                         RecountNew();
                     }
                     if (_browse.TryGetValue(id, out var b)) _ = b.LoadAsync(false);
+                    ScheduleTopRefresh();
+                    if (Page is SearchViewModel) SearchVm.ScheduleRefresh();
                     break;
                 }
                 case "newVideos":
@@ -389,6 +434,11 @@ public partial class MainViewModel : ObservableObject
                 }
                 case "catalog":
                     SharesVm.ScheduleReload();
+                    ScheduleTopRefresh();
+                    if (Page is SearchViewModel) SearchVm.ScheduleRefresh();
+                    break;
+                case "update":
+                    ApplyUpdate(Json.Deserialize<UpdateStatusDto>(data));
                     break;
                 case "grants":
                     _ = SharesVm.RefreshGrantsAsync();
@@ -522,8 +572,184 @@ public partial class MainViewModel : ObservableObject
             RecountNew();
             UpdateStatusText();
             RefreshLive();
+            ScheduleTopRefresh();
         }
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
+    }
+
+    // ------------------------------------------------------------------ updates
+
+    public async Task LoadUpdateAsync()
+    {
+        try { ApplyUpdate(await Api.GetAsync<UpdateStatusDto>("/api/update")); } catch { }
+    }
+
+    private void ApplyUpdate(UpdateStatusDto? u)
+    {
+        if (u is null) return;
+        Update = u;
+        var ready = u.Ready && u.Available && u.InstallerPath is not null;
+        Home.UpdateBanner = ready && u.Latest != _updateDismissed;
+        Home.UpdateTitle = ready ? $"Ocean {u.Latest} is ready to install" : "";
+        Home.UpdateHint = ready ? $"You have {u.Current}. Installing takes about a minute; Ocean closes and opens again by itself." : "";
+        SettingsVm.RefreshUpdateText();
+        if (ready && u.Latest != _updateAnnounced && u.Latest != _updateDismissed)
+        {
+            _updateAnnounced = u.Latest;
+            if (_initialPeersLoaded) Toast("Update ready", $"Ocean {u.Latest} is downloaded. Install it from the home page or Settings.", "info", ShowHome);
+        }
+    }
+
+    /// <summary>Runs the downloaded installer (silent, Windows asks for permission); it closes Ocean, updates and reopens it.</summary>
+    [RelayCommand]
+    public async Task InstallUpdate()
+    {
+        if (Update is not { Ready: true, InstallerPath: { Length: > 0 } path, Latest: var version }) return;
+        if (!File.Exists(path)) { Toast("Installer missing", "The downloaded file is gone; checking again.", "warn"); _ = CheckUpdatesAsync(); return; }
+        var casting = MyCast is { Active: true };
+        var ok = await Dialogs.ConfirmAsync($"Install Ocean {version}?",
+            "Ocean closes, the new version installs in the background (Windows asks for permission first) and Ocean opens again in about a minute. " +
+            "Downloads continue afterwards." + (casting ? " Your multicast stops." : ""), "Install now");
+        if (!ok) return;
+        try
+        {
+            AppLog.Info("Update", $"installing {version} from {path}");
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path, "/SILENT /NORESTART /SUPPRESSMSGBOXES") { UseShellExecute = true, Verb = "runas" });
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn("Update", "installer did not start", ex);
+            Toast("Update not installed", "Windows didn't let the installer run. You can run it yourself: " + path, "warn");
+        }
+    }
+
+    [RelayCommand]
+    private void DismissUpdate()
+    {
+        _updateDismissed = Update?.Latest ?? "";
+        Home.UpdateBanner = false;
+    }
+
+    [RelayCommand]
+    private void OpenReleaseNotes()
+    {
+        var url = Update?.Url is { Length: > 0 } u ? u : "https://github.com/kittysoftpaw0510/Ocean/releases";
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+    }
+
+    /// <summary>"Check for updates" in Settings: asks the service to look now.</summary>
+    public async Task CheckUpdatesAsync()
+    {
+        try { ApplyUpdate(await Api.PostAsync<UpdateStatusDto>("/api/update/check", null)); }
+        catch (Exception ex) { Error("Could not check for updates", ex); }
+    }
+
+    // ------------------------------------------------------------------ votes, tags, top list
+
+    /// <summary>
+    /// Thumbs up/down on another node's video (vote: 1, -1, 0 = take it back; null = unchanged) and/or "watched it to
+    /// the end". The service keeps my vote, sends it to the owner and brings back the new totals.
+    /// </summary>
+    public async Task<bool> RateAsync(PeerVm peer, ItemVm item, int? vote, bool finished)
+    {
+        try
+        {
+            var r = await Api.PostAsync<MyRatingDto>($"/api/peers/{peer.Id}/rate/{item.Id}", new RateDto { Vote = vote, Finished = finished });
+            if (r is null) return false;
+            item.ApplyRating(r);
+            if (_browse.TryGetValue(peer.Id, out var b)) b.ApplyRating(item.Id, r); // the same video on the node's page
+            SearchVm.ApplyRating(item.Id, r);
+            if (Player.Item is { } playing && playing.Id == item.Id && !ReferenceEquals(playing, item)) playing.ApplyRating(r);
+            if (vote is not null && r.Pending) Toast("Vote saved", $"{peer.Label} is offline right now; your vote is delivered when it's back.", "info");
+            ScheduleTopRefresh();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            if (vote is not null) Error("Could not vote", ex);
+            else AppLog.Warn("Votes", $"finished report for {item.Name} failed", ex);
+            return false;
+        }
+    }
+
+    private int _topRefreshPending;
+
+    /// <summary>Reloads "Top on the network" a moment later (catalog events come in bursts).</summary>
+    public void ScheduleTopRefresh()
+    {
+        if (Interlocked.CompareExchange(ref _topRefreshPending, 1, 0) != 0) return;
+        _ = Task.Delay(1500).ContinueWith(_ => Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            Volatile.Write(ref _topRefreshPending, 0);
+            return RefreshTopAsync();
+        }), TaskScheduler.Default);
+    }
+
+    public async Task RefreshTopAsync()
+    {
+        try
+        {
+            var query = "/api/top?limit=12" + (Home.TopTag is { } tag ? "&tag=" + Uri.EscapeDataString(tag) : "");
+            var top = await Api.GetAsync<TopDto>(query);
+            if (top is not null) Home.ApplyTop(top, this);
+        }
+        catch (Exception ex) { AppLog.Warn("Top", "refresh failed", ex); }
+    }
+
+    [RelayCommand]
+    private Task SelectTopTag(TagChipVm? chip)
+    {
+        Home.TopTag = chip is null || chip.IsSelected ? null : chip.Tag;
+        foreach (var t in Home.TopTags) t.IsSelected = Home.TopTag is not null && string.Equals(t.Tag, Home.TopTag, StringComparison.CurrentCultureIgnoreCase);
+        return RefreshTopAsync();
+    }
+
+    /// <summary>Play a row of the top list: my own video from disk, someone else's like from their page.</summary>
+    [RelayCommand]
+    private async Task PlayNet(NetItemVm? top)
+    {
+        if (top is null) return;
+        if (top.Dto.Mine)
+        {
+            if (top.Dto.FullPath is not { Length: > 0 } path) return;
+            var local = Json.Deserialize<LocalItemDto>(Json.Serialize(top.Dto.Item)) ?? new LocalItemDto();
+            local.FullPath = path;
+            Player.OpenLocal(new LocalItemVm(local, i => Thumbs.GetAsync(Api.LocalThumbPath(i.Id))), top.Dto.ShareName);
+            return;
+        }
+        var peer = Peers.FirstOrDefault(p => p.Id == top.Dto.PeerId);
+        if (peer is null) { Toast("Not available", $"{top.Dto.PeerName} isn't on the network right now.", "warn"); return; }
+        await BrowseFor(peer).PlayCommand.ExecuteAsync(top.Item);
+    }
+
+    [RelayCommand] private Task VoteNetUp(NetItemVm? top) => VoteNetAsync(top, 1);
+    [RelayCommand] private Task VoteNetDown(NetItemVm? top) => VoteNetAsync(top, -1);
+    private Task VoteNetAsync(NetItemVm? top, int vote)
+    {
+        if (top is null || !top.CanVote) return Task.CompletedTask;
+        var peer = Peers.FirstOrDefault(p => p.Id == top.Dto.PeerId);
+        if (peer is null) { Toast("Not available", $"{top.Dto.PeerName} isn't on the network right now.", "warn"); return Task.CompletedTask; }
+        return RateAsync(peer, top.Item, top.Item.MyVote == vote ? 0 : vote, finished: false);
+    }
+
+    /// <summary>Download a search result from its node (same queue and unlock flow as the node's page).</summary>
+    [RelayCommand]
+    private async Task DownloadNet(NetItemVm? row)
+    {
+        if (row is null || row.Dto.Mine) return;
+        var peer = Peers.FirstOrDefault(p => p.Id == row.Dto.PeerId);
+        if (peer is null) { Toast("Not available", $"{row.Dto.PeerName} isn't on the network right now.", "warn"); return; }
+        await BrowseFor(peer).DownloadCommand.ExecuteAsync(row.Item);
+    }
+
+    /// <summary>Open the node's page from a row of the top list or the search.</summary>
+    [RelayCommand]
+    private void BrowseNet(NetItemVm? top)
+    {
+        if (top is null) return;
+        if (top.Dto.Mine) { ShowShares(); return; }
+        var peer = Peers.FirstOrDefault(p => p.Id == top.Dto.PeerId);
+        if (peer is not null) SelectPeer(peer);
     }
 
     public void RecountNew()
@@ -598,13 +824,52 @@ public partial class MainViewModel : ObservableObject
         Player.EndCast();
     }
 
-    /// <summary>At start and after a reconnect: a multicast can't go on without its player, so a leftover one ends.</summary>
+    /// <summary>The player closed but the multicast goes on by itself (until the video ends, or Stop in My shares).</summary>
+    public async Task DetachCastAsync(bool notify)
+    {
+        var name = MyCast?.ItemName ?? Player.Title;
+        try { await Api.PostAsync("/api/cast/detach"); } catch (Exception ex) { AppLog.Warn("Cast", "detach", ex); }
+        Player.EndCast();
+        AppLog.Info("Cast", $"multicast of {name} goes on without the player");
+        if (!notify) return;
+        Toast("Multicast goes on", $"“{name}” keeps playing for everyone without your player. Take it back or stop it in My shares.", "info", ShowShares);
+        TrayNotify?.Invoke("Multicast goes on", $"“{name}” keeps playing for everyone. Open Ocean to stop it.", ShowShares);
+    }
+
+    /// <summary>Open the player on the video I'm multicasting and drive it again from where it is now.</summary>
+    public async Task ReopenCastAsync(LocalItemVm item, string shareName)
+    {
+        try
+        {
+            var st = await Api.GetAsync<MyCastDto>("/api/cast");
+            if (st?.Active != true)
+            {
+                MyCast = null; SharesVm.ApplyMyCast(null);
+                Player.OpenLocal(item, shareName); // it ended meanwhile: just watch it
+                return;
+            }
+            MyCast = st; SharesVm.ApplyMyCast(st);
+            Player.OpenLocal(item, shareName, startAt: st.Playing ? st.Position + 1 : st.Position, host: true);
+            Player.BeginHost(st);
+            AppLog.Info("Cast", $"player back on the multicast of {st.ItemName} at {st.Position:0} s");
+        }
+        catch (Exception ex) { Error("Can't open the player", ex); }
+    }
+
+    /// <summary>
+    /// At start and after a reconnect: a multicast whose player is gone (the app restarted) runs on by itself until
+    /// the video ends; a multicast I was watching is left (its player is gone too).
+    /// </summary>
     private async Task ResetCastAsync()
     {
         try
         {
             var mine = await Api.GetAsync<MyCastDto>("/api/cast");
-            if (mine?.Active == true && Player.CastRole != PlayerViewModel.CastRoles.Host) await Api.PostAsync("/api/cast/stop");
+            if (mine?.Active == true && Player.CastRole != PlayerViewModel.CastRoles.Host)
+            {
+                if (!mine.Unattended) { await Api.PostAsync("/api/cast/detach"); mine.Unattended = true; }
+                MyCast = mine; SharesVm.ApplyMyCast(mine);
+            }
             var view = await Api.GetAsync<CastViewDto>("/api/cast/view");
             if (view?.Active == true && Player.CastRole != PlayerViewModel.CastRoles.Follower) await Api.PostAsync("/api/cast/leave");
         }
@@ -639,7 +904,6 @@ public partial class MainViewModel : ObservableObject
         }
         SelectedPeer = peer;
         Nav = "peer";
-        vm.Filter = SearchText;
         Page = vm;
         _ = vm.LoadAsync(false);
     }
@@ -649,11 +913,56 @@ public partial class MainViewModel : ObservableObject
         if (value is not null && (Page is not BrowseViewModel b || b.Peer != value)) SelectPeer(value);
     }
 
-    partial void OnSearchTextChanged(string value)
+    partial void OnSearchTextChanged(string value) => _peersView.Refresh();
+
+    /// <summary>The node list's filter box: name, user, PC name or address.</summary>
+    private static bool PeerMatches(PeerVm p, string text)
     {
-        if (Page is BrowseViewModel b) b.Filter = value;
-        else if (Page is SharesViewModel s) s.ItemFilter = value;
+        if (string.IsNullOrWhiteSpace(text)) return true;
+        var f = text.Trim();
+        return p.Label.Contains(f, StringComparison.CurrentCultureIgnoreCase) || p.Name.Contains(f, StringComparison.CurrentCultureIgnoreCase)
+            || p.User.Contains(f, StringComparison.CurrentCultureIgnoreCase) || p.Host.Contains(f, StringComparison.CurrentCultureIgnoreCase)
+            || p.Address.Contains(f, StringComparison.OrdinalIgnoreCase);
     }
+
+    // ------------------------------------------------------------------ video search
+
+    partial void OnVideoQueryChanged(string value)
+    {
+        _queryCts?.Cancel();
+        var cts = _queryCts = new CancellationTokenSource();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            _ = SearchVm.RunAsync("");
+            if (Page is SearchViewModel) LeaveSearch();
+            return;
+        }
+        if (Page is not SearchViewModel)
+        {
+            _beforeSearch = (Page ?? Home, Nav, SelectedPeer);
+            if (Page is BrowseViewModel prev) prev.Deactivate();
+            SelectedPeer = null; Nav = "search"; Page = SearchVm;
+        }
+        _ = Task.Delay(250, cts.Token).ContinueWith(t =>
+        {
+            if (t.IsCanceled) return Task.CompletedTask;
+            return Application.Current.Dispatcher.InvokeAsync(() => SearchVm.RunAsync(value)).Task;
+        }, TaskScheduler.Default);
+    }
+
+    /// <summary>Back to where the user was before typing (Esc or the clear button).</summary>
+    private void LeaveSearch()
+    {
+        var back = _beforeSearch; _beforeSearch = null;
+        if (back is null) { ShowHome(); return; }
+        if (back.Value.Page is BrowseViewModel b && Peers.Contains(b.Peer)) SelectPeer(b.Peer);
+        else if (back.Value.Page is SharesViewModel) ShowShares();
+        else if (back.Value.Page is DownloadsViewModel) ShowDownloads();
+        else if (back.Value.Page is SettingsViewModel) ShowSettings();
+        else ShowHome();
+    }
+
+    [RelayCommand] private void ClearVideoQuery() => VideoQuery = "";
 
     [RelayCommand] public void ShowHome() { SelectedPeer = null; Nav = "home"; Page = Home; RefreshResumeCard(); }
 
@@ -744,7 +1053,7 @@ public partial class MainViewModel : ObservableObject
         Home.Resume = null;
         LastPlayedStore.Save(null);
     }
-    [RelayCommand] public void ShowShares() { SelectedPeer = null; Nav = "shares"; SharesVm.ItemFilter = SearchText; Page = SharesVm; }
+    [RelayCommand] public void ShowShares() { SelectedPeer = null; Nav = "shares"; Page = SharesVm; }
     [RelayCommand] public void ShowDownloads() { SelectedPeer = null; Nav = "downloads"; Page = DownloadsVm; }
     [RelayCommand] public void ShowSettings() { SelectedPeer = null; Nav = "settings"; _ = SettingsVm.LoadAsync(); Page = SettingsVm; }
     [RelayCommand] private void ClearSearch() => SearchText = "";

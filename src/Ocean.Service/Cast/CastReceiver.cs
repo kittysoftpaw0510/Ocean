@@ -65,6 +65,8 @@ public sealed class CastReceiver : IDisposable
         var req = _client.Build(peer, HttpMethod.Post, "/p/cast/" + Uri.EscapeDataString(sessionId) + "/join", _peers.GrantsFor(peerId));
         using var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseContentRead, ct);
         if (resp.StatusCode == HttpStatusCode.NotFound) throw new InvalidOperationException("That multicast has ended.");
+        if (resp.StatusCode == HttpStatusCode.BadRequest && peer.Bridged)
+            throw new InvalidOperationException($"This PC reaches {DisplayNames.Of(peer.User, peer.Name)} only through other PCs, and none of them can pass a multicast on yet (they run an older Ocean). It works once one of them is updated to 1.2.0 or later.");
         if (!resp.IsSuccessStatusCode) throw await PeerStatusException.FromAsync(resp);
         var join = await resp.Content.ReadFromJsonAsync<CastJoinDto>(Json.Options, ct) ?? throw new InvalidOperationException("Empty answer from the host.");
 
@@ -88,11 +90,15 @@ public sealed class CastReceiver : IDisposable
             sock.ReceiveBufferSize = 4 * 1024 * 1024;
             var group = IPAddress.Parse(join.Group);
             var joined = 0;
-            foreach (var addr in CastWire.LocalAddresses())
+            // listen on the real network adapter the host is reached through (never a VPN or virtual adapter)
+            var hostAddrs = (peer.Preferred is { } pref ? new[] { pref } : Array.Empty<IPAddress>()).Concat(peer.Addresses.Keys).Append(peer.Address);
+            var adapters = Net.LocalNetworks.MulticastAddresses(hostAddrs);
+            foreach (var (addr, adapter) in adapters)
             {
                 try { sock.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.AddMembership, new MulticastOption(group, addr)); joined++; }
-                catch (Exception ex) { _log.LogDebug("multicast: can't listen on {Addr}: {Msg}", addr, ex.Message); }
+                catch (Exception ex) { _log.LogDebug("multicast: can't listen on {Adapter} ({Addr}): {Msg}", adapter, addr, ex.Message); }
             }
+            _log.LogInformation("multicast: listening on {Adapters}", joined == 0 ? "no adapter" : string.Join(", ", adapters.Select(a => $"{a.Adapter} ({a.Address})")));
             if (joined == 0) _log.LogWarning("multicast: no network adapter to listen on; everything comes directly from {Host}", v.HostName);
             v.Socket = sock;
         }
@@ -171,6 +177,7 @@ public sealed class CastReceiver : IDisposable
             catch { break; }
             try
             {
+                if (from is IPEndPoint src && !Net.LocalNetworks.IsLan(src.Address)) continue; // local network only
                 if (!CastWire.TryParse(packet.AsSpan(0, n), out var session, out var type, out var seq, out var payload) || session != v.Id) continue;
                 if (v.Recent.ContainsKey(seq)) continue; // the same packet again (the host sends on every adapter)
                 if (type == CastWire.TypeParity)

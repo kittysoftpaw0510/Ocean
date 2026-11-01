@@ -53,4 +53,8 @@ if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed ($LASTEXITCODE)"
 
 $setup = Join-Path $root "dist\Ocean-Setup-$version.exe"
 $mb = [math]::Round((Get-Item $setup).Length / 1MB, 1)
-Write-Host "Setup ready: $setup ($mb MB)" -ForegroundColor Green
+# checksum next to it: upload both to the GitHub release (tag vX.Y.Z); the auto-updater verifies the download
+$sha = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+Set-Content -Path "$setup.sha256" -Value "$sha  Ocean-Setup-$version.exe" -Encoding ascii
+Write-Host "Setup ready: $setup ($mb MB), checksum in $setup.sha256" -ForegroundColor Green
+Write-Host "Publish: git tag v$version; create a GitHub release for it with both files attached." -ForegroundColor Cyan

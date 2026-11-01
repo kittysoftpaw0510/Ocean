@@ -152,6 +152,8 @@ public sealed class DiscoveryService : BackgroundService
             try
             {
                 if (r.Buffer.Length < 32 || r.Buffer.Length > 8192) continue;
+                // local network only: a beacon from the internet or through a VPN adapter is never answered
+                if (!Net.LocalNetworks.IsLan(r.RemoteEndPoint.Address)) { Net.LanOnly.Refused("beacon from", r.RemoteEndPoint.Address); continue; }
                 var b = Json.Deserialize<Beacon>(r.Buffer);
                 if (b is null || b.V != OceanDefaults.ProtocolVersion || b.Id == _identity.NodeId) continue;
                 if (b.Port <= 0 || b.Port > 65535 || string.IsNullOrEmpty(b.Id)) continue;
@@ -220,41 +222,28 @@ public sealed class DiscoveryService : BackgroundService
         return Encoding.UTF8.GetBytes(Json.Serialize(b));
     }
 
+    /// <summary>
+    /// Sends the beacon to the broadcast address of each local network (e.g. 192.168.1.255), which Windows sends out
+    /// of that network's own adapter. Never to 255.255.255.255: Windows sends that one where its default route
+    /// points, which is the VPN adapter while a VPN (Astrill...) is connected. VPN adapters are skipped altogether.
+    /// </summary>
     private void Broadcast(byte[] payload)
     {
         var port = _config.Current.DiscoveryPort;
-        var targets = new HashSet<IPAddress> { IPAddress.Broadcast };
-        foreach (var addr in LocalBroadcastAddresses()) targets.Add(addr);
-        foreach (var t in targets)
+        var targets = Net.LocalNetworks.LanBroadcasts();
+        if (targets.Count == 0 && Environment.TickCount64 - _lastNoLanLog > 600_000)
+        {
+            _lastNoLanLog = Environment.TickCount64;
+            _log.LogInformation("discovery: no local network to announce on ({Nets})", Net.LocalNetworks.Describe());
+        }
+        foreach (var (t, _) in targets)
         {
             try { _udp!.Send(payload, payload.Length, new IPEndPoint(t, port)); }
             catch (Exception ex) { _log.LogTrace(ex, "send to {Target}", t); }
         }
     }
 
-    private static IEnumerable<IPAddress> LocalBroadcastAddresses()
-    {
-        var list = new List<IPAddress>();
-        try
-        {
-            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
-            {
-                if (nic.OperationalStatus != OperationalStatus.Up) continue;
-                if (nic.NetworkInterfaceType is NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel) continue;
-                foreach (var ua in nic.GetIPProperties().UnicastAddresses)
-                {
-                    if (ua.Address.AddressFamily != AddressFamily.InterNetwork || ua.IPv4Mask is null) continue;
-                    var ip = ua.Address.GetAddressBytes();
-                    var mask = ua.IPv4Mask.GetAddressBytes();
-                    var bc = new byte[4];
-                    for (var i = 0; i < 4; i++) bc[i] = (byte)(ip[i] | ~mask[i]);
-                    list.Add(new IPAddress(bc));
-                }
-            }
-        }
-        catch { }
-        return list;
-    }
+    private long _lastNoLanLog = -600_000;
 
     public override async Task StopAsync(CancellationToken ct)
     {

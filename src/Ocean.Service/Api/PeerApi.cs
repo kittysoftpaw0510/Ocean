@@ -142,6 +142,17 @@ public static class PeerApi
 
         g.MapMethods("/via/{target}/{**rest}", new[] { "GET", "HEAD", "POST" }, (HttpContext ctx, ViaForwarder via) => via.ServeAsync(ctx));
 
+        // ---- votes (see Ratings): one per calling PC, under the video's own access rule ----
+        g.MapPost("/rate/{itemId}", async (HttpContext ctx, string itemId, CatalogService catalog, AccessService access, Social.Ratings ratings) =>
+        {
+            if (!catalog.TryGetItem(itemId, out var share, out var item)) return Results.NotFound();
+            var pc = PeerContext.Get(ctx);
+            if (!catalog.IsItemAccessible(share, item, access.Checker(pc.ClientId, pc.Grants))) return Locked(share, item);
+            var rate = await ctx.Request.ReadFromJsonAsync<RateDto>(Json.Options, ctx.RequestAborted) ?? new RateDto();
+            if (rate.Vote is { } v && v is < -1 or > 1) return Results.BadRequest();
+            return Results.Json(ratings.Rate(itemId, pc.ClientId, rate), Json.Options);
+        });
+
         // ---- multicast (see CastHost): join under the video's own access rule, report in, leave ----
         g.MapPost("/cast/{sessionId}/join", (HttpContext ctx, string sessionId, CastHost cast, CatalogService catalog, AccessService access) =>
         {

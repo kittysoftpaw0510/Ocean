@@ -46,6 +46,31 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _hostName = "";
     [ObservableProperty] private int _peerPort;
     [ObservableProperty] private string _versionText = "Ocean " + Core.OceanDefaults.AppVersion;
+    /// <summary>Look for newer versions on GitHub by itself (the service downloads; the user installs).</summary>
+    [ObservableProperty] private bool _checkUpdates = true;
+    partial void OnCheckUpdatesChanged(bool value) => MarkDirty();
+    [ObservableProperty] private string _updateText = "";
+    [ObservableProperty] private bool _updateReady;
+    [ObservableProperty] private bool _updateBusy;
+
+    /// <summary>One line under the version, from the service's update status.</summary>
+    public void RefreshUpdateText()
+    {
+        var u = _main.Update;
+        UpdateReady = u is { Ready: true, Available: true, InstallerPath.Length: > 0 };
+        UpdateBusy = u is { Checking: true } or { Downloading: true };
+        UpdateText = u is null ? "" :
+            u.Checking ? "Checking…" :
+            u.Downloading ? $"Downloading Ocean {u.Latest}…  {u.Progress:P0}" :
+            UpdateReady ? $"Ocean {u.Latest} is ready to install." :
+            u.Available ? $"Ocean {u.Latest} is available." + (u.Error.Length > 0 ? "  " + u.Error : "") :
+            u.Error.Length > 0 ? u.Error :
+            u.CheckedAt is null ? (u.AutoCheck ? "Not checked yet." : "Automatic checks are off.") :
+            $"You have the latest version  ·  checked {Format.Ago(u.CheckedAt.Value)}";
+    }
+
+    [RelayCommand] private Task CheckForUpdates() => _main.CheckUpdatesAsync();
+    [RelayCommand] private Task InstallUpdate() => _main.InstallUpdate();
     private bool _loading;
 
     public SettingsViewModel(MainViewModel main) { _main = main; }
@@ -107,7 +132,7 @@ public partial class SettingsViewModel : ObservableObject
             {
                 NodeName = s.NodeName; UserName = s.UserName; Secret = s.Secret ?? ""; DownloadDir = s.DownloadDir;
                 UploadLimitKBps = s.UploadLimitKBps; NewDays = s.NewDays; MaxConcurrentDownloads = s.MaxConcurrentDownloads; NotifyNewVideos = s.NotifyNewVideos; OfflineKeepHours = s.OfflineKeepHours;
-                AllowPublicNetworks = s.AllowPublicNetworks; FirewallManaged = s.FirewallManaged; AllowBridging = s.AllowBridging;
+                AllowPublicNetworks = s.AllowPublicNetworks; FirewallManaged = s.FirewallManaged; AllowBridging = s.AllowBridging; CheckUpdates = s.CheckUpdates;
                 LightCopies = s.LightCopies; LightKeepDays = s.LightKeepDays; LightCacheGB = s.LightCacheGB; LightAvailable = s.LightAvailable;
                 CpuLimitPercent = s.CpuLimitPercent;
                 LightStatusText = !s.LightAvailable ? "ffmpeg.exe isn't next to Ocean's service on this PC, so no copies are made here."
@@ -128,6 +153,7 @@ public partial class SettingsViewModel : ObservableObject
                 VersionText = string.IsNullOrEmpty(st.Version) || st.Version == app ? $"Ocean {app}" : $"Ocean {app}  ·  service {st.Version}";
             }
             RunAtStartup = ReadRunAtStartup();
+            RefreshUpdateText();
             Dirty = false;
         }
         catch (Exception ex) { _main.Error("Could not load settings", ex); }
@@ -142,7 +168,7 @@ public partial class SettingsViewModel : ObservableObject
             await _main.Api.PutAsync("/api/settings", new SettingsDto
             {
                 NodeName = NodeName.Trim(), UserName = UserName.Trim(), Secret = Secret, DownloadDir = DownloadDir.Trim(),
-                UploadLimitKBps = UploadLimitKBps, NewDays = NewDays, MaxConcurrentDownloads = MaxConcurrentDownloads, OfflineKeepHours = OfflineKeepHours, AllowPublicNetworks = AllowPublicNetworks, AllowBridging = AllowBridging, StreamCacheGB = StreamCacheGB, NetworkMode = NetworkMode,
+                UploadLimitKBps = UploadLimitKBps, NewDays = NewDays, MaxConcurrentDownloads = MaxConcurrentDownloads, OfflineKeepHours = OfflineKeepHours, AllowPublicNetworks = AllowPublicNetworks, AllowBridging = AllowBridging, CheckUpdates = CheckUpdates, StreamCacheGB = StreamCacheGB, NetworkMode = NetworkMode,
                 LightCopies = LightCopies, LightKeepDays = LightKeepDays, LightCacheGB = LightCacheGB, CpuLimitPercent = CpuLimitPercent,
                 NotifyNewVideos = NotifyNewVideos, SharingPaused = _main.SharingPaused,
             });

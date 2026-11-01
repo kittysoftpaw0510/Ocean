@@ -47,7 +47,7 @@
                 Visibility="{Binding CastBannerVisible, Converter={StaticResource BoolToVis}}">
             <StackPanel Orientation="Horizontal">
                 <Ellipse Width="9" Height="9" Fill="#FB7185" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                <TextBlock Text="{Binding CastBanner}" VerticalAlignment="Center" Foreground="White" MaxWidth="620" TextWrapping="Wrap"/>
+                <TextBlock Text="{Binding CastBanner}" ToolTip="{Binding CastBannerTip}" VerticalAlignment="Center" Foreground="White" MaxWidth="520" TextTrimming="CharacterEllipsis"/>
                 <Button Style="{StaticResource BtnPrimary}" Content="Stop multicast" Margin="12,0,0,0" Padding="12,4" Command="{Binding StopCastCommand}"
                         Visibility="{Binding IsCastHost, Converter={StaticResource BoolToVis}}"/>
                 <Button Style="{StaticResource BtnGhost}" Content="Leave" Margin="12,0,0,0" Padding="12,4" Command="{Binding LeaveCastCommand}"
@@ -73,6 +73,8 @@
                     <TextBlock Text="{Binding Subtitle}" Style="{StaticResource Muted}"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button Style="{StaticResource LikeBtn}" Content="&#xE8E1;" ToolTip="{Binding LikeTip}" Command="{Binding VoteUpCommand}" Visibility="{Binding CanVote, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Like"/>
+                    <Button Style="{StaticResource DislikeBtn}" Content="&#xE8E0;" ToolTip="{Binding DislikeTip}" Command="{Binding VoteDownCommand}" Visibility="{Binding CanVote, Converter={StaticResource BoolToVis}}" Margin="0,0,8,0" AutomationProperties.Name="Dislike"/>
                     <Button Style="{StaticResource BtnIcon}" Content="&#xE896;" ToolTip="Download" Command="{Binding DownloadCommand}" Visibility="{Binding CanDownload, Converter={StaticResource BoolToVis}}"/>
                     <Button Style="{StaticResource BtnIcon}" Content="&#xE8A7;" ToolTip="Open in external player" Command="{Binding OpenExternalCommand}"/>
                     <Button Style="{StaticResource BtnIcon}" Content="&#xE711;" ToolTip="Close (Esc)" Command="{Binding CloseCommand}" Margin="8,0,0,0"/>

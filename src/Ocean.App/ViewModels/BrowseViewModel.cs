@@ -85,6 +85,58 @@ public partial class BrowseViewModel : ObservableObject
     partial void OnViewModeChanged(ViewMode value) { _lastViewMode = value; }
     partial void OnNewOnlyChanged(bool value) => Rebuild();
     partial void OnFilterChanged(string value) => Rebuild();
+
+    // ------------------------------------------------------------------ tags and votes
+
+    /// <summary>Tags across this node's videos (chips under the share chips), most used first.</summary>
+    public ObservableCollection<TagChipVm> Tags { get; } = new();
+    [ObservableProperty] private bool _anyTags;
+    /// <summary>Only videos with this tag (null: all); leaves the folder view like a search does.</summary>
+    [ObservableProperty] private string? _tagFilter;
+    partial void OnTagFilterChanged(string? value)
+    {
+        foreach (var t in Tags) t.IsSelected = value is not null && string.Equals(t.Tag, value, StringComparison.CurrentCultureIgnoreCase);
+        Rebuild();
+    }
+
+    [RelayCommand] private void SelectTag(TagChipVm? chip) => TagFilter = chip is null || chip.IsSelected ? null : chip.Tag;
+    [RelayCommand] private void ClearTag() => TagFilter = null;
+
+    private void RebuildTags(IEnumerable<ItemVm> all)
+    {
+        var counts = all.SelectMany(i => i.Tags).GroupBy(t => t, StringComparer.CurrentCultureIgnoreCase)
+            .Select(g => (Tag: g.First(), Count: g.Count()))
+            .OrderByDescending(t => t.Count).ThenBy(t => t.Tag, StringComparer.CurrentCultureIgnoreCase).Take(40).ToList();
+        var keep = new List<TagChipVm>();
+        foreach (var (tag, count) in counts)
+        {
+            var chip = Tags.FirstOrDefault(c => string.Equals(c.Tag, tag, StringComparison.CurrentCultureIgnoreCase)) ?? new TagChipVm(tag, count);
+            chip.Count = count;
+            chip.IsSelected = TagFilter is not null && string.Equals(tag, TagFilter, StringComparison.CurrentCultureIgnoreCase);
+            keep.Add(chip);
+        }
+        for (var i = Tags.Count - 1; i >= 0; i--) if (!keep.Contains(Tags[i])) Tags.RemoveAt(i);
+        foreach (var c in keep) if (!Tags.Contains(c)) Tags.Add(c);
+        for (var i = 0; i < keep.Count; i++) { var idx = Tags.IndexOf(keep[i]); if (idx != i) Tags.Move(idx, i); }
+        AnyTags = Tags.Count > 0;
+        if (TagFilter is not null && !keep.Any(c => c.IsSelected)) TagFilter = null; // the tag is gone (owner changed it)
+    }
+
+    [RelayCommand] private Task VoteUp(ItemVm? item) => VoteAsync(item, 1);
+    [RelayCommand] private Task VoteDown(ItemVm? item) => VoteAsync(item, -1);
+
+    /// <summary>Thumbs up/down; the same button again takes the vote back.</summary>
+    private Task VoteAsync(ItemVm? item, int vote)
+    {
+        if (item is null || !item.CanVote) return Task.CompletedTask;
+        return _main.RateAsync(Peer, item, item.MyVote == vote ? 0 : vote, finished: false);
+    }
+
+    /// <summary>A vote cast from elsewhere (the player, the home page) on a video of this list.</summary>
+    public void ApplyRating(string itemId, MyRatingDto r)
+    {
+        if (_byId.TryGetValue(itemId, out var vm)) vm.ApplyRating(r);
+    }
     partial void OnSelectedShareChanged(ShareChipVm? oldValue, ShareChipVm? newValue)
     {
         if (oldValue is not null) oldValue.IsSelected = false;
@@ -149,6 +201,7 @@ public partial class BrowseViewModel : ObservableObject
         }
         foreach (var gone in _byId.Keys.Where(k => !seen.Contains(k)).ToList()) _byId.Remove(gone);
         _all = all;
+        RebuildTags(all);
 
         // sync chip collection (All + shares) without flicker
         for (var i = Shares.Count - 1; i >= 1; i--) if (!chips.Contains(Shares[i])) Shares.RemoveAt(i);
@@ -197,7 +250,7 @@ public partial class BrowseViewModel : ObservableObject
     {
         var shareId = SelectedShare?.Id;
         var shareDto = shareId is null ? null : Catalog?.Shares.FirstOrDefault(s => s.Id == shareId);
-        FolderMode = shareDto is not null && string.IsNullOrWhiteSpace(Filter) && !NewOnly;
+        FolderMode = shareDto is not null && string.IsNullOrWhiteSpace(Filter) && !NewOnly && TagFilter is null;
 
         List<ItemVm> list;
         if (FolderMode)
@@ -227,12 +280,14 @@ public partial class BrowseViewModel : ObservableObject
             IEnumerable<ItemVm> q = _all;
             if (shareId is not null) q = q.Where(i => i.Dto.ShareId == shareId);
             if (NewOnly) q = q.Where(i => i.IsNew);
+            if (TagFilter is { } tag) q = q.Where(i => i.HasTag(tag));
             if (!string.IsNullOrWhiteSpace(Filter))
             {
                 var f = Filter.Trim();
                 q = q.Where(i => i.Name.Contains(f, StringComparison.CurrentCultureIgnoreCase)
                               || i.Folder.Contains(f, StringComparison.CurrentCultureIgnoreCase)
-                              || i.ShareName.Contains(f, StringComparison.CurrentCultureIgnoreCase));
+                              || i.ShareName.Contains(f, StringComparison.CurrentCultureIgnoreCase)
+                              || i.Tags.Any(t => t.Contains(f, StringComparison.CurrentCultureIgnoreCase)));
             }
             list = SortItems(q);
             Entries = list.Cast<object>().ToList();
@@ -249,6 +304,7 @@ public partial class BrowseViewModel : ObservableObject
         EmptyText = !IsEmpty || SelectedShare is { IsLocked: true } ? "" :
             _all.Count == 0 && Catalog is { Shares.Count: 0 } ? "Nothing to show here." :
             NewOnly ? "No new videos since your last visit." :
+            TagFilter is not null ? $"No videos tagged #{TagFilter} here." :
             Filter.Length > 0 ? "No videos match your search." :
             FolderMode && CurrentFolder.Length > 0 ? "This folder is empty." :
             _all.Count == 0 ? "Nothing to show here." : "No videos in this share.";

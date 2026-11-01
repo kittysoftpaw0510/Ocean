@@ -35,6 +35,11 @@ public partial class SharesView : UserControl
         if (sender is MenuItem { DataContext: LocalItemVm item }) Vm?.RevealItemCommand.Execute(item);
     }
 
+    private void Tags_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: LocalItemVm item }) Vm?.EditTagsCommand.Execute(item);
+    }
+
     private void MoveTo_Click(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { DataContext: LocalItemVm item }) Vm?.MoveToCommand.Execute(item);

@@ -154,7 +154,8 @@ public partial class PlayerView : UserControl
                 if (d > 0 && Math.Abs(d - _vm.DurationSeconds) > 0.5) _vm.DurationSeconds = d;
             }
             var pos = Media.Position.TotalSeconds;
-            if (_vm.CastRole == PlayerViewModel.CastRoles.Host) _vm.ReportHost(pos, _vm.IsPlaying, force: false);
+            // host: report once the file is open and no jump is pending (a stale 0 would rewind everyone)
+            if (_vm.CastRole == PlayerViewModel.CastRoles.Host) { if (_opened && _seekTarget is null) _vm.ReportHost(pos, _vm.IsPlaying, force: false); }
             else if (_vm.CastRole == PlayerViewModel.CastRoles.Follower && _vm.FollowValid && _opened) FollowHost(pos);
             if (_seekTarget is { } target && !CheckSeek(pos, target))
             {

@@ -63,7 +63,7 @@ public sealed class PeerClient : IDisposable
                 RemoteCertificateValidationCallback = (_, cert, _, _) => Pinned(cert, id),
             },
         };
-        if (NetworkCompat.Classic) handler.ConnectCallback = NetworkCompat.ConnectAsync; // blocking sockets on threads (see NetworkCompat)
+        handler.ConnectCallback = Net.LanOnly.ConnectAsync; // local network only (blocking sockets in classic mode)
         var client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("Ocean/" + OceanDefaults.AppVersion);
         return client;
@@ -160,8 +160,9 @@ public sealed class PeerClient : IDisposable
 
         // least busy first, counting what we started ourselves lately (a bridge's own count lags a few seconds)
         var mine = _sticky.Values.Where(v => now - v.Used < TimeSpan.FromSeconds(30)).GroupBy(v => v.Bridge).ToDictionary(g => g.Key, g => g.Count());
+        var kind = Kind(path);
         var bridges = peer.LiveBridges()
-            .Where(b => !_avoid.ContainsKey((peer.Id, b.Id)))
+            .Where(b => !_avoid.ContainsKey((peer.Id, b.Id)) && !_avoid.ContainsKey((peer.Id, b.Id + "|" + kind)))
             .OrderBy(b => b.Load + mine.GetValueOrDefault(b.Id)).ThenByDescending(b => b.Confirmed).ToList();
         if (_sticky.TryGetValue(key, out var s) && bridges.FirstOrDefault(b => b.Id == s.Bridge) is { } same)
         {
@@ -174,7 +175,7 @@ public sealed class PeerClient : IDisposable
         var signed = req.Headers.Contains(Via.OriginHeader) ? null : Via.Sign(_identity, peer.Id, req.Method.Method, path).ToList();
         Exception? lastError = null;
         HttpResponseMessage? lastResponse = null;
-        foreach (var bridge in bridges.Take(4))
+        foreach (var bridge in bridges.Take(8))
         {
             if (!_registry.TryGetOnline(bridge.Id, out var via) || via.Bridged) continue; // one PC in between at most
             var outer = Build(via, req.Method, Via.Prefix + peer.Id + path);
@@ -199,16 +200,34 @@ public sealed class PeerClient : IDisposable
                 continue;
             }
             var fault = resp.Headers.TryGetValues(Via.ErrorHeader, out var f) ? f.FirstOrDefault() : null;
+            // A bridge on an older Ocean refuses request types it doesn't know (multicast, lighter copies) with a bare
+            // 400 and no body; Ocean's own 400 answers always carry one. That bridge simply can't help with this kind
+            // of request: ask the next one.
+            if (fault is null && resp.StatusCode == HttpStatusCode.BadRequest && resp.Content.Headers.ContentLength is null or 0) fault = "unsupported";
             if (fault is null) return resp;
             // the bridge's own failure (not the far node's answer): try the next one
             lastResponse?.Dispose();
             lastResponse = resp;
+            if (fault == "unsupported")
+            {
+                _avoid[(peer.Id, bridge.Id + "|" + kind)] = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(10);
+                _log.LogInformation("{Peer}: {Bridge} can't pass on {Kind} requests (an older Ocean); trying another bridge", peer.Name, bridge.Name, kind);
+                continue;
+            }
             Avoid(peer, bridge, fault switch { "busy" => TimeSpan.FromSeconds(15), "off" => TimeSpan.FromMinutes(10), _ => TimeSpan.FromSeconds(30) }, fault);
         }
         _sticky.TryRemove(key, out _);
         // every bridge failed: the last answer (e.g. "busy", which a download waits on) or the last error
         if (lastResponse is not null) return lastResponse;
         throw lastError ?? new HttpRequestException($"{peer.Name} can't be reached right now: no PC in between is available", null, HttpStatusCode.ServiceUnavailable);
+    }
+
+    /// <summary>The kind of request ("/p/cast", "/p/stream", …): a bridge may support some kinds and not others.</summary>
+    private static string Kind(string path)
+    {
+        var second = path.IndexOf('/', 3);
+        var end = second < 0 ? path.IndexOfAny(new[] { '?' }) : second;
+        return end < 0 ? path : path[..end];
     }
 
     private void Avoid(Peer peer, BridgeRoute bridge, TimeSpan howLong, string why)

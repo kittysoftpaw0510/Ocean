@@ -94,6 +94,12 @@ builder.Services.AddSingleton<PeerMedia>();
 builder.Services.AddSingleton<Ocean.Service.Media.LightCopies>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Ocean.Service.Media.LightCopies>());
 builder.Services.AddSingleton<Ocean.Service.Cast.ViewerTracker>();
+builder.Services.AddSingleton<Ocean.Service.Social.Ratings>();
+builder.Services.AddSingleton<Ocean.Service.Social.MyVotes>();
+builder.Services.AddSingleton<Ocean.Service.Social.TopList>();
+builder.Services.AddSingleton<Ocean.Service.Social.NetSearch>();
+builder.Services.AddSingleton<Ocean.Service.Update.Updater>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Ocean.Service.Update.Updater>());
 builder.Services.AddSingleton<Ocean.Service.Cast.CastHost>();
 builder.Services.AddSingleton<Ocean.Service.Cast.CastReceiver>();
 builder.Services.AddSingleton<DownloadManager>();
@@ -133,18 +139,31 @@ builder.WebHost.ConfigureKestrel(k =>
     // Loopback API for the UI
     k.Listen(IPAddress.Loopback, cfg.LocalPort);
     // Encrypted peer API: our self-signed node certificate + mandatory client certificate
-    k.ListenAnyIP(cfg.PeerPort, l => l.UseHttps(h =>
+    k.ListenAnyIP(cfg.PeerPort, l =>
     {
-        h.ServerCertificate = identity.Certificate;
-        h.ClientCertificateMode = ClientCertificateMode.RequireCertificate;
-        h.AllowAnyClientCertificate();
-        h.SslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13;
-        h.HandshakeTimeout = TimeSpan.FromSeconds(10);
-    }));
+        // local network only: a connection from the internet or a VPN is closed before the TLS handshake
+        l.Use(next => conn =>
+        {
+            var remote = (conn.RemoteEndPoint as IPEndPoint)?.Address;
+            if (LocalNetworks.IsLan(remote)) return next(conn);
+            LanOnly.Refused("connection from", remote);
+            conn.Abort();
+            return Task.CompletedTask;
+        });
+        l.UseHttps(h =>
+        {
+            h.ServerCertificate = identity.Certificate;
+            h.ClientCertificateMode = ClientCertificateMode.RequireCertificate;
+            h.AllowAnyClientCertificate();
+            h.SslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13;
+            h.HandshakeTimeout = TimeSpan.FromSeconds(10);
+        });
+    });
 });
 
 var app = builder.Build();
 var log = app.Services.GetRequiredService<ILogger<Program>>();
+LanOnly.Log = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("LanOnly");
 foreach (var w in identityWarnings) log.LogWarning("{Warning}", w);
 // Stopping (Windows stopping the service, an update): requests that never end by themselves (the app's event feed,
 // long polls, video streams) end at once, so the service stops in a second instead of waiting them out. An update
@@ -236,6 +255,7 @@ app.Services.GetRequiredService<AccessService>();
 app.Services.GetRequiredService<PeerService>();
 app.Services.GetRequiredService<Ocean.Service.Cast.ViewerTracker>(); // counts viewers for my listing
 app.Services.GetRequiredService<Ocean.Service.Cast.CastHost>();      // puts my multicast in my catalog
+app.Services.GetRequiredService<Ocean.Service.Social.Ratings>();     // puts the votes on my videos in my catalog
 
 log.LogInformation("Ocean {Version} starting as {Mode}; node {Node} ({Name}); data {Dir}; local {Local}, peers {Peer}, discovery {Disc}",
     OceanDefaults.AppVersion, isService ? "Windows service" : "background process", NodeIdentity.ShortId(identity.NodeId), cfg.NodeName,

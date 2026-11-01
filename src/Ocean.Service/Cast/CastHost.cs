@@ -8,6 +8,7 @@ using Ocean.Core.Protocol;
 using Ocean.Service.Catalog;
 using Ocean.Service.Discovery;
 using Ocean.Service.Media;
+using Ocean.Service.Net;
 using Ocean.Service.Peers;
 using Ocean.Service.State;
 
@@ -49,6 +50,8 @@ public sealed class CastHost : IDisposable
         public double Position;      // where the host's player is …
         public long PositionAtMs;    // … at this moment (Unix ms)
         public bool Playing;
+        /// <summary>The host closed the player: the session runs on its own clock and ends when the video does.</summary>
+        public bool Unattended;
         public bool Ended;
         public long Cursor;          // next byte to send
         public readonly ConcurrentDictionary<string, Viewer> Viewers = new(StringComparer.Ordinal);
@@ -136,16 +139,43 @@ public sealed class CastHost : IDisposable
         var jumped = Math.Abs(position - expected) > 3;
         s.Position = position; s.PositionAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(); s.Playing = playing;
         if (jumped) s.Cursor = s.ByteAt(Math.Max(0, position - 1)); // seek: the packets start again from just before it
+        if (s.Unattended)
+        {
+            s.Unattended = false; // the host's player is back and drives it again
+            _log.LogInformation("multicast: the host's player is back at {Pos:0} s", position);
+            _events.Publish("myCast", Status());
+        }
+    }
+
+    /// <summary>
+    /// The host closed the player but keeps the multicast running: it plays on by itself (a pause is lifted) and
+    /// ends when the video does. The player can take it back any time (<see cref="UpdateState"/>).
+    /// </summary>
+    public void Detach()
+    {
+        Session? s;
+        lock (_lock) s = _s;
+        if (s is null || s.Ended) return;
+        if (!s.Playing) { s.Position = s.Now(); s.PositionAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(); s.Playing = true; }
+        s.Unattended = true;
+        _log.LogInformation("multicast: goes on without the host's player from {Pos:0} s, {Viewers} viewer(s)", s.Now(), LiveViewers(s).Count);
+        _events.Publish("myCast", Status());
     }
 
     public void Stop()
     {
         Session? s;
-        lock (_lock) { s = _s; _s = null; }
-        if (s is null) return;
+        lock (_lock) s = _s;
+        if (s is not null) End(s, "stopped by the host");
+    }
+
+    /// <summary>Ends this session (and only this one: a later session is never touched by an old sender thread).</summary>
+    private void End(Session s, string why)
+    {
+        lock (_lock) { if (!ReferenceEquals(_s, s)) return; _s = null; }
         s.Ended = true;
         s.Cts.CancelAfter(1500); // the sender still announces the end a few times
-        _log.LogInformation("multicast ended: {Name} after {Min:0} min, {Viewers} viewer(s) at the end", s.Name, (DateTimeOffset.UtcNow - s.StartedAt).TotalMinutes, LiveViewers(s).Count);
+        _log.LogInformation("multicast ended ({Why}): {Name} after {Min:0} min, {Viewers} viewer(s) at the end", why, s.Name, (DateTimeOffset.UtcNow - s.StartedAt).TotalMinutes, LiveViewers(s).Count);
         _catalog.NotifyCastChanged();
         _events.Publish("myCast", Status());
     }
@@ -160,6 +190,7 @@ public sealed class CastHost : IDisposable
         {
             Active = true, SessionId = s.Id.ToString("N"), ItemId = s.ItemId, ItemName = s.Name, ShareName = s.ShareName, Light = s.Light,
             Viewers = live.Count, ViewersMulticast = live.Count(v => v.Receiving), Position = s.Now(), Playing = s.Playing, StartedAt = s.StartedAt,
+            Unattended = s.Unattended,
         };
     }
 
@@ -255,7 +286,11 @@ public sealed class CastHost : IDisposable
         try
         {
             var target = new IPEndPoint(CastWire.GroupAddress, CastWire.Port);
-            foreach (var addr in CastWire.LocalAddresses())
+            // only the real network adapter the other PCs are reached through (never a VPN or virtual adapter)
+            var peerAddrs = _registry.Snapshot().Where(p => p.Online && !p.Bridged).SelectMany(p => p.Addresses.Keys.Append(p.Address));
+            var adapters = LocalNetworks.MulticastAddresses(peerAddrs);
+            _log.LogInformation("multicast: sending on {Adapters}", adapters.Count == 0 ? "no adapter" : string.Join(", ", adapters.Select(a => $"{a.Adapter} ({a.Address})")));
+            foreach (var (addr, _) in adapters)
             {
                 try
                 {
@@ -282,6 +317,7 @@ public sealed class CastHost : IDisposable
             var lastTick = clock.Elapsed.TotalSeconds;
             var lastControl = 0.0;
             var endsSent = 0;
+            var finishedAt = 0.0; // unattended: when the video reached its end (the session ends a little later)
             var ct = s.Cts.Token;
 
             void Send(byte[] packet) { foreach (var sock in sockets) { try { sock.SendTo(packet, target); } catch { } } }
@@ -302,6 +338,15 @@ public sealed class CastHost : IDisposable
                     if (s.Ended && ++endsSent >= 3) break;
                 }
                 if (s.Ended) { Thread.Sleep(300); continue; }
+
+                // without the host's player nobody presses Stop: the session ends by itself once the video is over
+                if (s.Unattended)
+                {
+                    var finished = s.Duration > 0 ? s.Now() >= s.Duration : s.Cursor >= s.Size;
+                    if (!finished) finishedAt = 0;
+                    else if (finishedAt == 0) finishedAt = now;
+                    else if (now - finishedAt >= 10) { End(s, "the video finished"); continue; }
+                }
 
                 // data: from the cursor, within the lead, as the budget allows
                 var limit = s.Duration > 0 ? s.ByteAt(s.Now() + LeadSeconds) : s.Size;

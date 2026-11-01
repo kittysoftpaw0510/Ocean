@@ -57,6 +57,14 @@ public partial class LocalItemVm : ObservableObject
     public string LightTag => Dto.Light == LightVariant.Ready ? $"  ·  Light copy {Format.Bytes(Dto.LightSize)}" : Dto.Light == LightVariant.Preparing ? "  ·  Preparing a light copy…" : "";
     public string AddedText => Format.Ago(Dto.AddedAt);
     public string FullPath => Dto.FullPath;
+    // tags I gave it, and how others voted
+    public bool HasTags => Dto.Tags is { Count: > 0 };
+    public string TagsText => Votes.TagsText(Dto.Tags);
+    public string TagsEditText => Dto.Tags is null ? "" : string.Join(", ", Dto.Tags);
+    public int Up => Dto.Up;
+    public int Down => Dto.Down;
+    public bool HasVotes => Dto.Up + Dto.Down > 0;
+    public string VotesTip => Votes.Tip(Dto);
     public ItemAccessMode OverrideMode => Dto.OverrideMode;
     public string PolicyText => Dto.OverrideMode switch { ItemAccessMode.Public => "Public", ItemAccessMode.Password => "Password", ItemAccessMode.Ask => "Ask me", _ => "Same as share" };
     public string PolicyGlyph => Dto.OverrideMode switch { ItemAccessMode.Password => "", ItemAccessMode.Ask => "", ItemAccessMode.Public => "", _ => "" };
@@ -536,7 +544,9 @@ public partial class SharesViewModel : ObservableObject
     public bool HasCastHint => CastHint.Length > 0;
     partial void OnCastHintChanged(string value) => OnPropertyChanged(nameof(HasCastHint));
     public bool IsCasting => MyCast?.Active == true;
-    public string MyCastText => MyCast is null ? "" : $"You're multicasting “{MyCast.ItemName}” to {MyCast.Viewers} PC{(MyCast.Viewers == 1 ? "" : "s")}.";
+    public string MyCastText => MyCast is null ? "" : $"You're multicasting “{MyCast.ItemName}” to {MyCast.Viewers} PC{(MyCast.Viewers == 1 ? "" : "s")}."
+        + (MyCast.Unattended ? " It plays on without your player and ends with the video." : "");
+    public string OpenCastPlayerTip => MyCast?.Unattended == true ? "Open the player and take the multicast back (play, pause, seek)" : "Your player drives the multicast";
 
     /// <summary>Live "N watching" counts from the service, by item id.</summary>
     public void ApplyViewers(Dictionary<string, int> counts)
@@ -549,7 +559,7 @@ public partial class SharesViewModel : ObservableObject
     {
         MyCast = cast?.Active == true ? cast : null;
         foreach (var (id, vm) in _itemVms) vm.IsCasting = MyCast?.ItemId == id;
-        OnPropertyChanged(nameof(IsCasting)); OnPropertyChanged(nameof(MyCastText));
+        OnPropertyChanged(nameof(IsCasting)); OnPropertyChanged(nameof(MyCastText)); OnPropertyChanged(nameof(OpenCastPlayerTip));
         UpdateCastHint();
     }
 
@@ -570,12 +580,12 @@ public partial class SharesViewModel : ObservableObject
     [RelayCommand] private Task StartCast(LocalItemVm? item) => item is null ? Task.CompletedTask : StartCastAsync(item);
     [RelayCommand] private Task StopCast() => _main.StopCastAsync();
 
+    /// <summary>The player on the video I'm multicasting: it drives it again from where it is now.</summary>
     [RelayCommand]
     private void OpenCastPlayer()
     {
         if (MyCast is null || Selected is null || !_itemVms.TryGetValue(MyCast.ItemId ?? "", out var vm)) return;
-        _main.Player.OpenLocal(vm, Selected.Name);
-        _main.Player.BeginHost(MyCast);
+        _main.Player.OpenLocal(vm, Selected.Name); // routes to ReopenCastAsync for the multicast video
     }
 
     /// <summary>Start multicasting one of my videos: the player opens and drives everyone who joins.</summary>
@@ -594,7 +604,7 @@ public partial class SharesViewModel : ObservableObject
             var st = await _main.Api.PostAsync<MyCastDto>("/api/cast/start", new CastStartDto { ItemId = item.Id, PreferLight = true });
             if (st is null || st.Error is not null || !st.Active) { _main.Toast("Can't start the multicast", st?.Error ?? "Unknown error", "warn"); return; }
             ApplyMyCast(st);
-            _main.Player.OpenLocal(item, Selected.Name);
+            _main.Player.OpenLocal(item, Selected.Name, host: true);
             _main.Player.BeginHost(st);
             Services.AppLog.Info("Cast", $"multicast started: {item.Name}" + (st.Light ? " (lighter copy)" : ""));
         }
@@ -635,6 +645,24 @@ public partial class SharesViewModel : ObservableObject
             await LoadItemsAsync();
         }
         catch (Exception ex) { _main.Error("Could not change policy", ex); }
+    }
+
+    /// <summary>Tags on one of my videos: a comma-separated list everyone sees and can filter by.</summary>
+    [RelayCommand]
+    private async Task EditTags(LocalItemVm? item)
+    {
+        if (item is null || Selected is null) return;
+        var text = await _main.Dialogs.PromptAsync($"Tags for “{item.Name}”",
+            "Separate tags with commas, up to 8 (for example: comedy, kids, travel). Everyone sees them and can filter by them; liked videos show up under \"Top on the network\" by tag.",
+            item.TagsEditText, "Save");
+        if (text is null) return;
+        var tags = text.Split(new[] { ',', ';', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        try
+        {
+            await _main.Api.PutAsync($"/api/shares/{Selected.Id}/items/{item.Id}/tags", new TagsDto { Tags = tags });
+            await LoadItemsAsync();
+        }
+        catch (Exception ex) { _main.Error("Could not save tags", ex); }
     }
 
     [RelayCommand]

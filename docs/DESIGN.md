@@ -42,10 +42,31 @@
 - Discovery beacons are signed with the same key and carry the public key, so a beacon cannot
   announce an id it does not own.
 
+## Local network only (`Net.LocalNetworks.IsLan`, `Net.LanOnly`)
+
+Ocean talks to PCs on this PC's local networks and nowhere else. An address is local when it is loopback, or a
+private IPv4 address (10/8, 172.16/12, 192.168/16, 169.254/16) on the subnet of one of this PC's adapters that
+is not a VPN. VPN adapters are recognised by type (PPP) or by name/description (Astrill, Wintun, WireGuard,
+TAP, OpenVPN, Tailscale, ZeroTier, Hamachi, AnyConnect, GlobalProtect, Fortinet...); the other end of a VPN is
+the internet, and many VPN services put their customers on one shared subnet. IPv6 is never local (discovery is
+IPv4 only). The rule is applied:
+
+- discovery: beacons are sent only to the broadcast addresses of local networks, and beacons from elsewhere are
+  dropped before parsing (so never answered);
+- the peer port: a connection from elsewhere is closed before the TLS handshake (Kestrel connection middleware);
+- outgoing: every peer request, bridged and reverse ones included, connects through `LanOnly.ConnectAsync`, which
+  refuses other addresses before a packet leaves; a peer's candidate addresses are filtered the same way;
+- multicast: packets from elsewhere are dropped (they are also sent with TTL 1 on physical adapters only).
+
+The firewall rules (setup, `install-service.ps1`, and the service for the Public rule and the setup's rule) carry
+`remoteip=localsubnet` as a second line. Refusals are logged once per address every 10 minutes. The update
+check to GitHub is the only internet connection and carries nothing about peers.
+
 ## Discovery (UDP 38472)
 
-Every 4 s each node broadcasts a signed JSON `hello` (to `255.255.255.255` and to each interface's
-directed broadcast). Each node answers other nodes' broadcasts with a unicast `reply` (right away for a
+Every 4 s each node broadcasts a signed JSON `hello` to the directed broadcast address of each local network
+(see "Local network only"; never `255.255.255.255`, which Windows sends where the default route points, i.e.
+into a connected VPN). Each node answers other nodes' broadcasts with a unicast `reply` (right away for a
 newcomer, then at most every 8 s per node; a `reply` is never answered). Broadcasts are fragile: Wi-Fi
 drops them without retrying, and a firewall may block incoming broadcasts while still letting a unicast
 reply to the node's own broadcast in. With replies, a node only drops out of a list when both directions
@@ -199,7 +220,8 @@ and the requester polls `GET /p/access/{requestId}` every 2 s.
 ## Local API (HTTP 127.0.0.1:38470)
 
 Status, event stream, peers and their catalogs, unlocking, thumbnail/stream proxies, share CRUD and
-per-item policies, pending requests and grants, downloads, settings. See `Api/LocalApi.cs`.
+per-item policies and tags, votes, top list, search, pending requests and grants, downloads, settings, updates.
+See `Api/LocalApi.cs`.
 
 ## Lighter copies for watching (`Ocean.Service.Media.LightCopies`)
 
@@ -248,10 +270,51 @@ per-item policies, pending requests and grants, downloads, settings. See `Api/Lo
   only one block at a time otherwise, so what the multicast brings is never fetched twice and what it doesn't
   (lost, far ahead, or nothing at all on this network) comes directly. Heartbeats every 5 s carry stats and bring
   the host's state back when no control packet arrives (`MulticastWorking` false → "direct stream").
+- **Unattended.** `POST /api/cast/detach` (the host closed the player and chose "Keep it running", opened another
+  video, hid the window, or the app restarted with a session left over) marks the session unattended: a pause is
+  lifted and it plays on by its own clock; the sender ends it 10 s after the video is over (`Duration`, or the
+  whole file sent when the duration is unknown). The next state report from the player takes it back
+  (`MyCastDto.Unattended` false); the app opens the player at the session's current position for that
+  (`ReopenCastAsync`). Ending always checks the session is still the current one, so an old sender thread never
+  stops a newer session.
 - **Player.** Host: the view posts its position every second and at once on play/pause/seek. Follower: the view
   keeps the player at the host's position carried forward on this PC's clock, 1.5 s behind, seeking when more than
   2.5 s off and pausing with the host; controls are locked ("The host controls playback"); Leave or the host's end
   unlocks them and the cached bytes stay, so the video can go on as a normal stream.
+
+## Votes, tags and "Top on the network" (`Ocean.Service.Social`)
+
+Tags belong to the owner (`ShareDefinition.ItemTags`, at most 8 per video, 24 characters each) and travel inside
+the catalog like any other item field. Votes are counted by the owner's PC: `POST /p/rate/{item}` carries
+`{vote: 1|-1|0, finished}` from a viewer that passed the video's access check; `votes.json` keeps one entry per
+voter id (a second click replaces, 0 takes back) with the time of each vote. Totals go out in the catalog
+(`Up`, `Down`, `Finished`, `Score`); who voted never leaves the owner's PC. The voter's PC keeps its own votes in
+`my-votes.json` (annotated into cached catalogs as `MyVote`) and marks them pending while the owner is offline;
+they are delivered when the node comes back (`DeliverPendingVotesAsync` on Added/Online).
+
+`Score = sum(vote * 0.5^(age / 30 days)) + 0.25 * sum(finished * 0.5^(age / 30 days))`: a like is worth 1, a
+dislike -1, watching to the end a quarter, all fading with a 30-day half-life so the top list follows what people
+watch now. `TopList` ranks every known catalog plus my own (copies of my videos shared back by others are skipped)
+and offers tag counts: `GET /api/top?tag=&limit=`.
+
+## Search (`Ocean.Service.Social.NetSearch`)
+
+`GET /api/search?q=` matches every cached catalog (online or not) and my own shares inside the service, so the
+app never pulls lists to search them. Text is folded (lower case, accents stripped, punctuation to spaces, the
+extension kept as a word), every term must match (AND), `#term` only tags, `@term` only the owner. Scoring per
+term: whole name 12, a name word 8, a word prefix 6, inside the name 4, a tag 5, folder/share 2, owner 1; ties
+by online then newest. The result carries per-node counts for the chips and the best 200 rows.
+
+## Updates (`Ocean.Service.Update.Updater`)
+
+The service asks `api.github.com/repos/kittysoftpaw0510/Ocean/releases/latest` 90 s after start and every 6 h
+(off with `CheckUpdates`). A newer `vX.Y.Z` with `Ocean-Setup-X.Y.Z.exe` is downloaded to `<data>\updates\`
+(`.part` then renamed; size must match, SHA-256 checked when the release has a `.sha256` asset; older files
+removed). The status (`GET /api/update`, `POST /api/update/check`, event `update`) drives the home-page banner
+and *Settings > About*. The app runs the installer itself (`/SILENT /NORESTART /SUPPRESSMSGBOXES`, Windows asks
+for elevation); the installer stops the service and apps, installs and relaunches Ocean as the signed-in user
+(`postinstall runasoriginaluser`, no longer `skipifsilent`). `OCEAN_UPDATE_FROM=1.0.0` makes a dev node pretend
+to be older. No internet: the check fails quietly (debug log) and is retried next time.
 
 ## CPU limit (`Ocean.Service.State.CpuLimit`)
 
@@ -290,6 +353,8 @@ Downloads read through the stream cache (below), so whatever was already watched
 WPF, MVVM (CommunityToolkit.Mvvm), a single dark theme. Large libraries stay smooth thanks to a
 uniform-tile `VirtualizingWrapPanel` (only visible rows have containers) and lazy thumbnail loading
 (decoded at 320 px, frozen, LRU-capped). The tray icon is a WinForms `NotifyIcon` drawn at runtime.
+The box above the node list filters nodes; the box at the top of the content area searches videos (typing
+opens the search page, clearing it returns to the page you came from).
 
 ## Data directory (`%ProgramData%\Ocean`, override `OCEAN_DATA_DIR`)
 
@@ -300,6 +365,8 @@ local.token      UI ↔ service secret
 grants.json      issued grants (owner side)
 peers.json       last-visit times and grants we hold (browsing side)
 downloads.json   download jobs
+votes.json       votes on my videos (voter id -> vote, time); my-votes.json  my votes on others' videos (+ pending)
+updates/         downloaded installer of a newer version
 catalog/         per-share item index + version
 thumbs/          own thumbnails;  cache/thumbs/<peer>/  remote thumbnails
 cache/streams/   watched video bytes from other PCs (sparse files + block maps)

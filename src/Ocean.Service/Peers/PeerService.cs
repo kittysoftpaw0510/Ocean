@@ -53,9 +53,11 @@ public sealed class PeerService : IDisposable
 
     private readonly Catalog.CatalogService _catalog;
 
-    public PeerService(PeerRegistry registry, PeerClient client, ConfigStore config, EventHub events, Catalog.CatalogService catalog, ILogger<PeerService> log)
+    private readonly Social.MyVotes _myVotes;
+
+    public PeerService(PeerRegistry registry, PeerClient client, ConfigStore config, EventHub events, Catalog.CatalogService catalog, Social.MyVotes myVotes, ILogger<PeerService> log)
     {
-        _registry = registry; _client = client; _config = config; _events = events; _catalog = catalog; _log = log;
+        _registry = registry; _client = client; _config = config; _events = events; _catalog = catalog; _myVotes = myVotes; _log = log;
         _statePath = Path.Combine(OceanDefaults.DataDir, "peers.json");
         _thumbDir = Path.Combine(OceanDefaults.DataDir, "cache", "thumbs");
         Directory.CreateDirectory(_thumbDir);
@@ -77,6 +79,7 @@ public sealed class PeerService : IDisposable
             {
                 case PeerChange.Added or PeerChange.VersionChanged or PeerChange.Online:
                     ScheduleFetch(p.Id);
+                    if (change != PeerChange.VersionChanged) _ = DeliverPendingVotesAsync(p.Id);
                     break;
                 case PeerChange.Removed:
                     // forgotten (offline too long, or a different shared secret now): drop its snapshot
@@ -234,6 +237,64 @@ public sealed class PeerService : IDisposable
         var item = Cached(peerId)?.Shares.SelectMany(s => s.Items).FirstOrDefault(i => i.Id == baseId);
         if (item is null || !light) return item;
         return item.Light == LightVariant.Ready && item.LightSize > 0 ? LightVariant.Of(item) : null;
+    }
+
+    /// <summary>Every node's last known catalog (online or not), for "Top on the network".</summary>
+    public IEnumerable<(string PeerId, CatalogDto Catalog)> AllCatalogs() => _catalogs.Select(kv => (kv.Key, kv.Value));
+
+    /// <summary>
+    /// My vote (+1/−1/0) and/or "watched it to the end" on another node's video. Kept here first, so it shows at once
+    /// and reaches the owner later if it is offline now.
+    /// </summary>
+    public async Task<MyRatingDto> RateAsync(string peerId, string itemId, RateDto rate, CancellationToken ct)
+    {
+        _myVotes.Record(peerId, itemId, rate);
+        var totals = await SendRatingAsync(peerId, itemId, rate, ct);
+        if (totals is not null)
+        {
+            // keep my copy of its catalog in step until the owner's next version arrives
+            if (Cached(peerId)?.Shares.SelectMany(s => s.Items).FirstOrDefault(i => i.Id == itemId) is { } item)
+            {
+                item.Up = totals.Up; item.Down = totals.Down; item.Finished = totals.Finished; item.Score = totals.Score;
+                item.MyVote = _myVotes.VoteOn(peerId, itemId);
+            }
+        }
+        return new MyRatingDto { MyVote = _myVotes.VoteOn(peerId, itemId), Pending = totals is null, Totals = totals };
+    }
+
+    private async Task<RatingDto?> SendRatingAsync(string peerId, string itemId, RateDto rate, CancellationToken ct)
+    {
+        if (!_registry.TryGetOnline(peerId, out var peer)) return null;
+        try
+        {
+            var req = _client.Build(peer, HttpMethod.Post, "/p/rate/" + Uri.EscapeDataString(itemId), GrantsFor(peerId));
+            req.Content = JsonContent.Create(rate, options: Json.Options);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(15));
+            using var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseContentRead, cts.Token);
+            if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Forbidden)
+            {
+                _myVotes.Delivered(peerId, itemId, rate); // gone, locked, or an older Ocean that has no votes: nothing to deliver
+                return null;
+            }
+            if (!resp.IsSuccessStatusCode) return null;
+            var totals = await resp.Content.ReadFromJsonAsync<RatingDto>(Json.Options, cts.Token);
+            _myVotes.Delivered(peerId, itemId, rate);
+            return totals;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException or System.Text.Json.JsonException)
+        {
+            _log.LogDebug("vote for {Item} on {Peer} not delivered yet: {Msg}", itemId, peer.Name, ex.Message);
+            return null;
+        }
+    }
+
+    /// <summary>Votes cast while a node was offline go out when it is back.</summary>
+    private async Task DeliverPendingVotesAsync(string peerId)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        foreach (var (itemId, rate) in _myVotes.PendingFor(peerId))
+            await SendRatingAsync(peerId, itemId, rate, CancellationToken.None);
     }
 
     /// <summary>How the lighter copy of another node's video is doing; with <paramref name="request"/>, asks for one.</summary>
@@ -423,6 +484,7 @@ public sealed class PeerService : IDisposable
             foreach (var item in share.Items)
             {
                 item.ShareId = share.Id;
+                item.MyVote = _myVotes.VoteOn(peerId, item.Id);
                 item.IsMine = mine.Contains(EchoKey(item.Name, item.Size));
                 item.IsNew = !item.IsMine && item.AddedAt > threshold;
             }

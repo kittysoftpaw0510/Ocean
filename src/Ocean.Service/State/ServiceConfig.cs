@@ -21,6 +21,8 @@ public sealed class ShareDefinition
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public Dictionary<string, ItemOverride> Overrides { get; set; } = new();
+    /// <summary>The owner's tags, item id → tags.</summary>
+    public Dictionary<string, List<string>> ItemTags { get; set; } = new();
     /// <summary>Owner's organization: item id → folder (only where it differs from the folder on disk).</summary>
     public Dictionary<string, string> ItemFolders { get; set; } = new();
     /// <summary>Folders the owner created or kept (so they exist even when empty).</summary>
@@ -49,6 +51,8 @@ public sealed class ServiceConfig
     public bool AllowPublicNetworks { get; set; } = true;
     /// <summary>Carry traffic between PCs that have no network path to each other (see Ocean.Core.Protocol.Via).</summary>
     public bool AllowBridging { get; set; } = true;
+    /// <summary>Look for newer versions on GitHub and download the installer.</summary>
+    public bool CheckUpdates { get; set; } = true;
     /// <summary>Make lighter copies of my heavy videos for watching (see Ocean.Service.Media.LightCopies).</summary>
     public bool LightCopies { get; set; } = true;
     public int LightKeepDays { get; set; } = 7;

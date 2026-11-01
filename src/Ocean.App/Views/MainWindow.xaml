@@ -15,6 +15,7 @@
         <DataTemplate DataType="{x:Type vm:SharesViewModel}"><v:SharesView/></DataTemplate>
         <DataTemplate DataType="{x:Type vm:DownloadsViewModel}"><v:DownloadsView/></DataTemplate>
         <DataTemplate DataType="{x:Type vm:SettingsViewModel}"><v:SettingsView/></DataTemplate>
+        <DataTemplate DataType="{x:Type vm:SearchViewModel}"><v:SearchView/></DataTemplate>
 
         <Style x:Key="NavBtn" TargetType="Button" BasedOn="{StaticResource BtnGhost}">
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
@@ -108,7 +109,7 @@
                 <Grid Grid.Row="1" Margin="14,8,14,10">
                     <TextBox x:Name="SearchBox" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Padding="30,6,28,6"/>
                     <TextBlock Text="&#xE721;" Style="{StaticResource Icon}" Foreground="{StaticResource TextDim}" HorizontalAlignment="Left" Margin="10,0,0,0" IsHitTestVisible="False"/>
-                    <TextBlock Text="Search videos   (Ctrl+F)" Foreground="{StaticResource TextDim}" Margin="31,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"
+                    <TextBlock Text="Filter nodes" Foreground="{StaticResource TextDim}" Margin="31,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"
                                Visibility="{Binding Text.Length, ElementName=SearchBox, Converter={StaticResource ZeroToVis}}"/>
                     <Button Style="{StaticResource BtnIcon}" Width="24" Height="24" Content="&#xE711;" FontSize="10" HorizontalAlignment="Right" Margin="0,0,4,0"
                             Command="{Binding ClearSearchCommand}" Visibility="{Binding Text.Length, ElementName=SearchBox, Converter={StaticResource CountToVis}}"/>
@@ -295,11 +296,22 @@
         <Grid Grid.Column="1">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
+            <!-- video search: every node's list and my own shares; typing opens the results page -->
+            <Grid Grid.Row="0" Margin="24,14,24,0" HorizontalAlignment="Left" Width="460">
+                <TextBox x:Name="VideoSearchBox" Text="{Binding VideoQuery, UpdateSourceTrigger=PropertyChanged}" Padding="32,7,30,7" AutomationProperties.Name="Search videos"/>
+                <TextBlock Text="&#xE721;" Style="{StaticResource Icon}" Foreground="{StaticResource TextDim}" HorizontalAlignment="Left" Margin="11,0,0,0" IsHitTestVisible="False"/>
+                <TextBlock Text="Search videos on the network   (Ctrl+F)" Foreground="{StaticResource TextDim}" Margin="33,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"
+                           Visibility="{Binding Text.Length, ElementName=VideoSearchBox, Converter={StaticResource ZeroToVis}}"/>
+                <Button Style="{StaticResource BtnIcon}" Width="24" Height="24" Content="&#xE711;" FontSize="10" HorizontalAlignment="Right" Margin="0,0,5,0" ToolTip="Clear (Esc)"
+                        Command="{Binding ClearVideoQueryCommand}" Visibility="{Binding Text.Length, ElementName=VideoSearchBox, Converter={StaticResource CountToVis}}"/>
+            </Grid>
+
             <!-- pending access requests banner -->
-            <ItemsControl ItemsSource="{Binding Pending}" Margin="24,12,24,0">
+            <ItemsControl Grid.Row="1" ItemsSource="{Binding Pending}" Margin="24,12,24,0">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
                         <Border Background="#2A2B1E0A" BorderBrush="{StaticResource Warn}" BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,0,0,8">
@@ -325,7 +337,7 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
 
-            <ContentControl Grid.Row="1" Content="{Binding Page}" Focusable="False"/>
+            <ContentControl Grid.Row="2" Content="{Binding Page}" Focusable="False"/>
         </Grid>
 
         <!-- ================= overlays ================= -->

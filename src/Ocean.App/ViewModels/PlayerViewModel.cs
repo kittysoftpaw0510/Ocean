@@ -14,6 +14,34 @@ public partial class PlayerViewModel : ObservableObject
     [ObservableProperty] private bool _isOpen;
     [ObservableProperty] private ItemVm? _item;
     [ObservableProperty] private PeerVm? _peer;
+
+    // ---- votes: thumbs up/down in the top bar; "watched to the end" reported once per video ----
+    private bool _finishedReported;
+    partial void OnItemChanged(ItemVm? oldValue, ItemVm? newValue)
+    {
+        if (oldValue is not null) oldValue.PropertyChanged -= ItemChanged;
+        if (newValue is not null) newValue.PropertyChanged += ItemChanged;
+        RefreshVote();
+    }
+    private void ItemChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e) => RefreshVote();
+    private void RefreshVote()
+    {
+        OnPropertyChanged(nameof(CanVote)); OnPropertyChanged(nameof(IsUp)); OnPropertyChanged(nameof(IsDown));
+        OnPropertyChanged(nameof(LikeTip)); OnPropertyChanged(nameof(DislikeTip));
+    }
+    public bool CanVote => Item is { CanVote: true } && Peer is not null;
+    public bool IsUp => Item?.IsUp == true;
+    public bool IsDown => Item?.IsDown == true;
+    public string LikeTip => (IsUp ? "Take back my like" : "Like") + (Item is { Up: > 0 } ? $"  ({Item.Up})" : "");
+    public string DislikeTip => (IsDown ? "Take back my dislike" : "Dislike") + (Item is { Down: > 0 } ? $"  ({Item.Down})" : "");
+
+    [RelayCommand] private Task VoteUp() => VoteAsync(1);
+    [RelayCommand] private Task VoteDown() => VoteAsync(-1);
+    private Task VoteAsync(int vote)
+    {
+        if (Item is null || Peer is null || !CanVote) return Task.CompletedTask;
+        return _main.RateAsync(Peer, Item, Item.MyVote == vote ? 0 : vote, finished: false);
+    }
     /// <summary>Downloading applies to another node's video, not to one of my own.</summary>
     public bool CanDownload => Peer is not null;
     partial void OnPeerChanged(PeerVm? value) => OnPropertyChanged(nameof(CanDownload));
@@ -39,6 +67,8 @@ public partial class PlayerViewModel : ObservableObject
     public enum CastRoles { None, Host, Follower }
     [ObservableProperty] private CastRoles _castRole;
     [ObservableProperty] private string _castBanner = "";
+    /// <summary>The longer explanation behind the banner (tooltip).</summary>
+    [ObservableProperty] private string _castBannerTip = "";
     [ObservableProperty] private bool _castBannerVisible;
     [ObservableProperty] private bool _controlsLocked;
     [ObservableProperty] private int _castViewers;
@@ -98,11 +128,20 @@ public partial class PlayerViewModel : ObservableObject
 
     private void UpdateCastBanner()
     {
+        var direct = CastViewers - _castMulticast;
         var text = CastRole switch
         {
-            CastRoles.Host => CastViewers == 0 ? "Multicasting: waiting for viewers to join…"
-                : $"Multicasting to {CastViewers} PC{(CastViewers == 1 ? "" : "s")}" + (_castMulticast < CastViewers ? $"  ·  {_castMulticast} by multicast, the rest by direct stream" : ""),
-            CastRoles.Follower => $"Watching with {_hostName}  ·  {CastViewers} watching  ·  the host controls playback" + (_multicastWorking ? "" : "  ·  direct stream (no multicast reaches this PC)"),
+            CastRoles.Host => CastViewers == 0 ? "Multicasting · waiting for viewers"
+                : $"Multicasting · {CastViewers} watching" + (direct > 0 ? $" ({direct} direct)" : ""),
+            CastRoles.Follower => $"Watching with {_hostName} · {CastViewers} watching" + (_multicastWorking ? "" : " · direct"),
+            _ => "",
+        };
+        CastBannerTip = CastRole switch
+        {
+            CastRoles.Host => "Everyone who joined follows your play, pause and seek. Closing the player asks whether to keep it running without you."
+                + (direct > 0 ? $" {direct} of them get the video by a direct stream from you, because the multicast doesn't reach their PC (often Wi-Fi or another network segment)." : ""),
+            CastRoles.Follower => "The host controls play, pause and seek."
+                + (_multicastWorking ? "" : " The multicast doesn't reach this PC (often Wi-Fi, another network segment or a VPN), so the video comes by a direct stream from the host: you still watch in step, without the bandwidth saving."),
             _ => "",
         };
         CastBanner = text;
@@ -112,12 +151,42 @@ public partial class PlayerViewModel : ObservableObject
     [RelayCommand] private Task StopCast() => _main.StopCastAsync();
     [RelayCommand] private Task LeaveCast() => _main.LeaveCastAsync();
 
-    /// <summary>Opening another video while in a multicast leaves it (a host stops it).</summary>
-    private void LeaveCastForNewVideo()
+    /// <summary>
+    /// Opening another video while in a multicast leaves it: a follower leaves, a host lets it run on without the
+    /// player (it ends when the video does; My shares can stop it or bring the player back).
+    /// </summary>
+    private void LeaveCastForNewVideo(bool keepHost = false)
     {
-        if (CastRole == CastRoles.Host) _ = _main.StopCastAsync();
+        if (CastRole == CastRoles.Host) { if (keepHost) return; _ = _main.DetachCastAsync(notify: true); }
         else if (CastRole == CastRoles.Follower) _ = _main.LeaveCastAsync();
         EndCast();
+    }
+
+    /// <summary>
+    /// Closing the player while hosting: everyone can keep watching without it. Returns false when the user cancels.
+    /// </summary>
+    private async Task<bool> SettleCastForCloseAsync()
+    {
+        if (CastRole != CastRoles.Host) return true;
+        var who = CastViewers == 0 ? "No one has joined yet." : $"{CastViewers} PC{(CastViewers == 1 ? " is" : "s are")} watching.";
+        var choice = await _main.Dialogs.ChooseAsync("Keep multicasting?",
+            $"“{Title}” is being multicast. {who} It can go on without your player: everyone keeps watching until the video ends, "
+            + "and you can take it back or stop it from My shares.",
+            "Keep it running", "Stop for everyone", altDanger: true);
+        if (choice == 0) return false;
+        if (choice == 2) await _main.StopCastAsync(); else await _main.DetachCastAsync(notify: false);
+        EndCast();
+        return true;
+    }
+
+    /// <summary>The window goes to the tray: close the player without questions (a hosted multicast runs on).</summary>
+    public void CloseForHide()
+    {
+        if (!IsOpen) return;
+        LeaveCastForNewVideo();
+        EndLight();
+        IsOpen = false; IsFullscreen = false; IsPlaying = false;
+        Url = null; Item = null;
     }
 
     public PlayerViewModel(MainViewModel main) { _main = main; }
@@ -379,6 +448,11 @@ public partial class PlayerViewModel : ObservableObject
     {
         TickLight();
         if (_playing is null || _playingPeer is null) return;
+        if (finished && !_finishedReported && _playing.CanVote)
+        {
+            _finishedReported = true; // counts a little towards "Top on the network", once per play
+            _ = _main.RateAsync(_playingPeer, _playing, vote: null, finished: true);
+        }
         var persist = force || DateTime.UtcNow - _lastSaved > TimeSpan.FromSeconds(5);
         if (persist) _lastSaved = DateTime.UtcNow;
         _main.RememberPlayback(_playing, _playingPeer, position, DurationSeconds, finished, persist);
@@ -390,7 +464,7 @@ public partial class PlayerViewModel : ObservableObject
         Item = item; Peer = peer; Error = null;
         if (exactUrl) { EndLight(); Url = url; } // a multicast: the host decides which copy is sent
         else { BeginLight(item, peer, url); Url = UsingLight ? _lightUrl : url; }
-        _playing = item; _playingPeer = peer; StartAt = Math.Max(0, startAt);
+        _playing = item; _playingPeer = peer; StartAt = Math.Max(0, startAt); _finishedReported = false;
         Services.AppLog.Info("Player", $"play {item.Name} from {peer.Label}" + (StartAt > 0 ? $" at {StartAt:0} s" : ""));
         Title = item.Name;
         Subtitle = $"{peer.Label}  ·  {item.ShareName}{(item.Folder.Length > 0 ? "  ›  " + item.Folder : "")}{(item.ResolutionText.Length > 0 ? "  ·  " + item.ResolutionText : "")}";
@@ -401,13 +475,22 @@ public partial class PlayerViewModel : ObservableObject
         Generation++;
     }
 
-    /// <summary>Plays one of my own shared videos straight from disk.</summary>
-    public void OpenLocal(LocalItemVm item, string shareName)
+    /// <summary>
+    /// Plays one of my own shared videos straight from disk. The video I'm multicasting is special: opening it means
+    /// taking the multicast back (the player drives it from where it is), never starting it over for everyone.
+    /// </summary>
+    public void OpenLocal(LocalItemVm item, string shareName, double startAt = 0, bool host = false)
     {
-        LeaveCastForNewVideo();
+        if (!host && _main.MyCast is { Active: true } cast && cast.ItemId == item.Id)
+        {
+            if (CastRole == CastRoles.Host && IsOpen) return; // already driving it
+            _ = _main.ReopenCastAsync(item, shareName);
+            return;
+        }
+        LeaveCastForNewVideo(keepHost: host);
         EndLight();
         Item = null; Peer = null; Url = item.Dto.FullPath; Error = null;
-        _playing = null; _playingPeer = null; StartAt = 0; // no resume point: it is not another node's video
+        _playing = null; _playingPeer = null; StartAt = Math.Max(0, startAt); // no resume point: it is not another node's video
         Services.AppLog.Info("Player", $"play my own {item.Name}");
         Title = item.Name;
         Subtitle = $"My shares  ·  {shareName}{(item.Folder.Length > 0 ? "  ›  " + item.Folder : "")}";
@@ -419,8 +502,9 @@ public partial class PlayerViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void Close()
+    private async Task Close()
     {
+        if (!await SettleCastForCloseAsync()) return;
         LeaveCastForNewVideo();
         EndLight();
         IsOpen = false; IsFullscreen = false; IsPlaying = false;
@@ -431,11 +515,11 @@ public partial class PlayerViewModel : ObservableObject
     [RelayCommand] private void ToggleMute() => IsMuted = !IsMuted;
 
     [RelayCommand]
-    private void OpenExternal()
+    private async Task OpenExternal()
     {
         if (Url is null) return;
         OpenExternally(Url, _main);
-        Close();
+        await Close();
     }
 
     [RelayCommand]

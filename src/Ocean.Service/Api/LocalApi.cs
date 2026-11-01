@@ -111,6 +111,26 @@ public static class LocalApi
         });
 
         // The player's requests: own copy or finished download from disk, otherwise through the stream cache.
+        // ---- votes and tags ----
+        g.MapPost("/peers/{peerId}/rate/{itemId}", async (string peerId, string itemId, HttpContext ctx, PeerService peers) =>
+        {
+            var rate = await ctx.Request.ReadFromJsonAsync<RateDto>(Json.Options, ctx.RequestAborted);
+            if (rate is null || rate.Vote is < -1 or > 1) return Results.BadRequest();
+            return Results.Json(await peers.RateAsync(peerId, itemId, rate, ctx.RequestAborted), Json.Options);
+        });
+        g.MapPut("/shares/{id}/items/{itemId}/tags", async (string id, string itemId, HttpContext ctx, CatalogService catalog) =>
+        {
+            var dto = await ctx.Request.ReadFromJsonAsync<TagsDto>(Json.Options, ctx.RequestAborted);
+            if (dto is null) return Results.BadRequest();
+            return catalog.SetTags(id, itemId, dto.Tags) ? Results.Ok() : Results.NotFound();
+        });
+        g.MapGet("/top", (string? tag, int? limit, Social.TopList top) => Results.Json(top.Build(tag, Math.Clamp(limit ?? 30, 1, 200)), Json.Options));
+        g.MapGet("/search", (string? q, int? limit, Social.NetSearch search) => Results.Json(search.Search(q ?? "", Math.Clamp(limit ?? 200, 1, 1000)), Json.Options));
+
+        // ---- updates (GitHub releases): status, a check now; the app runs the downloaded installer ----
+        g.MapGet("/update", (Update.Updater updater) => Results.Json(updater.Status, Json.Options));
+        g.MapPost("/update/check", async (HttpContext ctx, Update.Updater updater) => Results.Json(await updater.CheckAsync(ctx.RequestAborted), Json.Options));
+
         // ---- multicast: mine (host) ----
         g.MapGet("/cast", (CastHost cast) => Results.Json(cast.Status(), Json.Options));
         g.MapGet("/cast/limit", (CastHost cast) => Results.Json(cast.Limit(), Json.Options));
@@ -122,6 +142,7 @@ public static class LocalApi
             return Results.Json(st, Json.Options); // Error says why it could not start
         });
         g.MapPost("/cast/stop", (CastHost cast) => { cast.Stop(); return Results.Ok(); });
+        g.MapPost("/cast/detach", (CastHost cast) => { cast.Detach(); return Results.Ok(); }); // the player closed; keep it running
         g.MapPost("/cast/state", async (HttpContext ctx, CastHost cast) =>
         {
             var st = await ctx.Request.ReadFromJsonAsync<CastHostStateDto>(Json.Options, ctx.RequestAborted);
@@ -263,7 +284,7 @@ public static class LocalApi
                 NodeName = c.NodeName, UserName = c.UserName, Secret = c.Secret, DownloadDir = c.DownloadDir,
                 UploadLimitKBps = c.UploadLimitKBps, SharingPaused = c.SharingPaused, NewDays = c.NewDays,
                 MaxConcurrentDownloads = c.MaxConcurrentDownloads, NotifyNewVideos = c.NotifyNewVideos, OfflineKeepHours = c.OfflineKeepHours,
-                AllowPublicNetworks = c.AllowPublicNetworks, FirewallManaged = firewall.CanManage, AllowBridging = c.AllowBridging,
+                AllowPublicNetworks = c.AllowPublicNetworks, FirewallManaged = firewall.CanManage, AllowBridging = c.AllowBridging, CheckUpdates = c.CheckUpdates,
                 NetworkMode = c.NetworkMode,
                 StreamCacheGB = c.StreamCacheGB, StreamCacheUsedBytes = cache.UsedBytes,
             }, Json.Options);
@@ -287,6 +308,7 @@ public static class LocalApi
                 c.OfflineKeepHours = Math.Clamp(dto.OfflineKeepHours, 1, 24 * 30);
                 c.AllowPublicNetworks = dto.AllowPublicNetworks;
                 c.AllowBridging = dto.AllowBridging;
+                c.CheckUpdates = dto.CheckUpdates;
                 c.LightCopies = dto.LightCopies;
                 c.LightKeepDays = Math.Clamp(dto.LightKeepDays, 1, 365);
                 c.LightCacheGB = Math.Clamp(dto.LightCacheGB, 1, 2000);

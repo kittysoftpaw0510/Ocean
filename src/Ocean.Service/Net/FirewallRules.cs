@@ -32,7 +32,12 @@ public sealed class FirewallRules : IHostedService
     public Task StartAsync(CancellationToken ct)
     {
         _config.Changed += cfg => { if (cfg.AllowPublicNetworks != _applied) _ = ApplyAsync(cfg.AllowPublicNetworks); };
-        _ = ApplyAsync(_config.Current.AllowPublicNetworks);
+        _ = Task.Run(async () =>
+        {
+            // The setup's rule for private/domain networks: only PCs on the local subnet (older setups allowed any address).
+            if (CanManage) await NetshAsync($"advfirewall firewall set rule name=\"Ocean\" dir=in program=\"{_exe}\" new remoteip=localsubnet");
+            await ApplyAsync(_config.Current.AllowPublicNetworks);
+        });
         return Task.CompletedTask;
     }
 
@@ -48,10 +53,10 @@ public sealed class FirewallRules : IHostedService
             var rule = $"name=\"{PublicRuleName}\" dir=in program=\"{_exe}\"";
             if (allow)
             {
-                // Repair the existing rule (re-enable it, make sure it allows) or create it.
-                var rc = await NetshAsync($"advfirewall firewall set rule {rule} new enable=yes action=allow profile=public");
+                // Repair the existing rule (re-enable it, make sure it allows, only from the local subnet) or create it.
+                var rc = await NetshAsync($"advfirewall firewall set rule {rule} new enable=yes action=allow profile=public remoteip=localsubnet");
                 if (rc != 0)
-                    rc = await NetshAsync($"advfirewall firewall add rule {rule} action=allow enable=yes profile=public " +
+                    rc = await NetshAsync($"advfirewall firewall add rule {rule} action=allow enable=yes profile=public remoteip=localsubnet " +
                                           "description=\"Ocean LAN video sharing on networks Windows marks as Public (Ocean settings: Network)\"");
                 if (rc == 0) _log.LogInformation("firewall: other PCs may connect on Public networks too");
                 else { _log.LogWarning("firewall: could not allow Ocean on Public networks (netsh exit {Code})", rc); return; }

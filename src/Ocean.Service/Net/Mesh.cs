@@ -210,7 +210,12 @@ public sealed class ViaForwarder
     public async Task ServeAsync(HttpContext ctx)
     {
         var res = ctx.Response;
-        if (!Via.TryParse(RawTarget(ctx), out var targetId, out var inner) || !Via.IsRelayable(inner)) { res.StatusCode = 400; return; }
+        if (!Via.TryParse(RawTarget(ctx), out var targetId, out var inner)) { res.StatusCode = 400; return; }
+        if (!Via.IsRelayable(inner))
+        {
+            await FailAsync(ctx, 400, "unsupported", "This PC can't pass that kind of request on (it runs a different Ocean version).");
+            return;
+        }
         if (!_config.Current.AllowBridging)
         {
             await FailAsync(ctx, 403, "off", "This PC doesn't pass traffic between other PCs (switched off in its Settings).");

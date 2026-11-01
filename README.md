@@ -20,6 +20,10 @@ and every byte between them travels over mutually authenticated, end-to-end encr
   videos through that PC (shown as "via …" in the list). At most one PC in between. When several PCs can bridge
   the same pair, requests spread over the least busy ones and move to another when one fails. A bridge paces what
   it passes on like its own uploads, keeps a copy so the owner sends each part once, and can opt out in Settings.
+- **Local network only**: Ocean only ever talks to PCs on the PC's own local networks (private addresses on an
+  Ethernet or Wi-Fi network it is plugged into). Never over the internet, never through a VPN: with a VPN such as
+  Astrill connected, Ocean neither announces itself nor answers on the VPN adapter, and refuses connections from
+  it. The firewall rules allow the local subnet only. The update check (GitHub) is the one internet connection.
 - **Lighter copies for watching**: when someone has watched one of your heavy videos for half a minute, your PC
   makes a 720p copy at about 1.5 Mbps (with the bundled ffmpeg) and serves that from then on; viewers see
   "Preparing…" meanwhile and can switch, or are switched when playback keeps stalling. The original is never
@@ -30,7 +34,9 @@ and every byte between them travels over mutually authenticated, end-to-end encr
   and seek; everyone who joins watches the same moment (the home page and the node list show "LIVE"). Joining follows
   the video's own access rule. The app suggests it when three or more PCs watch the same video from you; at most 30 %
   of the PCs on a network can multicast at once. Packets are encrypted with a per-session key; where multicast
-  doesn't arrive (some Wi-Fi, VPN adapters, bridged PCs) the viewer fetches from you directly instead.
+  doesn't arrive (some Wi-Fi, VPN adapters, bridged PCs) the viewer fetches from you directly instead. Closing
+  your player asks whether to keep it running: the video then plays on for everyone by itself until it ends, and
+  *My shares* lets you stop it or open the player again and take control back.
 - **Light on the PC**: Ocean's service, including making lighter copies, never uses more than 25 % of the processor
   (Windows enforces it; adjustable in Settings). The player in the app is not limited.
 - **Player**: speed control (0.25× to 2×) and A-B repeat with markers on the seek bar.
@@ -58,6 +64,13 @@ The setup:
   Public networks**);
 - optionally opens Ocean in the tray at sign-in;
 - upgrades in place (run a newer setup over an older one; settings and shares are kept).
+
+**Updates.** Ocean looks at this project's [GitHub releases](https://github.com/kittysoftpaw0510/Ocean/releases) a
+few times a day and downloads a newer installer in the background (switch it off under *Settings > App*). Nothing is
+installed until you click **Install now** on the home page or in *Settings > About*: the installer then closes Ocean,
+updates it and opens it again. PCs without internet simply never see the banner. A release must be tagged
+`vX.Y.Z` and carry `Ocean-Setup-X.Y.Z.exe` (and, when present, `Ocean-Setup-X.Y.Z.exe.sha256`, which is checked);
+`scripts\make-setup.ps1` writes both files into `dist\`.
 
 Uninstall from *Settings > Apps* (or the Start menu). It removes the service, firewall rules and shortcuts and
 asks whether to also delete settings and caches (`%ProgramData%\Ocean`). Videos and downloads are never touched.
@@ -92,20 +105,23 @@ cd dist\Ocean
 The first time the service listens, Windows Firewall may ask to allow `Ocean.Service` on private networks:
 allow it, or other PCs will not be able to connect. (`install-service.ps1` adds the rules itself.)
 When Ocean runs as the Windows service it also allows itself on Public networks, unless you turn that off in Settings.
+Every rule accepts the local subnet only.
 
 ## Using Ocean
 
 | Where | What |
 |---|---|
-| **Home** | *Continue watching* shows the last video you played and where you stopped: *Resume* picks up from there (or *Play again* if you watched it to the end). Kept per Windows user. |
+| **Home** | *Continue watching* shows the last video you played and where you stopped: *Resume* picks up from there (or *Play again* if you watched it to the end). Kept per Windows user. *Top on the network* lists the videos people liked or watched to the end, best first, with tag chips to narrow it. |
+| **Search** (top of the page) | Finds videos on every node, online or not (its last known list), and in your own shares. Every word must match, in any order, anywhere in the name, folder, share, tags or owner; accents and case don't matter; `#word` looks in tags only, `@name` in the owner's name. Best matches first; chips narrow it to one node. The box on the left filters the node list. |
 | **Network** (left) | Nodes currently online. A green badge counts videos added since you last visited that node. |
-| Node page | Share chips at the top filter the videos. Double-click to play, right-click for *Download*, *Open in external player*, *Copy stream link*. Multi-select and *Download n selected*. *Download all* for the chip you're on. |
-| **My shares** | *Share a folder* / *Files* / *New folder* (an empty folder you fill later; rename or remove any time), or drop folders anywhere in the window. Pick who can watch: everyone, password, or ask-me. Right-click a video to give it its own rule. *Who has access* lists issued grants (revoke any time). |
+| Node page | Share chips at the top filter the videos; tag chips below them (when the owner tagged videos) too. Double-click to play, right-click for *Download*, *Open in external player*, *Copy stream link*, *Like* / *Dislike*. Multi-select and *Download n selected*. *Download all* for the chip you're on. |
+| **My shares** | *Share a folder* / *Files* / *New folder* (an empty folder you fill later; rename or remove any time), or drop folders anywhere in the window. Pick who can watch: everyone, password, or ask-me. Right-click a video to give it its own rule or *Tags…* (up to 8 words everyone can filter by). Each row shows how many people liked it. *Who has access* lists issued grants (revoke any time). |
+| Votes | Thumbs up / down on anyone's video (tiles, rows, the player's top bar). The owner's PC counts them and everyone sees the totals, never who voted; your own vote is remembered and can be taken back. Watching a video to the end also counts a little. A vote cast while the owner is offline is delivered when it's back. Votes fade with time (half-life 30 days), so new favourites rise. |
 | **Downloads** | Progress, speed, ETA; cancel, retry, open, show in folder. Partial files resume after restarts. |
 | **Settings** | Your name, shared secret, upload speed cap, how long videos count as "new", download folder, video cache size (what you watched from other PCs is kept so replays cost no network), networking mode (Auto picks a classic, IPmsg-like mode when a VPN or proxy add-on would break the fast one), start with Windows. |
 | Tray icon | Open, pause sharing, exit (keeps sharing) or exit and stop sharing. Balloon tips for access requests and new videos. |
 
-Keyboard: `Ctrl+F` search · `Enter` play · `Ctrl+A` select all · in the player `Space` play/pause, `Shift+>` / `Shift+<` speed, `[` / `]` set A / B (A-B repeat), `\` clear repeat,
+Keyboard: `Ctrl+F` search videos · `Enter` play · `Ctrl+A` select all · in the player `Space` play/pause, `Shift+>` / `Shift+<` speed, `[` / `]` set A / B (A-B repeat), `\` clear repeat,
 `←/→` ±10 s, `↑/↓` volume, `F` fullscreen, `M` mute, `Esc` close.
 
 ### Access modes

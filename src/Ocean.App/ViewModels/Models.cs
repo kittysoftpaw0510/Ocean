@@ -13,6 +13,8 @@ public interface IDialogs
 {
     Task<string?> AskPasswordAsync(string title, string subtitle);
     Task<bool> ConfirmAsync(string title, string message, string okLabel = "OK", bool danger = false);
+    /// <summary>Two ways forward and Cancel: 1 = <paramref name="okLabel"/>, 2 = <paramref name="altLabel"/>, 0 = cancelled.</summary>
+    Task<int> ChooseAsync(string title, string message, string okLabel, string altLabel, bool altDanger = false);
     Task<ShareUpsertDto?> EditShareAsync(ShareEditorViewModel editor);
     Task<string?> PromptAsync(string title, string message, string initial, string okLabel);
     /// <summary>Lets the user pick a folder of a share ("" = its root), optionally creating a new one. Null = cancelled.</summary>
@@ -120,7 +122,34 @@ public partial class ItemVm : ObservableObject
     public string LockText => Dto.Lock?.Mode == AccessMode.Password ? "Password protected" : Dto.Lock?.Mode == AccessMode.Ask ? "Owner approval required" : "";
     /// <summary>"  ·  Light" when the owner has a lighter copy for watching, "  ·  Preparing…" while it is being made.</summary>
     public string LightTag => Dto.Light == LightVariant.Ready ? "  ·  Light" : Dto.Light == LightVariant.Preparing ? "  ·  Preparing…" : "";
-    public string Tooltip => $"{Dto.Name}\n{ShareName}{(Folder.Length > 0 ? "  ›  " + Folder : "")}\n{SizeText}{(DurationText.Length > 0 ? "  ·  " + DurationText : "")}{(ResolutionText.Length > 0 ? "  ·  " + ResolutionText : "")}\nAdded {AddedFull}";
+    public string Tooltip => $"{Dto.Name}\n{ShareName}{(Folder.Length > 0 ? "  ›  " + Folder : "")}\n{SizeText}{(DurationText.Length > 0 ? "  ·  " + DurationText : "")}{(ResolutionText.Length > 0 ? "  ·  " + ResolutionText : "")}\nAdded {AddedFull}"
+                             + (HasVotes ? "\n" + VotesTip : "") + (HasTags ? "\n" + TagsText : "");
+
+    // ---- tags (set by the owner) and votes (anyone's, counted by the owner) ----
+    public IReadOnlyList<string> Tags => Dto.Tags ?? (IReadOnlyList<string>)Array.Empty<string>();
+    public bool HasTags => Dto.Tags is { Count: > 0 };
+    public string TagsText => Votes.TagsText(Dto.Tags);
+    public int Up => Dto.Up;
+    public int Down => Dto.Down;
+    public bool HasVotes => Dto.Up + Dto.Down > 0;
+    public string VotesTip => Votes.Tip(Dto);
+    /// <summary>My thumbs up (1), down (-1) or nothing yet (0).</summary>
+    public int MyVote => Dto.MyVote;
+    public bool IsUp => Dto.MyVote > 0;
+    public bool IsDown => Dto.MyVote < 0;
+    /// <summary>No voting on my own videos (copies of mine shared back by others included).</summary>
+    public bool CanVote => !IsMine;
+    public string LikeMenu => IsUp ? "Take back my like" : "Like";
+    public string DislikeMenu => IsDown ? "Take back my dislike" : "Dislike";
+    public bool HasTag(string tag) => Dto.Tags?.Any(t => string.Equals(t, tag, StringComparison.CurrentCultureIgnoreCase)) == true;
+
+    /// <summary>The owner's answer to my vote (or the service's note while the owner is away).</summary>
+    public void ApplyRating(MyRatingDto r)
+    {
+        Dto.MyVote = r.MyVote;
+        if (r.Totals is { } t) { Dto.Up = t.Up; Dto.Down = t.Down; Dto.Finished = t.Finished; Dto.Score = t.Score; }
+        OnPropertyChanged(string.Empty);
+    }
 
     [ObservableProperty] private bool _isSelected;
 
@@ -203,6 +232,84 @@ public partial class FolderVm : ObservableObject
 
 /// <summary>One step of a breadcrumb trail ("Family" › "2024" › "Beach").</summary>
 public sealed record Crumb(string Name, string Path, bool IsLast);
+
+/// <summary>Text for votes and tags shared by the browse tiles, My shares and the home page.</summary>
+public static class Votes
+{
+    public static string TagsText(List<string>? tags) => tags is { Count: > 0 } ? string.Join("  ", tags.Select(t => "#" + t)) : "";
+
+    public static string Tip(ItemDto d)
+    {
+        var parts = new List<string>();
+        if (d.Up > 0) parts.Add(d.Up == 1 ? "1 person liked it" : $"{d.Up} people liked it");
+        if (d.Down > 0) parts.Add(d.Down == 1 ? "1 didn't" : $"{d.Down} didn't");
+        if (d.Finished > 0) parts.Add(d.Finished == 1 ? "1 watched it to the end" : $"{d.Finished} watched it to the end");
+        return parts.Count == 0 ? "No votes yet" : string.Join("  ·  ", parts);
+    }
+}
+
+/// <summary>A tag chip: filter by it in a node's list or in "Top on the network".</summary>
+public partial class TagChipVm : ObservableObject
+{
+    public TagChipVm(string tag, int count) { Tag = tag; Count = count; }
+    public string Tag { get; }
+    public string Label => "#" + Tag;
+    [ObservableProperty] private int _count;
+    [ObservableProperty] private bool _isSelected;
+}
+
+/// <summary>A video somewhere on the network: a row of "Top on the network" (with its rank) or of the search page.</summary>
+public sealed partial class NetItemVm : ObservableObject
+{
+    public NetItemVm(NetItemDto dto, MainViewModel main)
+    {
+        Dto = dto;
+        Item = new ItemVm(dto.Item, dto.PeerId, dto.ShareName,
+            i => main.Thumbs.GetAsync(dto.Mine ? main.Api.LocalThumbPath(i.Id) : main.Api.PeerThumbPath(dto.PeerId, i.Id)));
+        Item.PropertyChanged += (_, _) => OnPropertyChanged(string.Empty); // a vote from the row or the player
+    }
+
+    public NetItemDto Dto { get; private set; }
+    public ItemVm Item { get; }
+    [ObservableProperty] private int _rank;
+
+    public static string KeyOf(NetItemDto d) => d.PeerId + "/" + d.Item.Id;
+    public string Key => KeyOf(Dto);
+    public string Title => Dto.Item.Name;
+    public string Who => Dto.Mine ? "Your video" : Dto.Online ? Dto.PeerName : Dto.PeerName + "  ·  offline";
+    /// <summary>"Node  ›  Share  ›  Folder" (search rows).</summary>
+    public string Where => (Dto.Mine ? "My shares" : Dto.PeerName + (Dto.Online ? "" : " (offline)")) + "  ›  " + Dto.ShareName + (Item.Folder.Length > 0 ? "  ›  " + Item.Folder : "");
+    public string Details => Item.SizeText + (Item.DurationText.Length > 0 ? "  ·  " + Item.DurationText : "") + (Item.ResolutionText.Length > 0 ? "  ·  " + Item.ResolutionText : "") + "  ·  added " + Item.AddedText;
+    public bool Online => Dto.Online;
+    public bool CanDownload => !Dto.Mine;
+    public string Meta
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (Dto.Item.Up > 0) parts.Add($"{Dto.Item.Up} liked");
+            if (Dto.Item.Finished > 0) parts.Add($"{Dto.Item.Finished} watched to the end");
+            if (Item.DurationText.Length > 0) parts.Add(Item.DurationText);
+            return string.Join("  ·  ", parts);
+        }
+    }
+    public string Tooltip => Item.Tooltip;
+    public string ActionText => Dto.Mine ? "Play" : "Watch";
+    // my vote, mirrored from the item for the buttons on the row
+    public bool CanVote => Item.CanVote;
+    public bool IsUp => Item.IsUp;
+    public bool IsDown => Item.IsDown;
+    public string LikeMenu => Item.LikeMenu;
+    public string DislikeMenu => Item.DislikeMenu;
+
+    public NetItemVm Update(NetItemDto d)
+    {
+        Dto = d;
+        Item.Update(d.Item);
+        OnPropertyChanged(string.Empty);
+        return this;
+    }
+}
 
 public partial class ShareChipVm : ObservableObject
 {

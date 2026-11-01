@@ -349,6 +349,8 @@ public sealed class CatalogService : IDisposable
                 h = Fnv.Add(h, dto.DurationMs ?? -1); h = Fnv.Add(h, dto.Width ?? -1); h = Fnv.Add(h, dto.Height ?? -1);
                 h = Fnv.Add(h, dto.Lock?.Id); h = Fnv.Add(h, (long)(dto.Lock?.Mode ?? AccessMode.Public));
                 h = Fnv.Add(h, dto.Light); h = Fnv.Add(h, dto.LightSize);
+                h = Fnv.Add(h, dto.Tags is null ? "" : string.Join('\u001f', dto.Tags));
+                h = Fnv.Add(h, dto.Up); h = Fnv.Add(h, dto.Down); h = Fnv.Add(h, dto.Finished); h = Fnv.Add(h, (long)Math.Round(dto.Score * 100));
                 map[i.Id] = h;
             }
         return map;
@@ -583,6 +585,8 @@ public sealed class CatalogService : IDisposable
         dto.Width = i.Width;
         dto.Height = i.Height;
         if (LightLookup is { } light) { (dto.Light, dto.LightSize) = light(i.Id, i); } else { dto.Light = null; dto.LightSize = 0; }
+        dto.Tags = share.ItemTags.TryGetValue(i.Id, out var tags) && tags.Count > 0 ? tags : null;
+        if (RatingLookup is { } rating) (dto.Up, dto.Down, dto.Finished, dto.Score) = rating(i.Id); else { dto.Up = dto.Down = dto.Finished = 0; dto.Score = 0; }
         if (share.Overrides.TryGetValue(i.Id, out var ov) && ov.Mode is ItemAccessMode.Password or ItemAccessMode.Ask)
         {
             dto.Lock = new LockInfo { Id = ItemLock(i.Id), Mode = ov.Mode == ItemAccessMode.Password ? AccessMode.Password : AccessMode.Ask };
@@ -875,6 +879,39 @@ public sealed class CatalogService : IDisposable
 
     /// <summary>A lighter copy started, finished or went away: other nodes learn it with the next (coalesced) version.</summary>
     public void NotifyLightChanged() => BumpSoon("light");
+
+    /// <summary>Set by the ratings store: a video's votes, "watched to the end" count and score.</summary>
+    public Func<string, (int Up, int Down, int Finished, double Score)>? RatingLookup { get; set; }
+    /// <summary>A vote arrived: other nodes learn the new totals with the next (coalesced) version.</summary>
+    public void NotifyRatingsChanged() => BumpSoon("ratings");
+
+    /// <summary>The owner sets a video's tags (trimmed, without "#", at most 8 of up to 24 characters, no duplicates).</summary>
+    public bool SetTags(string shareId, string itemId, IEnumerable<string> tags)
+    {
+        var clean = new List<string>();
+        foreach (var raw in tags)
+        {
+            var t = raw.Trim().TrimStart('#').Trim();
+            if (t.Length == 0) continue;
+            if (t.Length > 24) t = t[..24].Trim();
+            if (clean.Any(c => string.Equals(c, t, StringComparison.CurrentCultureIgnoreCase))) continue;
+            clean.Add(t);
+            if (clean.Count == 8) break;
+        }
+        var ok = false;
+        _config.Update(cfg =>
+        {
+            var def = cfg.Shares.FirstOrDefault(s => s.Id == shareId);
+            if (def is null) return;
+            var map = new Dictionary<string, List<string>>(def.ItemTags);
+            if (clean.Count == 0) map.Remove(itemId); else map[itemId] = clean;
+            def.ItemTags = map;
+            def.UpdatedAt = DateTimeOffset.UtcNow;
+            ok = true;
+        });
+        if (ok) Bump("tags");
+        return ok;
+    }
 
     /// <summary>Set by the multicast host: what I'm multicasting now, carried in my catalog.</summary>
     public Func<CastInfoDto?>? CastLookup { get; set; }

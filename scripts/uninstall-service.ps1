@@ -18,4 +18,5 @@ if ($svc) {
 }
 Remove-NetFirewallRule -DisplayName "Ocean (peer TLS)" -ErrorAction SilentlyContinue
 Remove-NetFirewallRule -DisplayName "Ocean (discovery)" -ErrorAction SilentlyContinue
+Remove-NetFirewallRule -DisplayName "Ocean (multicast)" -ErrorAction SilentlyContinue
 Remove-NetFirewallRule -DisplayName "Ocean (public networks)" -ErrorAction SilentlyContinue  # added by the service

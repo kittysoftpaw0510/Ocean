@@ -21,6 +21,9 @@
                         <MenuItem Header="Move to…" Click="MoveTo_Click">
                             <MenuItem.Icon><TextBlock Text="&#xE8DE;" Style="{StaticResource Icon}"/></MenuItem.Icon>
                         </MenuItem>
+                        <MenuItem Header="Tags…" Click="Tags_Click" ToolTip="Words everyone can filter by (comedy, kids, travel…)">
+                            <MenuItem.Icon><TextBlock Text="&#xE8EC;" Style="{StaticResource Icon}"/></MenuItem.Icon>
+                        </MenuItem>
                         <Separator/>
                         <MenuItem Header="Who can open this video" IsEnabled="False"/>
                         <MenuItem Header="Same as share" Tag="Inherit" Click="Policy_Click"/>
@@ -49,6 +52,7 @@
                         <TextBlock Style="{StaticResource Dim}">
                             <Run Text="{Binding SizeText, Mode=OneWay}"/><Run Text="{Binding DurationText, Mode=OneWay, StringFormat='  ·  {0}'}"/><Run Text="{Binding AddedText, Mode=OneWay, StringFormat='  ·  added {0}'}"/><Run Text="{Binding LightTag, Mode=OneWay}"/>
                         </TextBlock>
+                        <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource SocialLine}"/>
                     </StackPanel>
                     <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
                         <!-- I'm multicasting this one -->
@@ -175,7 +179,7 @@
                             Visibility="{Binding IsCasting, Converter={StaticResource BoolToVis}}">
                         <DockPanel>
                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
-                                <Button Style="{StaticResource BtnGhost}" Content="Open player" Command="{Binding OpenCastPlayerCommand}" ToolTip="Your player drives the multicast"/>
+                                <Button Style="{StaticResource BtnGhost}" Content="Open player" Command="{Binding OpenCastPlayerCommand}" ToolTip="{Binding OpenCastPlayerTip}"/>
                                 <Button Style="{StaticResource BtnGhost}" Content="Stop multicast" Margin="6,0,0,0" Command="{Binding StopCastCommand}"/>
                             </StackPanel>
                             <Ellipse Width="9" Height="9" Fill="#FB7185" Margin="2,0,12,0" VerticalAlignment="Center"/>

@@ -37,7 +37,7 @@ public partial class MainWindow : Window, IDialogs
         if (!_forceClose)
         {
             e.Cancel = true;
-            _vm.Player.CloseCommand.Execute(null);
+            _vm.Player.CloseForHide(); // a multicast I'm hosting goes on by itself (nothing to ask on the way to the tray)
             Hide();
             return;
         }
@@ -48,7 +48,11 @@ public partial class MainWindow : Window, IDialogs
     {
         if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control)
         {
-            SearchBox.Focus(); SearchBox.SelectAll(); e.Handled = true;
+            VideoSearchBox.Focus(); VideoSearchBox.SelectAll(); e.Handled = true;
+        }
+        else if (e.Key == Key.Escape && !_vm.Player.IsOpen && VideoSearchBox.IsKeyboardFocused)
+        {
+            _vm.VideoQuery = ""; Keyboard.ClearFocus(); e.Handled = true;
         }
         else if (e.Key == Key.Escape && !_vm.Player.IsOpen && SearchBox.IsKeyboardFocused)
         {
@@ -90,6 +94,9 @@ public partial class MainWindow : Window, IDialogs
 
     public Task<bool> ConfirmAsync(string title, string message, string okLabel = "OK", bool danger = false)
         => Task.FromResult(ConfirmWindow.Show(Owner_, title, message, okLabel, "Cancel", danger));
+
+    public Task<int> ChooseAsync(string title, string message, string okLabel, string altLabel, bool altDanger = false)
+        => Task.FromResult(ConfirmWindow.ShowChoice(Owner_, title, message, okLabel, altLabel, altDanger));
 
     public Task<ShareUpsertDto?> EditShareAsync(ShareEditorViewModel editor)
         => Task.FromResult(ShareEditorWindow.Show(Owner_, editor, this));

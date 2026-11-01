@@ -83,6 +83,8 @@ public sealed class MyCastDto
     public double Position { get; set; }
     public bool Playing { get; set; }
     public DateTimeOffset StartedAt { get; set; }
+    /// <summary>The host closed the player: the service plays it on by itself until the video ends.</summary>
+    public bool Unattended { get; set; }
     public string? Error { get; set; }
 }
 

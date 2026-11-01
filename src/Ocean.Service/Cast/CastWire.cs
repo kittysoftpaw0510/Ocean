@@ -173,23 +173,4 @@ public static class CastWire
         if (missing is null || missingLen > x.Length) return null;
         return (missing.Value, x[..missingLen]);
     }
-
-    /// <summary>IPv4 addresses of the real network adapters (where multicast is sent and received).</summary>
-    public static List<IPAddress> LocalAddresses()
-    {
-        var list = new List<IPAddress>();
-        try
-        {
-            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
-            {
-                if (nic.OperationalStatus != OperationalStatus.Up) continue;
-                if (nic.NetworkInterfaceType is NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel) continue;
-                if (!nic.SupportsMulticast) continue;
-                foreach (var ua in nic.GetIPProperties().UnicastAddresses)
-                    if (ua.Address.AddressFamily == AddressFamily.InterNetwork) list.Add(ua.Address);
-            }
-        }
-        catch { }
-        return list;
-    }
 }

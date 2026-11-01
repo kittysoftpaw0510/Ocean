@@ -80,12 +80,13 @@ public sealed class Peer
 
     /// <summary>
     /// Addresses to try, best first: the last one that worked, then addresses on the same subnet as one of our
-    /// physical adapters (the real LAN), then other local subnets (virtual switches, VPN), then private ranges,
-    /// then the most recently heard.
+    /// physical adapters (the real LAN), then other local subnets (virtual switches), then the most recently heard.
+    /// Only addresses on the local network (an address can stop being one when this PC changes networks).
     /// </summary>
     public List<IPAddress> Candidates()
     {
-        var list = Addresses.OrderBy(kv => kv.Key.Equals(Preferred) ? 0 : 1)
+        var list = Addresses.Where(kv => Net.LocalNetworks.IsLan(kv.Key))
+                            .OrderBy(kv => kv.Key.Equals(Preferred) ? 0 : 1)
                             .ThenByDescending(kv => Net.LocalNetworks.Rank(kv.Key))
                             .ThenBy(kv => IsLikelyLan(kv.Key) ? 0 : 1)
                             .ThenByDescending(kv => kv.Value)

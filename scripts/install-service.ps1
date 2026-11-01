@@ -36,9 +36,10 @@ $peerPort = 38471; $discPort = 38472; $castPort = 38473
 Remove-NetFirewallRule -DisplayName "Ocean (peer TLS)" -ErrorAction SilentlyContinue
 Remove-NetFirewallRule -DisplayName "Ocean (discovery)" -ErrorAction SilentlyContinue
 Remove-NetFirewallRule -DisplayName "Ocean (multicast)" -ErrorAction SilentlyContinue
-New-NetFirewallRule -DisplayName "Ocean (peer TLS)" -Direction Inbound -Protocol TCP -LocalPort $peerPort -Action Allow -Profile Private,Domain | Out-Null
-New-NetFirewallRule -DisplayName "Ocean (discovery)" -Direction Inbound -Protocol UDP -LocalPort $discPort -Action Allow -Profile Private,Domain | Out-Null
-New-NetFirewallRule -DisplayName "Ocean (multicast)" -Direction Inbound -Protocol UDP -LocalPort $castPort -Action Allow -Profile Private,Domain | Out-Null
+# Only from the local subnet: Ocean never talks to PCs outside the local network.
+New-NetFirewallRule -DisplayName "Ocean (peer TLS)" -Direction Inbound -Protocol TCP -LocalPort $peerPort -Action Allow -Profile Private,Domain -RemoteAddress LocalSubnet | Out-Null
+New-NetFirewallRule -DisplayName "Ocean (discovery)" -Direction Inbound -Protocol UDP -LocalPort $discPort -Action Allow -Profile Private,Domain -RemoteAddress LocalSubnet | Out-Null
+New-NetFirewallRule -DisplayName "Ocean (multicast)" -Direction Inbound -Protocol UDP -LocalPort $castPort -Action Allow -Profile Private,Domain -RemoteAddress LocalSubnet | Out-Null
 
 Start-Service $name
 Write-Host "OceanService installed and started. Open Ocean.exe to manage shares." -ForegroundColor Green

@@ -49,6 +49,21 @@
     <c:NullToVisibilityConverter x:Key="NullToVis"/>
     <c:NullToVisibilityConverter x:Key="NullToVisInv" Invert="True"/>
     <c:CountToVisibilityConverter x:Key="CountToVis"/>
+
+    <!-- votes and tags under a video (any VM with HasVotes/Up/Down/VotesTip/HasTags/TagsText) -->
+    <DataTemplate x:Key="SocialLine">
+        <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+            <StackPanel Orientation="Horizontal" Margin="0,0,10,0" ToolTip="{Binding VotesTip}" Visibility="{Binding HasVotes, Converter={StaticResource BoolToVis}}">
+                <TextBlock Text="&#xE8E1;" Style="{StaticResource Icon}" FontSize="11" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding Up}" Style="{StaticResource Dim}" Margin="4,0,0,0" VerticalAlignment="Center"/>
+                <TextBlock Text="&#xE8E0;" Style="{StaticResource Icon}" FontSize="11" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" Margin="8,0,0,0" Visibility="{Binding Down, Converter={StaticResource CountToVis}}"/>
+                <TextBlock Text="{Binding Down}" Style="{StaticResource Dim}" Margin="4,0,0,0" VerticalAlignment="Center" Visibility="{Binding Down, Converter={StaticResource CountToVis}}"/>
+            </StackPanel>
+            <TextBlock Text="{Binding TagsText}" Style="{StaticResource Dim}" Foreground="{StaticResource AccentDim}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
+                       Visibility="{Binding HasTags, Converter={StaticResource BoolToVis}}"/>
+        </StackPanel>
+    </DataTemplate>
+
     <c:CountToVisibilityConverter x:Key="ZeroToVis" Invert="True"/>
     <c:BytesConverter x:Key="Bytes"/>
     <c:EqualsConverter x:Key="Equals"/>
@@ -194,6 +209,18 @@
         <Setter Property="Height" Value="32"/>
         <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
         <Setter Property="FontSize" Value="15"/>
+    </Style>
+
+    <!-- thumbs up / down buttons lit in accent when they are my vote (DataContext: ItemVm or PlayerViewModel) -->
+    <Style x:Key="LikeBtn" TargetType="Button" BasedOn="{StaticResource BtnIcon}">
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding IsUp}" Value="True"><Setter Property="Foreground" Value="{StaticResource Accent}"/><Setter Property="Background" Value="{StaticResource AccentSoft}"/></DataTrigger>
+        </Style.Triggers>
+    </Style>
+    <Style x:Key="DislikeBtn" TargetType="Button" BasedOn="{StaticResource BtnIcon}">
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding IsDown}" Value="True"><Setter Property="Foreground" Value="{StaticResource Warn}"/><Setter Property="Background" Value="{StaticResource Hover}"/></DataTrigger>
+        </Style.Triggers>
     </Style>
 
     <Style x:Key="BtnDanger" TargetType="ButtonBase" BasedOn="{StaticResource BtnGhost}">

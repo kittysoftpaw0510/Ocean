@@ -85,7 +85,7 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 Root: HKCU; Subkey: "Software\Ocean"; Flags: uninsdeletekey dontcreatekey
 
 [Run]
-Filename: "{app}\Ocean.exe"; Description: "Open Ocean now"; Flags: postinstall nowait skipifsilent runasoriginaluser
+Filename: "{app}\Ocean.exe"; Description: "Open Ocean now"; Flags: postinstall nowait runasoriginaluser
 
 [UninstallRun]
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=all program=""{app}\Ocean.Service.exe"""; Flags: runhidden; RunOnceId: "Firewall"
@@ -218,8 +218,8 @@ begin
   Run(Netsh, 'advfirewall firewall delete rule name=all program="' + Exe + '"');
   if WizardIsTaskSelected('firewall') then
   begin
-    Run(Netsh, 'advfirewall firewall add rule name="Ocean" description="Ocean LAN video sharing (discovery + encrypted transfers)" dir=in action=allow program="' + Exe + '" enable=yes profile=private,domain');
-    Run(Netsh, 'advfirewall firewall add rule name="Ocean (public networks)" description="Ocean LAN video sharing on networks Windows marks as Public (Ocean settings: Network)" dir=in action=allow program="' + Exe + '" enable=yes profile=public');
+    Run(Netsh, 'advfirewall firewall add rule name="Ocean" description="Ocean LAN video sharing (discovery + encrypted transfers)" dir=in action=allow program="' + Exe + '" enable=yes profile=private,domain remoteip=localsubnet');
+    Run(Netsh, 'advfirewall firewall add rule name="Ocean (public networks)" description="Ocean LAN video sharing on networks Windows marks as Public (Ocean settings: Network)" dir=in action=allow program="' + Exe + '" enable=yes profile=public remoteip=localsubnet');
   end;
 end;
 
