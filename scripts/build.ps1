@@ -64,6 +64,22 @@ Write-Host "Publishing app..." -ForegroundColor Cyan
 & $dotnet publish (Join-Path $root "src\Ocean.App\Ocean.App.csproj") @common
 if ($LASTEXITCODE -ne 0) { throw "app publish failed" }
 
+# A build stopped halfway (machine shut down, terminal closed) can leave files of the right size full of zeros, and the
+# next build keeps them because they look up to date. Never package such a build: an empty runtimeconfig.json alone
+# stops Ocean.exe from starting at all.
+$broken = @()
+foreach ($f in Get-ChildItem $out -File -Filter "*.json") {
+    try { Get-Content $f.FullName -Raw | ConvertFrom-Json | Out-Null } catch { $broken += $f.Name }
+}
+foreach ($f in Get-ChildItem $out -File | Where-Object { $_.Extension -in ".dll", ".exe" }) {
+    $fs = [IO.File]::OpenRead($f.FullName)
+    try { $b0 = $fs.ReadByte(); $b1 = $fs.ReadByte() } finally { $fs.Dispose() }
+    if ($b0 -ne 0x4D -or $b1 -ne 0x5A) { $broken += $f.Name } # every Windows program starts with "MZ"
+}
+if ($broken.Count -gt 0) {
+    throw "Broken build output (empty or damaged): $($broken -join ', '). Delete src\*\bin\$Configuration and src\*\obj\$Configuration, then build again."
+}
+
 # ASP.NET leaves an IIS web.config behind; Ocean does not use IIS.
 Remove-Item (Join-Path $out "web.config") -ErrorAction SilentlyContinue
 # ffmpeg makes the lighter copies of videos for watching; shipped next to the service (fetched once into .tools\ffmpeg)
