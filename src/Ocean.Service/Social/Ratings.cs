@@ -11,7 +11,7 @@ namespace Ocean.Service.Social;
 /// score travel in my catalog, who voted never leaves this PC. The score fades older votes (half weight after 30
 /// days) so a good new video can climb past old favourites.
 /// </summary>
-public sealed class Ratings
+public sealed class Ratings : IDisposable
 {
     private static readonly TimeSpan HalfLife = TimeSpan.FromDays(30);
     private const double FinishedWeight = 0.25;
@@ -61,6 +61,7 @@ public sealed class Ratings
             if (rate.Finished) r.Finished.TryAdd(voterId, DateTimeOffset.UtcNow);
             if (r.Votes.Count == 0 && r.Finished.Count == 0) _items.Remove(itemId);
         }
+        _dirty = true;
         _save.Change(2000, Timeout.Infinite);
         _catalog.NotifyRatingsChanged();
         return Totals(itemId);
@@ -111,10 +112,20 @@ public sealed class Ratings
         try
         {
             string json;
-            lock (_lock) json = Json.Serialize(_items);
+            lock (_lock) { json = Json.Serialize(_items); _dirty = false; }
             AtomicFile.Write(_path, json);
         }
         catch (Exception ex) { _log.LogWarning(ex, "votes: save failed"); }
+    }
+
+    /// <summary>A vote not written yet (saving waits 2 s for more): the service is stopping (shutdown, an update).</summary>
+    private volatile bool _dirty;
+
+    public void Dispose()
+    {
+        _save.Dispose();
+        _prune.Dispose();
+        if (_dirty) Save();
     }
 }
 
@@ -185,6 +196,25 @@ public sealed class MyVotes
             if (e.Vote == 0 && !e.Pending && !e.FinishedPending && !e.Finished) _entries.Remove(Key(peerId, itemId));
         }
         Save();
+    }
+
+    /// <summary>
+    /// Marks every vote for <paramref name="peerId"/> as not delivered: its Ocean turned out to have no votes, so none of
+    /// them can have been counted (older versions of this PC dropped them). Returns how many were put back.
+    /// </summary>
+    public int Requeue(string peerId)
+    {
+        var prefix = peerId + "|";
+        var n = 0;
+        lock (_lock)
+            foreach (var (key, e) in _entries)
+            {
+                if (!key.StartsWith(prefix, StringComparison.Ordinal)) continue;
+                if (e.Vote != 0 && !e.Pending) { e.Pending = true; n++; }
+                if (e.Finished && !e.FinishedPending) { e.FinishedPending = true; n++; }
+            }
+        if (n > 0) Save();
+        return n;
     }
 
     /// <summary>What still has to reach <paramref name="peerId"/>.</summary>

@@ -207,7 +207,16 @@ public sealed class PeerService : IDisposable
             m.Groups[1].Value, st.Version is null ? "" : $" (was {st.Version})");
         st.Version = m.Groups[1].Value;
         Persist();
+        // it may just have been updated to an Ocean with votes: what was kept for it can go out now
+        if (KnowsVotes(peerId) == true && _myVotes.PendingFor(peerId).Count > 0) _ = DeliverPendingVotesAsync(peerId);
+        // an Ocean without votes can't have counted any: votes an older version of this PC gave up on wait for its update
+        if (KnowsVotes(peerId) == false && _myVotes.Requeue(peerId) is > 0 and var n)
+            _log.LogInformation("{Peer}: {Count} vote(s) kept until it is updated to an Ocean with votes", p?.Name ?? NodeIdentity.ShortId(peerId), n);
     }
+
+    /// <summary>Votes came with Ocean 1.3.2. True/false when the node's version is known, null otherwise.</summary>
+    private bool? KnowsVotes(string peerId)
+        => _state.TryGetValue(peerId, out var st) && st.Version is { } v && System.Version.TryParse(v, out var ver) ? ver >= new System.Version(1, 3, 2) : null;
 
     /// <summary>Everything this PC knows about one node, for the "Node info" window.</summary>
     public PeerInfoDto? Info(string peerId)
@@ -301,7 +310,7 @@ public sealed class PeerService : IDisposable
     public async Task<MyRatingDto> RateAsync(string peerId, string itemId, RateDto rate, CancellationToken ct)
     {
         _myVotes.Record(peerId, itemId, rate);
-        var totals = await SendRatingAsync(peerId, itemId, rate, ct);
+        var (outcome, totals) = await SendRatingAsync(peerId, itemId, rate, ct);
         if (totals is not null)
         {
             // keep my copy of its catalog in step until the owner's next version arrives
@@ -311,12 +320,42 @@ public sealed class PeerService : IDisposable
                 item.MyVote = _myVotes.VoteOn(peerId, itemId);
             }
         }
-        return new MyRatingDto { MyVote = _myVotes.VoteOn(peerId, itemId), Pending = totals is null, Totals = totals };
+        return new MyRatingDto
+        {
+            MyVote = _myVotes.VoteOn(peerId, itemId), Totals = totals,
+            Pending = outcome is VoteOutcome.Offline or VoteOutcome.Unreachable or VoteOutcome.Old or VoteOutcome.Locked,
+            Reason = outcome switch
+            {
+                VoteOutcome.Delivered => null,
+                VoteOutcome.Offline => "offline",
+                VoteOutcome.Unreachable => "unreachable",
+                VoteOutcome.Old => "old",
+                VoteOutcome.Locked => "locked",
+                VoteOutcome.Gone => "gone",
+                _ => "rejected",
+            },
+        };
     }
 
-    private async Task<RatingDto?> SendRatingAsync(string peerId, string itemId, RateDto rate, CancellationToken ct)
+    /// <summary>What became of a vote sent to the video's owner.</summary>
+    private enum VoteOutcome
     {
-        if (!_registry.TryGetOnline(peerId, out var peer)) return null;
+        Delivered,
+        /// <summary>Not online, or no answer: kept, sent when it is back.</summary>
+        Offline, Unreachable,
+        /// <summary>Its Ocean has no votes yet (before 1.3.2): kept, sent once it is updated.</summary>
+        Old,
+        /// <summary>No access to the video right now (approval expired or revoked): kept, sent once approved again.</summary>
+        Locked,
+        /// <summary>The video is no longer shared there, or the vote was refused as invalid: dropped.</summary>
+        Gone, Rejected,
+    }
+
+    private readonly ConcurrentDictionary<string, byte> _oldVoteLogged = new(StringComparer.Ordinal);
+
+    private async Task<(VoteOutcome Outcome, RatingDto? Totals)> SendRatingAsync(string peerId, string itemId, RateDto rate, CancellationToken ct)
+    {
+        if (!_registry.TryGetOnline(peerId, out var peer)) return (VoteOutcome.Offline, null);
         try
         {
             var req = _client.Build(peer, HttpMethod.Post, "/p/rate/" + Uri.EscapeDataString(itemId), GrantsFor(peerId));
@@ -324,20 +363,40 @@ public sealed class PeerService : IDisposable
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(15));
             using var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseContentRead, cts.Token);
-            if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Forbidden)
+            if (resp.StatusCode == HttpStatusCode.NotFound)
             {
-                _myVotes.Delivered(peerId, itemId, rate); // gone, locked, or an older Ocean that has no votes: nothing to deliver
-                return null;
+                // An Ocean before 1.3.2 has no votes and says "not found" to every vote; one with votes says it only for a
+                // video it no longer shares. Told apart by its version when known, else by whether it still lists the video.
+                var old = KnowsVotes(peerId) is { } knows ? !knows
+                    : Cached(peerId)?.Shares.Any(s => s.Items.Any(i => i.Id == itemId)) == true;
+                if (old)
+                {
+                    if (_oldVoteLogged.TryAdd(peerId, 0))
+                        _log.LogInformation("{Peer} runs an Ocean without votes (before 1.3.2); votes for it are kept until it is updated", peer.Name);
+                    return (VoteOutcome.Old, null);
+                }
+                _myVotes.Delivered(peerId, itemId, rate); // the video is gone: nothing left to vote on
+                return (VoteOutcome.Gone, null);
             }
-            if (!resp.IsSuccessStatusCode) return null;
+            if (resp.StatusCode == HttpStatusCode.Forbidden)
+            {
+                _log.LogInformation("{Peer} refused a vote for {Item}: no access to it right now; kept until approved again", peer.Name, itemId);
+                return (VoteOutcome.Locked, null);
+            }
+            if (resp.StatusCode == HttpStatusCode.BadRequest)
+            {
+                _myVotes.Delivered(peerId, itemId, rate); // refused as invalid: sending it again would not help
+                return (VoteOutcome.Rejected, null);
+            }
+            if (!resp.IsSuccessStatusCode) return (VoteOutcome.Unreachable, null);
             var totals = await resp.Content.ReadFromJsonAsync<RatingDto>(Json.Options, cts.Token);
             _myVotes.Delivered(peerId, itemId, rate);
-            return totals;
+            return (VoteOutcome.Delivered, totals);
         }
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException or System.Text.Json.JsonException)
         {
             _log.LogDebug("vote for {Item} on {Peer} not delivered yet: {Msg}", itemId, peer.Name, ex.Message);
-            return null;
+            return (VoteOutcome.Unreachable, null);
         }
     }
 
@@ -595,6 +654,7 @@ public sealed class PeerService : IDisposable
         var st = State(peerId);
         lock (st) st.Grants[lockId] = new GrantToken { Token = resp.Token, ExpiresAt = resp.ExpiresAt };
         Persist();
+        if (_myVotes.PendingFor(peerId).Count > 0) _ = DeliverPendingVotesAsync(peerId); // kept for lack of access
     }
 
     public void DropGrant(string peerId, string lockId)

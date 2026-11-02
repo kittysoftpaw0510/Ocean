@@ -294,7 +294,13 @@ the catalog like any other item field. Votes are counted by the owner's PC: `POS
 voter id (a second click replaces, 0 takes back) with the time of each vote. Totals go out in the catalog
 (`Up`, `Down`, `Finished`, `Score`); who voted never leaves the owner's PC. The voter's PC keeps its own votes in
 `my-votes.json` (annotated into cached catalogs as `MyVote`) and marks them pending while the owner is offline;
-they are delivered when the node comes back (`DeliverPendingVotesAsync` on Added/Online).
+they are delivered when the node comes back (`DeliverPendingVotesAsync` on Added/Online). The owner's answer decides
+what happens to a vote (`MyRatingDto.Reason`): counted; `offline`/`unreachable` (kept); `old`, a 404 from an Ocean
+before 1.3.2, told apart from a removed video by the node's known version or, unknown, by the video still being in
+its list (kept; sent when the node's version changes to one with votes); `locked`, a 403 (kept; sent when a new
+approval is stored); `gone` / `rejected` (dropped). When a node turns out to run an Ocean without votes, every vote
+for it goes back to waiting (`MyVotes.Requeue`), since none can have been counted. The owner writes `votes.json` 2 s
+after the last vote, and at once when the service stops.
 
 `Score = sum(vote * 0.5^(age / 30 days)) + 0.25 * sum(finished * 0.5^(age / 30 days))`: a like is worth 1, a
 dislike -1, watching to the end a quarter, all fading with a 30-day half-life so the top list follows what people

@@ -665,6 +665,27 @@ public partial class MainViewModel : ObservableObject
     /// Thumbs up/down on another node's video (vote: 1, -1, 0 = take it back; null = unchanged) and/or "watched it to
     /// the end". The service keeps my vote, sends it to the owner and brings back the new totals.
     /// </summary>
+    private readonly Dictionary<string, DateTime> _voteNoticeShown = new(StringComparer.Ordinal);
+
+    /// <summary>Why a vote didn't reach the owner yet (or at all); the same note for the same node at most every 10 minutes.</summary>
+    private void VoteNotice(PeerVm peer, string? reason)
+    {
+        if (reason is null) return;
+        var key = peer.Id + "|" + reason;
+        if (_voteNoticeShown.TryGetValue(key, out var last) && DateTime.UtcNow - last < TimeSpan.FromMinutes(10)) return;
+        _voteNoticeShown[key] = DateTime.UtcNow;
+        var (title, text, kind) = reason switch
+        {
+            "offline" => ("Vote saved", $"{peer.Label} is offline right now. Your vote is delivered when it's back.", "info"),
+            "unreachable" => ("Vote saved", $"{peer.Label} can't be reached right now. Your vote is delivered as soon as it can be.", "info"),
+            "old" => ("Vote saved", $"{peer.Label} runs an older Ocean without votes. Your vote is kept and delivered once {peer.Label} updates.", "info"),
+            "locked" => ("Vote saved", $"You don't have access to this video right now (the approval expired or was withdrawn). Your vote is sent once {peer.Label} lets you in again.", "warn"),
+            "gone" => ("Vote not counted", $"{peer.Label} doesn't share this video anymore.", "warn"),
+            _ => ("Vote not counted", $"{peer.Label} refused the vote.", "warn"),
+        };
+        Toast(title, text, kind);
+    }
+
     public async Task<bool> RateAsync(PeerVm peer, ItemVm item, int? vote, bool finished)
     {
         try
@@ -675,7 +696,7 @@ public partial class MainViewModel : ObservableObject
             if (_browse.TryGetValue(peer.Id, out var b)) b.ApplyRating(item.Id, r); // the same video on the node's page
             SearchVm.ApplyRating(item.Id, r);
             if (Player.Item is { } playing && playing.Id == item.Id && !ReferenceEquals(playing, item)) playing.ApplyRating(r);
-            if (vote is not null && r.Pending) Toast("Vote saved", $"{peer.Label} is offline right now; your vote is delivered when it's back.", "info");
+            if (vote is not null) VoteNotice(peer, r.Reason);
             ScheduleTopRefresh();
             return true;
         }

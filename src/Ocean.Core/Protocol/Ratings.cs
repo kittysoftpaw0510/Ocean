@@ -21,8 +21,15 @@ public sealed class RatingDto
 public sealed class MyRatingDto
 {
     public int MyVote { get; set; }
+    /// <summary>Kept on this PC and sent to the owner later (see <see cref="Reason"/>).</summary>
     public bool Pending { get; set; }
     public RatingDto? Totals { get; set; }
+    /// <summary>
+    /// Why the owner has not counted it (null when it has): offline | unreachable | old (its Ocean has no votes yet:
+    /// kept until it updates) | locked (no access right now: kept until approved again) | gone (the video is no longer
+    /// shared) | rejected.
+    /// </summary>
+    public string? Reason { get; set; }
 }
 
 public sealed class TagsDto
