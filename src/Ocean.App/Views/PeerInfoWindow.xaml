@@ -1,0 +1,62 @@
+<Window x:Class="Ocean.App.Views.PeerInfoWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Node info" Width="560" SizeToContent="Height" MaxHeight="720" ResizeMode="NoResize" WindowStartupLocation="CenterOwner"
+        Background="{StaticResource Bg1}" Foreground="{StaticResource Text}" FontFamily="{StaticResource UiFont}" ShowInTaskbar="False">
+    <Grid Margin="24,20,24,20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <StackPanel>
+            <TextBlock Text="{Binding Title}" Style="{StaticResource H2}" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding Subtitle}" Style="{StaticResource Muted}" Margin="0,2,0,0"/>
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="0,8,0,0">
+            <ItemsControl ItemsSource="{Binding Sections}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Margin="0,12,0,0">
+                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                            <Border BorderBrush="{StaticResource Border}" BorderThickness="1" CornerRadius="8" Background="{StaticResource Bg2}" Padding="12,4">
+                                <ItemsControl ItemsSource="{Binding Rows}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,4">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="120"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding Label}" Style="{StaticResource Dim}" VerticalAlignment="Center"/>
+                                                <TextBlock x:Name="Value" Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                                <Button Grid.Column="2" Style="{StaticResource BtnIcon}" Width="26" Height="26" FontSize="12" Content="&#xE8C8;" Margin="6,0,0,0"
+                                                        ToolTip="Copy" AutomationProperties.Name="Copy" Click="Copy_Click"
+                                                        Visibility="{Binding CanCopy, Converter={StaticResource BoolToVis}}"/>
+                                            </Grid>
+                                            <DataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding Warn}" Value="True">
+                                                    <Setter TargetName="Value" Property="Foreground" Value="{StaticResource Warn}"/>
+                                                </DataTrigger>
+                                            </DataTemplate.Triggers>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Border>
+                        </StackPanel>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <DockPanel Grid.Row="2" Margin="0,18,0,0">
+            <TextBlock x:Name="CopiedText" Text="Copied" Style="{StaticResource Muted}" VerticalAlignment="Center" Visibility="Collapsed"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="Copy all" Style="{StaticResource BtnGhost}" Click="CopyAll_Click" ToolTip="Copy everything above as text"/>
+                <Button Content="Close" Style="{StaticResource BtnPrimary}" Click="Close_Click" Margin="8,0,0,0" IsDefault="True" IsCancel="True" MinWidth="90"/>
+            </StackPanel>
+        </DockPanel>
+    </Grid>
+</Window>

@@ -220,7 +220,11 @@ and the requester polls `GET /p/access/{requestId}` every 2 s.
 ## Local API (HTTP 127.0.0.1:38470)
 
 Status, event stream, peers and their catalogs, unlocking, thumbnail/stream proxies, share CRUD and
-per-item policies and tags, votes, top list, search, pending requests and grants, downloads, settings, updates.
+per-item policies and tags, votes, top list, search, pending requests and grants, downloads, settings, updates,
+node info (`GET /api/peers/{id}/info`). A node's Ocean version is taken from the `Ocean/x.y.z` user agent of its
+own requests (every version sends it; each PC on a bridged path builds its own request, so it is always the
+connecting PC's) and from `CatalogDto.AppVersion`, kept in `peer-state` so it survives while the node is offline.
+Newer catalogs also carry `Os` (Windows edition and build).
 See `Api/LocalApi.cs`.
 
 ## Lighter copies for watching (`Ocean.Service.Media.LightCopies`)

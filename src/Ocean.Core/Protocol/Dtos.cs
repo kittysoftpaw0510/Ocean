@@ -23,6 +23,10 @@ public sealed class CatalogDto
     public string NodeName { get; set; } = "";
     public string UserName { get; set; } = "";
     public string Host { get; set; } = "";
+    /// <summary>The node's Ocean version (Ocean after 1.3.3; older nodes leave it out).</summary>
+    public string? AppVersion { get; set; }
+    /// <summary>The node's Windows edition, e.g. "Windows 11 Pro 24H2 (build 26100)" (Ocean after 1.3.3).</summary>
+    public string? Os { get; set; }
     public long Version { get; set; }
     public DateTimeOffset GeneratedAt { get; set; }
     public List<ShareDto> Shares { get; set; } = new();

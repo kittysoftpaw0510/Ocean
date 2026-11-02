@@ -163,6 +163,7 @@ builder.WebHost.ConfigureKestrel(k =>
 
 var app = builder.Build();
 var log = app.Services.GetRequiredService<ILogger<Program>>();
+var peerService = app.Services.GetRequiredService<PeerService>();
 LanOnly.Log = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("LanOnly");
 foreach (var w in identityWarnings) log.LogWarning("{Warning}", w);
 // Stopping (Windows stopping the service, an update): requests that never end by themselves (the app's event feed,
@@ -192,6 +193,7 @@ app.Use(async (ctx, next) =>
         {
             ctx.Response.StatusCode = 403; return;
         }
+        var connectedId = clientId; // who opened this connection (its own "Ocean/x.y.z" is on the request)
         // Reverse connection: our own relay worker replays a request of node X on X's behalf. Accepted only when
         // the caller holds OUR key and calls over loopback; every other check (secret proof, grants) still applies to X.
         var onBehalf = ctx.Request.Headers["X-Ocean-OnBehalf"].ToString();
@@ -210,6 +212,8 @@ app.Use(async (ctx, next) =>
             await ctx.Response.WriteAsJsonAsync(new Ocean.Core.Protocol.ErrorDto { Error = "realm", Message = "Different shared secret" }, Json.Options);
             return;
         }
+        // Each PC on the way builds its own request, so the version on it is the connecting PC's (never our own relay).
+        if (connectedId != identity.NodeId) peerService.NoteVersion(connectedId, ctx.Request.Headers.UserAgent.ToString());
         // Carried by other nodes (Via): the caller is a relay; the origin signed the request. Checked by every node on
         // the way; the destination serves it as the origin's (its grants, its download slots).
         if (ctx.Request.Headers.ContainsKey(Ocean.Core.Protocol.Via.OriginHeader))

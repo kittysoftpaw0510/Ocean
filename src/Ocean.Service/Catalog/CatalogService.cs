@@ -600,6 +600,7 @@ public sealed class CatalogService : IDisposable
         var cat = new CatalogDto
         {
             NodeId = nodeId, NodeName = nodeName, UserName = userName, Host = Environment.MachineName,
+            AppVersion = OceanDefaults.AppVersion, Os = Ocean.Service.State.SystemInfo.Windows,
             Version = Version, GeneratedAt = DateTimeOffset.UtcNow, Cast = CastLookup?.Invoke(),
         };
         if (paused) return cat;

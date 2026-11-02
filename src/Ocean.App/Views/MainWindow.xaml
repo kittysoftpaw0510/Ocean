@@ -41,6 +41,9 @@
         <!-- right-click menu of a node in the sidebar (PlacementTarget = the row, its Tag = MainViewModel) -->
         <ContextMenu x:Key="PeerMenu" x:Shared="False">
             <MenuItem Header="Open" Command="{Binding PlacementTarget.Tag.SelectPeerCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"/>
+            <MenuItem Header="Node info…" Command="{Binding PlacementTarget.Tag.ShowPeerInfoCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}">
+                <MenuItem.Icon><TextBlock Text="&#xE946;" Style="{StaticResource Icon}" FontSize="12"/></MenuItem.Icon>
+            </MenuItem>
             <MenuItem Header="Refresh" Command="{Binding PlacementTarget.Tag.RefreshNetworkCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                       Visibility="{Binding Online, Converter={StaticResource BoolToVis}}"/>
             <MenuItem Header="Remove from the list" Command="{Binding PlacementTarget.Tag.RemovePeerCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"

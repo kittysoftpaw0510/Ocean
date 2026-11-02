@@ -20,6 +20,9 @@ public sealed class PeerLocalState
 {
     public string Name { get; set; } = "";
     public DateTimeOffset? LastVisitedAt { get; set; }
+    /// <summary>Its Ocean version, as last seen (its requests to us, or its video list), kept while it is offline.</summary>
+    public string? Version { get; set; }
+    public DateTimeOffset? VersionSeenAt { get; set; }
     public Dictionary<string, GrantToken> Grants { get; set; } = new();
 }
 
@@ -185,6 +188,55 @@ public sealed class PeerService : IDisposable
     }
 
     private PeerLocalState State(string peerId) => _state.GetOrAdd(peerId, _ => new PeerLocalState());
+
+    private static readonly System.Text.RegularExpressions.Regex VersionPattern = new(@"^(?:Ocean/)?(\d+\.\d+\.\d+)", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>
+    /// A node's Ocean version: every Ocean sends "Ocean/x.y.z" with its requests (older ones too), and newer ones put
+    /// it in their video list. Called for every request, so it only writes to disk when the version changes.
+    /// </summary>
+    public void NoteVersion(string peerId, string? versionOrUserAgent)
+    {
+        if (string.IsNullOrEmpty(versionOrUserAgent) || peerId.Length == 0) return;
+        var m = VersionPattern.Match(versionOrUserAgent.Trim());
+        if (!m.Success) return;
+        var st = State(peerId);
+        st.VersionSeenAt = DateTimeOffset.UtcNow;
+        if (st.Version == m.Groups[1].Value) return;
+        _log.LogInformation("{Peer} runs Ocean {Version}{Was}", _registry.TryGet(peerId, out var p) ? p.Name : NodeIdentity.ShortId(peerId),
+            m.Groups[1].Value, st.Version is null ? "" : $" (was {st.Version})");
+        st.Version = m.Groups[1].Value;
+        Persist();
+    }
+
+    /// <summary>Everything this PC knows about one node, for the "Node info" window.</summary>
+    public PeerInfoDto? Info(string peerId)
+    {
+        if (!_registry.TryGet(peerId, out var p)) return null;
+        _catalogs.TryGetValue(peerId, out var cat);
+        _state.TryGetValue(peerId, out var st);
+        var preferred = p.Bridged ? null : p.DisplayAddress;
+        var info = new PeerInfoDto
+        {
+            Id = p.Id, Name = p.Name, User = p.User, Host = p.Host,
+            Online = p.Online, FirstSeen = p.FirstSeen, LastSeen = p.LastSeen, OfflineSince = p.OfflineSince,
+            AppVersion = st?.Version ?? cat?.AppVersion, AppVersionSeenAt = st?.VersionSeenAt, MyVersion = OceanDefaults.AppVersion,
+            Os = cat?.Os,
+            Connection = p.Bridged ? "bridge" : p.PreferRelay ? "reverse" : "direct",
+            Via = p.Via, Bridges = p.LiveBridges().Select(b => b.Name).ToList(),
+            Address = preferred is null || preferred.Equals(IPAddress.None) ? null : preferred.ToString(), Port = p.Port,
+            Addresses = p.Addresses.OrderByDescending(kv => kv.Value).Select(kv => new PeerAddressDto
+            {
+                Address = kv.Key.ToString(), LastHeard = kv.Value, Preferred = kv.Key.Equals(preferred), Local = Net.LocalNetworks.IsLan(kv.Key),
+            }).ToList(),
+            CatalogLoaded = cat is not null, CatalogAt = cat?.GeneratedAt,
+            ShareCount = cat?.Shares.Count ?? p.ShareCount,
+            ItemCount = cat?.Shares.Sum(s => s.ItemCount) ?? 0,
+            TotalBytes = cat?.Shares.Sum(s => s.TotalBytes) ?? 0,
+            CastItem = p.Online ? cat?.Cast?.ItemName : null,
+        };
+        return info;
+    }
 
     // ------------------------------------------------------------------ peers
 
@@ -408,6 +460,7 @@ public sealed class PeerService : IDisposable
             Annotate(peerId, cat);
             _catalogs[peerId] = cat;
             SaveSnapshot(peer, cat);
+            NoteVersion(peerId, cat.AppVersion);
             if (previous?.Cast?.SessionId != cat.Cast?.SessionId)
                 _events.Publish("peerCast", new { peerId, peerName = DisplayNames.Of(cat.UserName, cat.NodeName), cast = cat.Cast });
             var itemCount = cat.Shares.Sum(s => s.ItemCount);

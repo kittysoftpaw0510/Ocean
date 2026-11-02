@@ -92,6 +92,8 @@ public partial class MainWindow : Window, IDialogs
     public Task<string?> AskPasswordAsync(string title, string subtitle)
         => Task.FromResult(PasswordWindow.Show(Owner_, title, subtitle));
 
+    public void ShowPeerInfo(PeerInfoViewModel info) => PeerInfoWindow.Show(Owner_, info);
+
     public Task<string?> NewPasswordAsync(string title, string subtitle)
         => Task.FromResult(PasswordWindow.Show(Owner_, title, subtitle, "Set password", confirm: true));
 

@@ -24,6 +24,8 @@ public interface IDialogs
     string? PickFolder(string title);
     string[]? PickFiles(string title);
     void ShowError(string title, string message);
+    /// <summary>The "Node info" window for one node.</summary>
+    void ShowPeerInfo(PeerInfoViewModel info);
 }
 
 public partial class PeerVm : ObservableObject

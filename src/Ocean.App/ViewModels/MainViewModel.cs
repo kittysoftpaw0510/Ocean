@@ -516,6 +516,21 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty] private bool _isRefreshingNetwork;
 
+    /// <summary>"Node info": who it is, its Ocean and Windows versions, how this PC reaches it, what it shares.</summary>
+    [RelayCommand]
+    private async Task ShowPeerInfo(PeerVm? peer)
+    {
+        if (peer is null) return;
+        try
+        {
+            var info = await Api.GetAsync<PeerInfoDto>($"/api/peers/{peer.Id}/info");
+            if (info is null) return;
+            Dialogs.ShowPeerInfo(new PeerInfoViewModel(info));
+        }
+        catch (ApiException ex) when (ex.StatusCode == 404) { Toast("Not in the list anymore", $"{peer.Label} was removed from the list.", "info"); }
+        catch (Exception ex) { Error("Could not show the node's details", ex); }
+    }
+
     /// <summary>Removes an offline node (and its remembered shares) from the list. It reappears if it comes back online.</summary>
     [RelayCommand]
     public async Task RemovePeer(PeerVm? peer)
