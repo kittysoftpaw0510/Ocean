@@ -91,7 +91,7 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <Button Command="{Binding DataContext.PlayNetCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Cursor="Hand" Focusable="False" ToolTip="Play">
+                            <Button Command="{Binding DataContext.PlayNetCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Cursor="Hand" Focusable="False" ToolTip="{Binding PlayTip}">
                                 <Button.Template>
                                     <ControlTemplate TargetType="Button">
                                         <Grid Width="112" Height="63">
@@ -99,9 +99,17 @@
                                                 <Grid>
                                                     <TextBlock Text="&#xE714;" Style="{StaticResource Icon}" FontSize="20" Foreground="{StaticResource TextDim}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                                                     <Image Source="{Binding Item.Thumb}" Stretch="UniformToFill"/>
+                                                    <!-- locked for me: a lock instead of the picture (the owner doesn't send it) -->
+                                                    <Border Background="#CC000000" Visibility="{Binding IsLocked, Converter={StaticResource BoolToVis}}">
+                                                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                                            <TextBlock Text="&#xE72E;" Style="{StaticResource Icon}" FontSize="16" Foreground="{StaticResource Warn}" HorizontalAlignment="Center"/>
+                                                            <TextBlock Text="{Binding LockLabel}" FontSize="10" Foreground="{StaticResource Warn}" Margin="0,2,0,0" HorizontalAlignment="Center"/>
+                                                        </StackPanel>
+                                                    </Border>
                                                 </Grid>
                                             </Border>
-                                            <Border x:Name="PlayBadge" Width="30" Height="30" CornerRadius="15" Background="#B0000000" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0">
+                                            <Border x:Name="PlayBadge" Width="30" Height="30" CornerRadius="15" Background="#B0000000" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0"
+                                                    Visibility="{Binding IsLocked, Converter={StaticResource InvBoolToVis}}">
                                                 <TextBlock Text="&#xE768;" Style="{StaticResource Icon}" FontSize="12" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="2,0,0,0"/>
                                             </Border>
                                         </Grid>
@@ -131,7 +139,7 @@
                                         Command="{Binding DataContext.VoteNetDownCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                                 <Button Style="{StaticResource BtnIcon}" Content="&#xE896;" ToolTip="Download" Visibility="{Binding CanDownload, Converter={StaticResource BoolToVis}}"
                                         Command="{Binding DataContext.DownloadNetCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
-                                <Button Style="{StaticResource BtnIcon}" Content="&#xE768;" ToolTip="Play"
+                                <Button Style="{StaticResource BtnIcon}" Content="{Binding PlayGlyph}" ToolTip="{Binding PlayTip}"
                                         Command="{Binding DataContext.PlayNetCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
                             </StackPanel>
                         </Grid>

@@ -298,9 +298,19 @@ public sealed partial class NetItemVm : ObservableObject
         }
     }
     public string Tooltip => Item.Tooltip;
-    public string ActionText => Dto.Mine ? "Play" : "Watch";
+    public string ActionText => Dto.Mine ? "Play" : IsLocked ? "Unlock" : "Watch";
+    /// <summary>
+    /// Locked for me (password or the owner's approval): no thumbnail (the owner never sends it to whoever can't open
+    /// the video), "Unlock" instead of "Watch", no votes (the owner would refuse them). Unlocking runs the usual
+    /// password / approval request, then plays.
+    /// </summary>
+    public bool IsLocked => !Dto.Mine && Item.IsLocked;
+    /// <summary>Short, under the lock in place of the thumbnail.</summary>
+    public string LockLabel => Item.Dto.Lock?.Mode == AccessMode.Password ? "Password" : "Approval";
+    public string PlayTip => IsLocked ? Item.LockText + ": click to unlock" : "Play";
+    public string PlayGlyph => IsLocked ? "\uE72E" : "\uE768";
     // my vote, mirrored from the item for the buttons on the row
-    public bool CanVote => Item.CanVote;
+    public bool CanVote => Item.CanVote && !IsLocked;
     public bool IsUp => Item.IsUp;
     public bool IsDown => Item.IsDown;
     public string LikeMenu => Item.LikeMenu;

@@ -732,6 +732,8 @@ public sealed class PeerService : IDisposable
     public Task<string?> GetThumbPathAsync(string peerId, string itemId, CancellationToken ct)
     {
         var item = FindItem(peerId, itemId);
+        // locked for me (never unlocked, or the approval was withdrawn since): not even a thumbnail fetched earlier
+        if (item is { Lock: not null, Unlocked: false }) return Task.FromResult<string?>(null);
         var key = $"{itemId}-{item?.ModifiedAt.UtcTicks ?? 0}";
         var dir = Path.Combine(_thumbDir, peerId[..Math.Min(16, peerId.Length)]);
         var jpeg = Path.Combine(dir, key + ".jpg");
