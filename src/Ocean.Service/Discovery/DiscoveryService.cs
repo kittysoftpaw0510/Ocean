@@ -65,6 +65,8 @@ public sealed class DiscoveryService : BackgroundService
     private long _lastNoLanLog = -600_000;
     /// <summary>Quiet only after the startup questions had time to be answered (older nodes would be missed before).</summary>
     private readonly long _started = Environment.TickCount64;
+    /// <summary>The rhythm is written to the log once the startup questions are answered, then at every change.</summary>
+    private bool _rhythmLogged;
 
     public DiscoveryService(ConfigStore config, NodeIdentity identity, PeerRegistry registry, CatalogService catalog,
         EventHub events, Net.RelayHub relay, Net.RelayWorker relayWorker, Net.MeshService mesh, Peers.PeerClient client,
@@ -177,13 +179,19 @@ public sealed class DiscoveryService : BackgroundService
         while (!ct.IsCancellationRequested)
         {
             var quiet = !OlderNodesAround(out var older) && Environment.TickCount64 - _started > 20_000;
-            if (quiet != _quiet)
+            var startupOver = Environment.TickCount64 - _started > 20_000;
+            if (quiet != _quiet || (startupOver && !_rhythmLogged))
             {
+                if (quiet != _quiet) Interlocked.Exchange(ref _pendingEvent, 1); // tell the new rhythm at once
                 _quiet = quiet;
-                if (quiet) _log.LogInformation("discovery: quiet, a heartbeat every {Every} (every node heard here is quiet-capable)",
-                    QuietEvery.TotalMinutes >= 1 ? $"{QuietEvery.TotalMinutes:0} min" : $"{QuietEvery.TotalSeconds:0} s");
-                else _log.LogInformation("discovery: a hello every 4 s while an older Ocean is heard here ({Names})", older);
-                Interlocked.Exchange(ref _pendingEvent, 1); // tell the new rhythm at once
+                if (startupOver)
+                {
+                    _rhythmLogged = true;
+                    if (quiet) _log.LogInformation("discovery: quiet, a heartbeat every {Every} (every node heard here is quiet-capable)",
+                        QuietEvery.TotalMinutes >= 1 ? $"{QuietEvery.TotalMinutes:0} min" : $"{QuietEvery.TotalSeconds:0} s");
+                    else _log.LogInformation("discovery: a hello every 4 s while {Count} node(s) with an older Ocean are heard here ({Names})",
+                        _registry.Snapshot().Count(p => p.Online && p.HeardDirectly && p.Hb == 0), older);
+                }
             }
             var every = _quiet ? QuietEvery : LoudEvery;
             var change = Interlocked.Exchange(ref _pendingEvent, 0) == 1;
