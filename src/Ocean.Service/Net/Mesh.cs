@@ -13,8 +13,9 @@ using Ocean.Service.State;
 namespace Ocean.Service.Net;
 
 /// <summary>
-/// Learns about nodes we have no network path to: every few seconds each node we hear directly is asked which nodes
-/// it hears (<c>/p/neighbors</c>), and those we can't hear ourselves are listed as reached through it. Every node
+/// Learns about nodes we have no network path to: every 30 s each node we hear directly is asked which nodes it hears
+/// (<c>/p/neighbors</c>), and those we can't hear ourselves are listed as reached through it. A node that just came
+/// online is asked at once, so routes appear quickly; between asks a route counts for 75 s (one missed ask is fine). Every node
 /// that offers one is kept as a bridge to it, so requests can spread over them and move when one fails.
 /// <para>
 /// The answer carries a revision: when nothing changed the node answers 304 with only its current load, so the
@@ -45,6 +46,8 @@ public sealed class MeshService : BackgroundService
         _registry.Changed += (p, change) =>
         {
             if (change is PeerChange.Offline or PeerChange.Removed) { _lastRev.TryRemove(p.Id, out _); _lastNodes.TryRemove(p.Id, out _); }
+            // a node we hear that just came online is asked at once (the loop looks every second), not up to 30 s later
+            if (!p.Bridged && change is PeerChange.Added or PeerChange.Online) _lastAsk.TryRemove(p.Id, out _);
             if (p.Bridged && change is PeerChange.Added or PeerChange.Online)
                 _log.LogInformation("peer {State}: {Name} ({User}@{Host}), reached through {Via} (no network path from here)",
                     change == PeerChange.Added ? "online" : "back online", p.Name, p.User, p.Host, p.Via);
@@ -84,8 +87,11 @@ public sealed class MeshService : BackgroundService
         return dto;
     }
 
-    /// <summary>Each node we hear is asked every 5 s; on a crowded network (many nodes) up to every 10 s.</summary>
-    private static TimeSpan PollInterval(int direct) => TimeSpan.FromSeconds(Math.Clamp(direct / 4.0, 5, 10));
+    /// <summary>
+    /// Each node we hear is asked every 30 s (it used to be 5-10 s: with two dozen PCs that was a few requests a second
+    /// for lists that rarely change). <see cref="PeerRegistry.BridgeFresh"/> must stay well above it.
+    /// </summary>
+    private static TimeSpan PollInterval(int direct) => TimeSpan.FromSeconds(30);
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {

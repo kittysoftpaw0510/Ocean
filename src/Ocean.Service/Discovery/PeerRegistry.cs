@@ -207,10 +207,13 @@ public sealed class PeerRegistry
 
     /// <summary>A node's own beacons count as a direct route for this long (the discovery MaxAge).</summary>
     public static readonly TimeSpan DirectFresh = TimeSpan.FromSeconds(16);
-    /// <summary>A bridge that hasn't listed the node for this long is no longer used for it.</summary>
-    public static readonly TimeSpan BridgeFresh = TimeSpan.FromSeconds(20);
+    /// <summary>
+    /// A bridge that hasn't listed the node for this long is no longer used for it. Bridges are asked every 30 s
+    /// (MeshService), so this tolerates one missed answer. A bridge that goes offline drops its routes at once.
+    /// </summary>
+    public static readonly TimeSpan BridgeFresh = TimeSpan.FromSeconds(75);
     /// <summary>A bridged node goes offline when no bridge has listed it for this long.</summary>
-    public static readonly TimeSpan BridgedSilence = TimeSpan.FromSeconds(25);
+    public static readonly TimeSpan BridgedSilence = TimeSpan.FromSeconds(80);
 
     /// <summary>
     /// <paramref name="via"/> reports that it hears <paramref name="n"/>: remember it as one way to reach that node.

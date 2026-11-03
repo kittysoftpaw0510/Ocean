@@ -74,7 +74,9 @@ fail. A `reply` is never answered, whatever the node wants: until 1.3.7 a node a
 (reverse connection) answered all its beacons, replies included, so two nodes that each wanted the other to connect
 back answered each other's replies without end (about 1,200 packets a second, 20 Mbps, on a network of 24 PCs). Such
 a node now gets an answer to each `hello` at most once a second; others at most every 8 s. Broadcasts are at most
-one a second however many changes ask for one. Older nodes treat `reply` like `hello`. A `bye` is sent on shutdown; nodes silent for 16 s go
+one a second however many changes ask for one. Bridge lists (`/p/neighbors`) are asked from each directly heard node
+every 30 s (it was 5-10 s), and at once when such a node comes online; a route counts for 75 s and a bridged node
+stays online 80 s without news, so one missed answer is fine; a bridge going offline drops its routes at once. Older nodes treat `reply` like `hello`. A `bye` is sent on shutdown; nodes silent for 16 s go
 offline (logged), and stay listed as offline for a while. The beacon carries
 the catalog version and share count, so browsing nodes refetch a catalog only when it changed.
 
