@@ -74,7 +74,18 @@ public partial class PlayerViewModel : ObservableObject
     [ObservableProperty] private int _castViewers;
     public bool IsCastHost => CastRole == CastRoles.Host;
     public bool IsCastFollower => CastRole == CastRoles.Follower;
-    partial void OnCastRoleChanged(CastRoles value) { OnPropertyChanged(nameof(IsCastHost)); OnPropertyChanged(nameof(IsCastFollower)); UpdateCastBanner(); }
+    /// <summary>
+    /// Speed and A-B repeat belong to one player alone: in a multicast everyone watches the same moment at normal speed
+    /// (the multicast carries the host's position, not a speed), so neither the host nor a viewer can change them.
+    /// </summary>
+    public bool CanChangePace => CastRole == CastRoles.None;
+    public const string PaceLockedNote = "Normal speed, no repeat during a multicast";
+    partial void OnCastRoleChanged(CastRoles value)
+    {
+        if (value != CastRoles.None) { Speed = 1.0; ClearLoop(); }
+        OnPropertyChanged(nameof(IsCastHost)); OnPropertyChanged(nameof(IsCastFollower)); OnPropertyChanged(nameof(CanChangePace));
+        UpdateCastBanner();
+    }
     private int _castMulticast;
     private bool _multicastWorking = true;
     private string _hostName = "";
@@ -97,11 +108,23 @@ public partial class PlayerViewModel : ObservableObject
         UpdateCastBanner();
     }
 
-    public void BeginFollow(CastViewDto v) { CastRole = CastRoles.Follower; ControlsLocked = true; _hostName = v.HostName; FollowUpdate(v); }
+    /// <summary>The multicast being followed: to join it again when this PC's service came back (an update, a restart).</summary>
+    public string? FollowPeerId { get; private set; }
+    public string? FollowSessionId { get; private set; }
+
+    public void BeginFollow(CastViewDto v)
+    {
+        FollowPeerId = v.PeerId; FollowSessionId = v.SessionId;
+        CastRole = CastRoles.Follower; ControlsLocked = true; _hostName = v.HostName;
+        FollowUpdate(v);
+    }
 
     public void FollowUpdate(CastViewDto v)
     {
         if (CastRole != CastRoles.Follower) return;
+        // News about another session is not about this one: "left the previous multicast" can arrive just after
+        // joining this one, and would otherwise end it at once ("... ended the multicast").
+        if (!string.Equals(v.SessionId, FollowSessionId, StringComparison.Ordinal)) return;
         if (v.Ended || !v.Active)
         {
             EndCast();
@@ -149,16 +172,16 @@ public partial class PlayerViewModel : ObservableObject
     }
 
     [RelayCommand] private Task StopCast() => _main.StopCastAsync();
-    [RelayCommand] private Task LeaveCast() => _main.LeaveCastAsync();
+    [RelayCommand] private Task LeaveCast() => _main.LeaveCastAsync("Leave");
 
     /// <summary>
     /// Opening another video while in a multicast leaves it: a follower leaves, a host lets it run on without the
     /// player (it ends when the video does; My shares can stop it or bring the player back).
     /// </summary>
-    private void LeaveCastForNewVideo(bool keepHost = false)
+    private void LeaveCastForNewVideo(bool keepHost = false, string why = "another video was opened")
     {
         if (CastRole == CastRoles.Host) { if (keepHost) return; _ = _main.DetachCastAsync(notify: true); }
-        else if (CastRole == CastRoles.Follower) _ = _main.LeaveCastAsync();
+        else if (CastRole == CastRoles.Follower) _ = _main.LeaveCastAsync(why);
         EndCast();
     }
 
@@ -183,7 +206,7 @@ public partial class PlayerViewModel : ObservableObject
     public void CloseForHide()
     {
         if (!IsOpen) return;
-        LeaveCastForNewVideo();
+        LeaveCastForNewVideo(why: "the window was closed to the tray");
         EndLight();
         IsOpen = false; IsFullscreen = false; IsPlaying = false;
         Url = null; Item = null;
@@ -367,6 +390,7 @@ public partial class PlayerViewModel : ObservableObject
     /// <summary>Returns a short message describing the new state (shown over the video).</summary>
     public string CycleLoop(double position)
     {
+        if (!CanChangePace) return PaceLockedNote;
         if (LoopA is null) return SetLoopA(position);
         if (LoopB is null) return SetLoopB(position);
         ClearLoop();
@@ -375,6 +399,7 @@ public partial class PlayerViewModel : ObservableObject
 
     public string SetLoopA(double position)
     {
+        if (!CanChangePace) return PaceLockedNote;
         LoopA = Math.Max(0, position);
         if (LoopB is { } b && b - LoopA < MinLoop) LoopB = null;
         return LoopB is null ? $"A  {T(LoopA.Value)}" : $"Repeat {T(LoopA.Value)} to {T(LoopB!.Value)}";
@@ -382,6 +407,7 @@ public partial class PlayerViewModel : ObservableObject
 
     public string SetLoopB(double position)
     {
+        if (!CanChangePace) return PaceLockedNote;
         var a = LoopA ?? 0;
         var b = position;
         if (b < a) (a, b) = (b, a);                       // pressed B before A: swap
@@ -421,11 +447,14 @@ public partial class PlayerViewModel : ObservableObject
             Speed = Math.Clamp(s, Speeds[0], Speeds[^1]);
     }
 
-    public void StepSpeed(int direction)
+    /// <summary>False (nothing changes) during a multicast.</summary>
+    public bool StepSpeed(int direction)
     {
+        if (!CanChangePace) return false;
         var i = Array.FindIndex(Speeds, s => Math.Abs(s - Speed) < 0.001);
         if (i < 0) i = Array.IndexOf(Speeds, 1.0);
         Speed = Speeds[Math.Clamp(i + direction, 0, Speeds.Length - 1)];
+        return true;
     }
 
     public string TimeText => $"{Core.Format.Duration(TimeSpan.FromSeconds(PositionSeconds))} / {Core.Format.Duration(TimeSpan.FromSeconds(DurationSeconds))}";
@@ -505,7 +534,7 @@ public partial class PlayerViewModel : ObservableObject
     private async Task Close()
     {
         if (!await SettleCastForCloseAsync()) return;
-        LeaveCastForNewVideo();
+        LeaveCastForNewVideo(why: "the player was closed");
         EndLight();
         IsOpen = false; IsFullscreen = false; IsPlaying = false;
         Url = null; Item = null;

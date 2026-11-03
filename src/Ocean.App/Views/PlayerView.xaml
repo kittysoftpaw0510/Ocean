@@ -126,7 +126,7 @@
                         <Button Style="{StaticResource BtnIcon}" Content="&#xEB9D;" ToolTip="Forward 10 s (→)" Click="Fwd_Click"/>
                         <TextBlock Text="{Binding TimeText}" VerticalAlignment="Center" Margin="12,0,0,0" FontFamily="Consolas" FontSize="13"/>
                         <!-- A-B repeat: set A, set B (loop), clear -->
-                        <Button x:Name="LoopButton" Click="Loop_Click" Margin="14,0,0,0" Padding="10,4" AutomationProperties.Name="A-B repeat"
+                        <Button x:Name="LoopButton" Click="Loop_Click" Margin="14,0,0,0" Padding="10,4" AutomationProperties.Name="A-B repeat" IsEnabled="{Binding CanChangePace}"
                                 ToolTip="A-B repeat: click to set A, again to set B and loop, again to stop.  Keys: [ set A,  ] set B,  \ clear">
                             <Button.Style>
                                 <Style TargetType="Button" BasedOn="{StaticResource BtnGhost}">
@@ -155,7 +155,7 @@
                             <TextBlock Text="{Binding VariantButtonText}" FontSize="13" Foreground="White"/>
                         </Button>
                         <!-- playback speed -->
-                        <Button x:Name="SpeedButton" Style="{StaticResource BtnGhost}" Padding="10,4" Margin="0,0,8,0" Click="Speed_Click"
+                        <Button x:Name="SpeedButton" Style="{StaticResource BtnGhost}" Padding="10,4" Margin="0,0,8,0" Click="Speed_Click" IsEnabled="{Binding CanChangePace}"
                                 ToolTip="Playback speed (Shift+&gt; faster, Shift+&lt; slower)" AutomationProperties.Name="Playback speed">
                             <TextBlock Text="{Binding SpeedText}" FontFamily="Consolas" FontSize="13" Foreground="White"/>
                         </Button>

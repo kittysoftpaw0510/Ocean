@@ -281,6 +281,16 @@ See `Api/LocalApi.cs`.
   (`MyCastDto.Unattended` false); the app opens the player at the session's current position for that
   (`ReopenCastAsync`). Ending always checks the session is still the current one, so an old sender thread never
   stops a newer session.
+- **Network changes.** When the PC's networks change (Wi-Fi reconnecting, a new address, a VPN switched on or off)
+  the host opens its send sockets again on the adapters there are now (and every 10 s while there is none), and a
+  viewer drops and joins the group again on the adapters the host is reached through; a viewer whose heartbeats are
+  answered but who has had no packet for 20 s joins again too (at most once a minute).
+- **Service restarts under a viewer.** The app's player keeps the followed session (`FollowPeerId`/`FollowSessionId`);
+  when the app reconnects to a service that no longer receives it, it joins again if the host still sends it, else it
+  says the multicast ended. Events about another session (a late "left the previous one" after joining a new one) are
+  ignored by the follower. Every leave is logged with its reason (Leave, player closed, another video, tray).
+- **Pace.** Speed and A-B repeat are off for host and viewers during a multicast (the session carries a position, not
+  a speed); starting or joining one sets the speed back to normal and clears the repeat.
 - **Player.** Host: the view posts its position every second and at once on play/pause/seek. Follower: the view
   keeps the player at the host's position carried forward on this PC's clock, 1.5 s behind, seeking when more than
   2.5 s off and pausing with the host; controls are locked ("The host controls playback"); Leave or the host's end

@@ -29,6 +29,11 @@ public sealed class CastReceiver : IDisposable
         public ItemDto Item = new();
         public StreamCache.ExternalFeed? Feed;
         public Socket? Socket;
+        public IPAddress Group = IPAddress.None;
+        /// <summary>The local adapter addresses the group is joined on (dropped and joined again after a network change).</summary>
+        public readonly List<IPAddress> Joined = new();
+        public readonly object JoinLock = new();
+        public DateTime LastListen;
         public Thread? Thread;
         public readonly CancellationTokenSource Cts = new();
         public CastStateDto State = new();
@@ -56,6 +61,14 @@ public sealed class CastReceiver : IDisposable
     public CastReceiver(PeerService peers, PeerClient client, PeerRegistry registry, StreamCache cache, EventHub events, ILogger<CastReceiver> log)
     {
         _peers = peers; _client = client; _registry = registry; _cache = cache; _events = events; _log = log;
+        // Wi-Fi reconnecting, a new address, a VPN switched on or off: the group membership may be gone with the old
+        // adapter state, and nothing would arrive by multicast again for the rest of the session.
+        Net.LocalNetworks.Changed += () =>
+        {
+            View? v;
+            lock (_lock) v = _v;
+            if (v is { Ended: false, Socket: not null }) Listen(v, "the network changed");
+        };
     }
 
     public async Task<CastViewDto> JoinAsync(string peerId, string sessionId, CancellationToken ct)
@@ -88,19 +101,9 @@ public sealed class CastReceiver : IDisposable
             sock.Bind(new IPEndPoint(IPAddress.Any, join.Port));
             sock.ReceiveTimeout = 1000;
             sock.ReceiveBufferSize = 4 * 1024 * 1024;
-            var group = IPAddress.Parse(join.Group);
-            var joined = 0;
-            // listen on the real network adapter the host is reached through (never a VPN or virtual adapter)
-            var hostAddrs = (peer.Preferred is { } pref ? new[] { pref } : Array.Empty<IPAddress>()).Concat(peer.Addresses.Keys).Append(peer.Address);
-            var adapters = Net.LocalNetworks.MulticastAddresses(hostAddrs);
-            foreach (var (addr, adapter) in adapters)
-            {
-                try { sock.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.AddMembership, new MulticastOption(group, addr)); joined++; }
-                catch (Exception ex) { _log.LogDebug("multicast: can't listen on {Adapter} ({Addr}): {Msg}", adapter, addr, ex.Message); }
-            }
-            _log.LogInformation("multicast: listening on {Adapters}", joined == 0 ? "no adapter" : string.Join(", ", adapters.Select(a => $"{a.Adapter} ({a.Address})")));
-            if (joined == 0) _log.LogWarning("multicast: no network adapter to listen on; everything comes directly from {Host}", v.HostName);
+            v.Group = IPAddress.Parse(join.Group);
             v.Socket = sock;
+            Listen(v, null);
         }
         catch (Exception ex) { _log.LogWarning("multicast: can't listen ({Msg}); everything comes directly from {Host}", ex.Message, v.HostName); }
         lock (_lock) _v = v;
@@ -110,6 +113,37 @@ public sealed class CastReceiver : IDisposable
         _log.LogInformation("multicast: joined {Name} from {Host}", join.Name, v.HostName);
         Publish(v, force: true);
         return Status()!;
+    }
+
+    /// <summary>
+    /// Joins the group on the real network adapters the host is reached through (never a VPN or virtual adapter),
+    /// dropping the earlier memberships first. <paramref name="again"/>: why it is done again (logged), null the first time.
+    /// </summary>
+    private void Listen(View v, string? again)
+    {
+        if (v.Socket is not { } sock) return;
+        lock (v.JoinLock)
+        {
+            v.LastListen = DateTime.UtcNow;
+            var before = v.Joined.ToList();
+            foreach (var addr in before)
+                try { sock.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.DropMembership, new MulticastOption(v.Group, addr)); } catch { }
+            v.Joined.Clear();
+            var hostAddrs = _registry.TryGet(v.PeerId, out var peer)
+                ? (peer.Preferred is { } pref ? new[] { pref } : Array.Empty<IPAddress>()).Concat(peer.Addresses.Keys).Append(peer.Address)
+                : Array.Empty<IPAddress>();
+            var adapters = Net.LocalNetworks.MulticastAddresses(hostAddrs);
+            foreach (var (addr, adapter) in adapters)
+            {
+                try { sock.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.AddMembership, new MulticastOption(v.Group, addr)); v.Joined.Add(addr); }
+                catch (Exception ex) { _log.LogDebug("multicast: can't listen on {Adapter} ({Addr}): {Msg}", adapter, addr, ex.Message); }
+            }
+            var where = v.Joined.Count == 0 ? "no adapter" : string.Join(", ", adapters.Where(a => v.Joined.Contains(a.Address)).Select(a => $"{a.Adapter} ({a.Address})"));
+            if (again is null) _log.LogInformation("multicast: listening on {Adapters}", where);
+            else if (!before.SequenceEqual(v.Joined)) _log.LogInformation("multicast: listening again on {Adapters} ({Why})", where, again);
+            else _log.LogDebug("multicast: joined the group again on {Adapters} ({Why})", where, again);
+            if (v.Joined.Count == 0) _log.LogWarning("multicast: no network adapter to listen on; everything comes directly from {Host}", v.HostName);
+        }
     }
 
     public async Task LeaveAsync()
@@ -252,6 +286,10 @@ public sealed class CastReceiver : IDisposable
                 var st = await resp.Content.ReadFromJsonAsync<CastStateDto>(Json.Options, cts.Token);
                 if (st is null) continue;
                 if (st.Ended) { EndedByHost(v); return; }
+                // The host answers but no packet has come for a while: join the group again (at most once a minute;
+                // where multicast never arrives, as on some Wi-Fi, this changes nothing and costs nothing).
+                if (DateTime.UtcNow - v.LastControl > TimeSpan.FromSeconds(20) && DateTime.UtcNow - v.LastListen > TimeSpan.FromMinutes(1))
+                    Listen(v, "no multicast packets for a while");
                 // no packets arrive here: the host's answer is the only word on where it is
                 if (DateTime.UtcNow - v.LastControl > ControlStale) { v.State = st; v.StateAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(); Publish(v, force: true); }
             }

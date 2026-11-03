@@ -895,8 +895,9 @@ public partial class MainViewModel : ObservableObject
         catch (Exception ex) { Error("Can't join the multicast", ex); }
     }
 
-    public async Task LeaveCastAsync()
+    public async Task LeaveCastAsync(string why = "Leave")
     {
+        AppLog.Info("Cast", $"leaving the multicast of {CastView?.ItemName ?? Player.Title}: {why}");
         try { await Api.PostAsync("/api/cast/leave"); } catch (Exception ex) { AppLog.Warn("Cast", "leave", ex); }
         CastView = null;
         Player.EndCast();
@@ -958,6 +959,23 @@ public partial class MainViewModel : ObservableObject
             }
             var view = await Api.GetAsync<CastViewDto>("/api/cast/view");
             if (view?.Active == true && Player.CastRole != PlayerViewModel.CastRoles.Follower) await Api.PostAsync("/api/cast/leave");
+            else if (view?.Active != true && Player.CastRole == PlayerViewModel.CastRoles.Follower)
+            {
+                // This PC's service came back (an update, a restart) while the player was following: it no longer
+                // receives that multicast. Join it again when the host still sends it, otherwise say it is over.
+                var peer = Peers.FirstOrDefault(p => p.Id == Player.FollowPeerId);
+                Player.EndCast();
+                if (peer is { Online: true, Cast: { } cast } && cast.SessionId == Player.FollowSessionId)
+                {
+                    AppLog.Info("Cast", $"joining {peer.Label}'s multicast of {cast.ItemName} again (the service was restarted)");
+                    await JoinCastAsync(peer, cast);
+                }
+                else
+                {
+                    AppLog.Info("Cast", "the multicast being watched ended while Ocean was reconnecting");
+                    Player.Notice = "The multicast ended while Ocean was reconnecting";
+                }
+            }
         }
         catch (Exception ex) { AppLog.Warn("Cast", "reset", ex); }
         RefreshLive();

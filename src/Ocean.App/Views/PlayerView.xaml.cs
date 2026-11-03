@@ -278,6 +278,7 @@ public partial class PlayerView : UserControl
     private void Speed_Click(object sender, RoutedEventArgs e)
     {
         if (_vm is null) return;
+        if (!_vm.CanChangePace) { ShowOsd(PlayerViewModel.PaceLockedNote); return; }
         var menu = new ContextMenu { PlacementTarget = SpeedButton, Placement = PlacementMode.Top };
         foreach (var s in PlayerViewModel.Speeds)
         {
@@ -459,7 +460,7 @@ public partial class PlayerView : UserControl
         // Shift+> / Shift+< change speed (same keys as most web players)
         if (Keyboard.Modifiers == ModifierKeys.Shift && e.Key is Key.OemPeriod or Key.OemComma)
         {
-            _vm.StepSpeed(e.Key == Key.OemPeriod ? +1 : -1);
+            if (!_vm.StepSpeed(e.Key == Key.OemPeriod ? +1 : -1)) ShowOsd(PlayerViewModel.PaceLockedNote);
             e.Handled = true;
             return;
         }

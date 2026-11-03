@@ -52,6 +52,8 @@ public sealed class CastHost : IDisposable
         public bool Playing;
         /// <summary>The host closed the player: the session runs on its own clock and ends when the video does.</summary>
         public bool Unattended;
+        /// <summary>The PC's networks changed: the sender opens its sockets again on the adapters there are now.</summary>
+        public volatile bool NetworkChanged;
         public bool Ended;
         public long Cursor;          // next byte to send
         public readonly ConcurrentDictionary<string, Viewer> Viewers = new(StringComparer.Ordinal);
@@ -78,6 +80,7 @@ public sealed class CastHost : IDisposable
         _catalog = catalog; _light = light; _peers = peers; _registry = registry; _tracker = tracker; _events = events; _log = log;
         _catalog.CastLookup = Info;
         _publish = new Timer(_ => _events.Publish("myCast", Status()), null, Timeout.Infinite, Timeout.Infinite);
+        Net.LocalNetworks.Changed += () => { Session? s; lock (_lock) s = _s; if (s is not null) s.NetworkChanged = true; };
     }
 
     // ------------------------------------------------------------------ for the app
@@ -283,13 +286,16 @@ public sealed class CastHost : IDisposable
     private void SendLoop(Session s)
     {
         var sockets = new List<Socket>();
-        try
+        var socketsAt = TimeSpan.Zero;
+        // only the real network adapter the other PCs are reached through (never a VPN or virtual adapter); opened again
+        // when the PC's networks change (Wi-Fi reconnecting, a new address, a VPN switched on or off) and, while there
+        // is none, every 10 s, so a network that comes back carries the multicast again
+        void OpenSockets(string? why)
         {
-            var target = new IPEndPoint(CastWire.GroupAddress, CastWire.Port);
-            // only the real network adapter the other PCs are reached through (never a VPN or virtual adapter)
+            foreach (var old in sockets) old.Dispose();
+            sockets.Clear();
             var peerAddrs = _registry.Snapshot().Where(p => p.Online && !p.Bridged).SelectMany(p => p.Addresses.Keys.Append(p.Address));
             var adapters = LocalNetworks.MulticastAddresses(peerAddrs);
-            _log.LogInformation("multicast: sending on {Adapters}", adapters.Count == 0 ? "no adapter" : string.Join(", ", adapters.Select(a => $"{a.Adapter} ({a.Address})")));
             foreach (var (addr, _) in adapters)
             {
                 try
@@ -304,7 +310,14 @@ public sealed class CastHost : IDisposable
                 }
                 catch (Exception ex) { _log.LogDebug("multicast: no sender on {Addr}: {Msg}", addr, ex.Message); }
             }
-            if (sockets.Count == 0) { _log.LogWarning("multicast: no network adapter to send on; viewers get a direct stream"); }
+            var where = sockets.Count == 0 ? "no adapter" : string.Join(", ", adapters.Select(a => $"{a.Adapter} ({a.Address})"));
+            if (why is null || sockets.Count > 0) _log.LogInformation("multicast: sending on {Adapters}{Why}", where, why is null ? "" : $" ({why})");
+            if (sockets.Count == 0 && why is null) _log.LogWarning("multicast: no network adapter to send on; viewers get a direct stream");
+        }
+        try
+        {
+            var target = new IPEndPoint(CastWire.GroupAddress, CastWire.Port);
+            OpenSockets(null);
 
             using var aes = new AesGcm(s.Key, 16);
             using var file = File.Open(s.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
@@ -324,6 +337,8 @@ public sealed class CastHost : IDisposable
 
             while (!ct.IsCancellationRequested)
             {
+                if (s.NetworkChanged) { s.NetworkChanged = false; socketsAt = clock.Elapsed; OpenSockets("the network changed"); }
+                else if (sockets.Count == 0 && clock.Elapsed - socketsAt > TimeSpan.FromSeconds(10)) { socketsAt = clock.Elapsed; OpenSockets("trying again"); }
                 var now = clock.Elapsed.TotalSeconds;
                 var bytesPerSecond = bitrate * (s.Duration > 0 && s.Cursor < s.ByteAt(s.Now() + 5) ? CatchUpFactor : RateFactor);
                 budget = Math.Min(budget + (now - lastTick) * bytesPerSecond, bytesPerSecond / 20); // smooth: bursts of 50 ms at most

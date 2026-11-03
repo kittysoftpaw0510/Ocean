@@ -36,7 +36,8 @@ and every byte between them travels over mutually authenticated, end-to-end encr
   of the PCs on a network can multicast at once. Packets are encrypted with a per-session key; where multicast
   doesn't arrive (some Wi-Fi, VPN adapters, bridged PCs) the viewer fetches from you directly instead. Closing
   your player asks whether to keep it running: the video then plays on for everyone by itself until it ends, and
-  *My shares* lets you stop it or open the player again and take control back.
+  *My shares* lets you stop it or open the player again and take control back. Everyone watches at normal speed:
+  speed and A-B repeat are off for the host and the viewers while a multicast runs.
 - **Light on the PC**: Ocean's service, including making lighter copies, never uses more than 25 % of the processor
   (Windows enforces it; adjustable in Settings). The player in the app is not limited.
 - **Player**: speed control (0.25× to 2×) and A-B repeat with markers on the seek bar.
