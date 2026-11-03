@@ -70,7 +70,11 @@ into a connected VPN). Each node answers other nodes' broadcasts with a unicast 
 newcomer, then at most every 8 s per node; a `reply` is never answered). Broadcasts are fragile: Wi-Fi
 drops them without retrying, and a firewall may block incoming broadcasts while still letting a unicast
 reply to the node's own broadcast in. With replies, a node only drops out of a list when both directions
-fail. Older nodes treat `reply` like `hello`. A `bye` is sent on shutdown; nodes silent for 16 s go
+fail. A `reply` is never answered, whatever the node wants: until 1.3.7 a node asking another to connect back
+(reverse connection) answered all its beacons, replies included, so two nodes that each wanted the other to connect
+back answered each other's replies without end (about 1,200 packets a second, 20 Mbps, on a network of 24 PCs). Such
+a node now gets an answer to each `hello` at most once a second; others at most every 8 s. Broadcasts are at most
+one a second however many changes ask for one. Older nodes treat `reply` like `hello`. A `bye` is sent on shutdown; nodes silent for 16 s go
 offline (logged), and stay listed as offline for a while. The beacon carries
 the catalog version and share count, so browsing nodes refetch a catalog only when it changed.
 

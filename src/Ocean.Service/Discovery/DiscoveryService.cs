@@ -31,6 +31,8 @@ public sealed class DiscoveryService : BackgroundService
     /// <summary>Beacon type of a direct answer to a node's broadcast. Older nodes treat it as a hello.</summary>
     private const string ReplyType = "reply";
     private const long ReplyEveryMs = 8000;
+    /// <summary>At most one broadcast, and one answer to a node, per second (however many changes ask for one).</summary>
+    private const int MinGapMs = 1000;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _lastReply = new();
 
     private readonly Net.RelayHub _relay;
@@ -112,8 +114,13 @@ public sealed class DiscoveryService : BackgroundService
 
     private async Task SendLoop(CancellationToken ct)
     {
+        var last = Environment.TickCount64 - MinGapMs;
         while (!ct.IsCancellationRequested)
         {
+            // many changes at once (nodes coming and going, catalog changes) make one broadcast, not one each
+            var wait = MinGapMs - (Environment.TickCount64 - last);
+            if (wait > 0) { try { await Task.Delay((int)wait, ct); } catch (OperationCanceledException) { break; } }
+            last = Environment.TickCount64;
             try { Broadcast(Build("hello")); } catch (Exception ex) { _log.LogDebug(ex, "broadcast failed"); }
             _registry.Expire(MaxAge, TimeSpan.FromHours(Math.Max(1, _config.Current.OfflineKeepHours)));
             try { await _announce.WaitAsync(Interval, ct); } catch (OperationCanceledException) { break; }
@@ -186,8 +193,12 @@ public sealed class DiscoveryService : BackgroundService
                 // broadcast in (for ~3 s). Replying to each node's broadcasts (at most every few seconds) means a node
                 // only drops out of a list when both directions fail, and a newcomer learns about us right away.
                 // Also carries our request to connect back (Want) to a node we can't reach.
-                var due = isNew || _relay.IsWanted(b.Id)
-                          || (b.T != ReplyType && Environment.TickCount64 - _lastReply.GetValueOrDefault(b.Id) >= ReplyEveryMs);
+                // A reply is never answered: two nodes that each wanted the other to connect back used to answer each
+                // other's replies without end, a loop at network speed (20 Mbps and more on a busy network). A newcomer,
+                // or a node we ask to connect back, gets an answer to each of its broadcasts (at most once a second);
+                // everyone else at most every 8 s.
+                var since = Environment.TickCount64 - _lastReply.GetValueOrDefault(b.Id);
+                var due = b.T != ReplyType && (since >= ReplyEveryMs || ((isNew || _relay.IsWanted(b.Id)) && since >= MinGapMs));
                 if (due)
                 {
                     _lastReply[b.Id] = Environment.TickCount64;
