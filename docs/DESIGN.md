@@ -317,8 +317,16 @@ by online then newest. The result carries per-node counts for the chips and the 
 
 ## Updates (`Ocean.Service.Update.Updater`)
 
-The service asks `api.github.com/repos/kittysoftpaw0510/Ocean/releases/latest` 90 s after start and every 6 h
-(off with `CheckUpdates`). A newer `vX.Y.Z` with `Ocean-Setup-X.Y.Z.exe` is downloaded to `<data>\updates\`
+Three modes (`ServiceConfig.UpdateMode`; settings from before it map `CheckUpdates` on/off to auto-check/manual):
+`auto-update` downloads a newer version by itself, `auto-check` (default) only announces it (`POST /api/update/download`
+fetches it when the user clicks Update now; the app then runs the installer by itself), `manual` never looks by itself.
+Checks are due 4 h after the last one, 30 min after a failed one, by the wall clock: `update-state.json` keeps the time
+and the newest release seen, the service looks every 5 min whether a check is due, so sleep and restarts neither skip
+nor repeat checks, and a known newer version is announced right after a restart. The service asks
+`api.github.com/repos/kittysoftpaw0510/Ocean/releases/latest`; when the API refuses (60 requests an hour per internet
+address, shared by every PC behind one router) it reads `github.com/.../releases/latest`, which redirects to the tag,
+and takes the installer from its fixed address under `releases/download/vX.Y.Z/` (size from the download's headers).
+Every check is one line in the log. A newer `vX.Y.Z` with `Ocean-Setup-X.Y.Z.exe` is downloaded to `<data>\updates\`
 (`.part` then renamed; size must match, SHA-256 checked when the release has a `.sha256` asset; older files
 removed). The status (`GET /api/update`, `POST /api/update/check`, event `update`) drives the home-page banner
 and *Settings > About*. The app runs the installer itself (`/SILENT /NORESTART /SUPPRESSMSGBOXES`, Windows asks

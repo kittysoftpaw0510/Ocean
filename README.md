@@ -65,10 +65,11 @@ The setup:
 - optionally opens Ocean in the tray at sign-in;
 - upgrades in place (run a newer setup over an older one; settings and shares are kept).
 
-**Updates.** Ocean looks at this project's [GitHub releases](https://github.com/kittysoftpaw0510/Ocean/releases) a
-few times a day and downloads a newer installer in the background (switch it off under *Settings > App*). Nothing is
-installed until you click **Install now** on the home page or in *Settings > About*: the installer then closes Ocean,
-updates it and opens it again. PCs without internet simply never see the banner. A release must be tagged
+**Updates.** Ocean looks at this project's [GitHub releases](https://github.com/kittysoftpaw0510/Ocean/releases)
+every 4 hours (sleep and restarts don't reset that). *Settings > App > Updates* picks how: **Auto-check** (default)
+tells you when a new version is out and downloads it when you click **Update now**; **Auto-update** also downloads
+it in the background, so **Install now** is one click; **Manual** never looks by itself (*Settings > About > Check
+for updates*). Nothing is installed until you click: the installer then closes Ocean, updates it and opens it again. PCs without internet simply never see the banner. A release must be tagged
 `vX.Y.Z` and carry `Ocean-Setup-X.Y.Z.exe` (and, when present, `Ocean-Setup-X.Y.Z.exe.sha256`, which is checked);
 `scripts\make-setup.ps1` writes both files into `dist\`.
 
