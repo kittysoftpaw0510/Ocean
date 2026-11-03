@@ -13,7 +13,7 @@
 ;   - uninstall removes the service, firewall rules and shortcuts, and offers to remove settings/caches
 
 #ifndef AppVersion
-  #define AppVersion "1.3.5"
+  #define AppVersion "1.3.7"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\dist\setup\Ocean"
