@@ -51,8 +51,10 @@ public sealed class ServiceConfig
     public bool AllowPublicNetworks { get; set; } = true;
     /// <summary>Carry traffic between PCs that have no network path to each other (see Ocean.Core.Protocol.Via).</summary>
     public bool AllowBridging { get; set; } = true;
-    /// <summary>Look for newer versions on GitHub and download the installer.</summary>
+    /// <summary>Look for newer versions by themselves (settings from before the three modes; see <see cref="UpdateMode"/>).</summary>
     public bool CheckUpdates { get; set; } = true;
+    /// <summary>auto-update | auto-check | manual (Ocean.Core.Protocol.UpdateModes); unset: from <see cref="CheckUpdates"/>.</summary>
+    public string? UpdateMode { get; set; }
     /// <summary>Make lighter copies of my heavy videos for watching (see Ocean.Service.Media.LightCopies).</summary>
     public bool LightCopies { get; set; } = true;
     public int LightKeepDays { get; set; } = 7;

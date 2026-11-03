@@ -317,7 +317,10 @@ public sealed class SettingsDto
     public bool AllowPublicNetworks { get; set; } = true;
     /// <summary>Let PCs that have no network path to each other reach each other through this one.</summary>
     public bool AllowBridging { get; set; } = true;
+    /// <summary>Older apps only know on/off; <see cref="UpdateMode"/> wins when set.</summary>
     public bool CheckUpdates { get; set; } = true;
+    /// <summary><see cref="UpdateModes"/>: auto-update | auto-check | manual.</summary>
+    public string? UpdateMode { get; set; }
     /// <summary>Make lighter copies (720p) of my heavy videos when someone watches them.</summary>
     public bool LightCopies { get; set; } = true;
     /// <summary>Keep a lighter copy this many days after it was last watched.</summary>

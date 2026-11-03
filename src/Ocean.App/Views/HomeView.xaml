@@ -16,7 +16,8 @@
                 <DockPanel>
                     <TextBlock DockPanel.Dock="Left" Text="&#xE896;" Style="{StaticResource Icon}" FontSize="20" Foreground="{StaticResource Accent}" VerticalAlignment="Center" Margin="0,0,14,0"/>
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
-                        <Button Style="{StaticResource BtnPrimary}" Content="Install now" Command="{Binding DataContext.InstallUpdateCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
+                        <Button Style="{StaticResource BtnPrimary}" Content="{Binding UpdateAction}" Command="{Binding DataContext.UpdateNowCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                Visibility="{Binding UpdateBusy, Converter={StaticResource InvBoolToVis}}"/>
                         <Button Style="{StaticResource BtnGhost}" Content="Later" Margin="6,0,0,0" Command="{Binding DataContext.DismissUpdateCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
                     </StackPanel>
                     <StackPanel VerticalAlignment="Center">

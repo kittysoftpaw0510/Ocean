@@ -330,12 +330,19 @@
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="Check for updates automatically" Style="{StaticResource RowTitle}"/>
-                                    <TextBlock Style="{StaticResource InfoTip}" ToolTip="Looks at the project's GitHub releases a few times a day and downloads a newer installer in the background. Nothing is installed until you click Install; the installer closes Ocean, updates it and opens it again." AutomationProperties.HelpText="Looks at the project's GitHub releases a few times a day and downloads a newer installer in the background. Nothing is installed until you click Install; the installer closes Ocean, updates it and opens it again."/>
+                                    <TextBlock Text="Updates" Style="{StaticResource RowTitle}"/>
+                                    <TextBlock Style="{StaticResource InfoTip}" ToolTip="Ocean looks at the project's GitHub releases every 4 hours (sleep and restarts don't reset that). Auto-update also downloads a new version in the background; Auto-check only tells you, and downloads when you click Update now; Manual never looks by itself. Nothing installs until you click: the installer closes Ocean, updates it and opens it again, and Windows asks for permission." AutomationProperties.HelpText="Ocean looks at the project's GitHub releases every 4 hours (sleep and restarts don't reset that). Auto-update also downloads a new version in the background; Auto-check only tells you, and downloads when you click Update now; Manual never looks by itself. Nothing installs until you click: the installer closes Ocean, updates it and opens it again, and Windows asks for permission."/>
                                 </StackPanel>
-                                <TextBlock Text="Downloads new versions; you choose when to install." Style="{StaticResource RowHint}"/>
+                                <TextBlock Text="Nothing installs until you click." Style="{StaticResource RowHint}"/>
                             </StackPanel>
-                            <CheckBox Grid.Column="1" Style="{StaticResource Switch}" IsChecked="{Binding CheckUpdates}" AutomationProperties.Name="Check for updates automatically"/>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Width="220">
+                                <RadioButton Content="Auto-update" Margin="0,2" ToolTip="Checks by itself and downloads in the background; you install with one click"
+                                             IsChecked="{Binding UpdateMode, Converter={StaticResource Equals}, ConverterParameter=auto-update}"/>
+                                <RadioButton Content="Auto-check (recommended)" Margin="0,2" ToolTip="Checks by itself and tells you; downloads when you click Update now"
+                                             IsChecked="{Binding UpdateMode, Converter={StaticResource Equals}, ConverterParameter=auto-check}"/>
+                                <RadioButton Content="Manual" Margin="0,2" ToolTip="Only Settings > About > Check for updates looks"
+                                             IsChecked="{Binding UpdateMode, Converter={StaticResource Equals}, ConverterParameter=manual}"/>
+                            </StackPanel>
                         </Grid>
                       </StackPanel>
                     </Border>
@@ -369,6 +376,8 @@
                                     <TextBlock Text="{Binding UpdateText}" Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,2,0,0" Visibility="{Binding UpdateText, Converter={StaticResource NullToVis}}"/>
                                     <WrapPanel Margin="-8,6,0,0">
                                         <Button Style="{StaticResource BtnPrimary}" Content="Install update" Command="{Binding InstallUpdateCommand}" Margin="8,0,0,0" Visibility="{Binding UpdateReady, Converter={StaticResource BoolToVis}}"/>
+                                        <Button Style="{StaticResource BtnPrimary}" Content="Update now" Command="{Binding UpdateNowCommand}" Margin="8,0,0,0" Visibility="{Binding UpdateAvailable, Converter={StaticResource BoolToVis}}"
+                                                ToolTip="Downloads the new version, then installs it"/>
                                         <Button Style="{StaticResource BtnGhost}" Content="Check for updates" Command="{Binding CheckForUpdatesCommand}" IsEnabled="{Binding UpdateBusy, Converter={StaticResource Equals}, ConverterParameter=False}"/>
                                         <Button Style="{StaticResource BtnGhost}" Content="Releases page" Command="{Binding DataContext.OpenReleaseNotesCommand, RelativeSource={RelativeSource AncestorType=Window}}"/>
                                     </WrapPanel>

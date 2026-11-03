@@ -132,6 +132,8 @@ public static class LocalApi
         // ---- updates (GitHub releases): status, a check now; the app runs the downloaded installer ----
         g.MapGet("/update", (Update.Updater updater) => Results.Json(updater.Status, Json.Options));
         g.MapPost("/update/check", async (HttpContext ctx, Update.Updater updater) => Results.Json(await updater.CheckAsync(ctx.RequestAborted), Json.Options));
+        // "Update now": downloads the newest version in the background (progress as "update" events)
+        g.MapPost("/update/download", async (HttpContext ctx, Update.Updater updater) => Results.Json(await updater.DownloadNowAsync(ctx.RequestAborted), Json.Options));
 
         // ---- multicast: mine (host) ----
         g.MapGet("/cast", (CastHost cast) => Results.Json(cast.Status(), Json.Options));
@@ -287,6 +289,7 @@ public static class LocalApi
                 UploadLimitKBps = c.UploadLimitKBps, SharingPaused = c.SharingPaused, NewDays = c.NewDays,
                 MaxConcurrentDownloads = c.MaxConcurrentDownloads, NotifyNewVideos = c.NotifyNewVideos, OfflineKeepHours = c.OfflineKeepHours,
                 AllowPublicNetworks = c.AllowPublicNetworks, FirewallManaged = firewall.CanManage, AllowBridging = c.AllowBridging, CheckUpdates = c.CheckUpdates,
+                UpdateMode = Update.Updater.ModeOf(c),
                 NetworkMode = c.NetworkMode,
                 StreamCacheGB = c.StreamCacheGB, StreamCacheUsedBytes = cache.UsedBytes,
             }, Json.Options);
@@ -310,7 +313,8 @@ public static class LocalApi
                 c.OfflineKeepHours = Math.Clamp(dto.OfflineKeepHours, 1, 24 * 30);
                 c.AllowPublicNetworks = dto.AllowPublicNetworks;
                 c.AllowBridging = dto.AllowBridging;
-                c.CheckUpdates = dto.CheckUpdates;
+                if (UpdateModes.Normalize(dto.UpdateMode) is { } updates) { c.UpdateMode = updates; c.CheckUpdates = updates != UpdateModes.Manual; }
+                else { c.CheckUpdates = dto.CheckUpdates; c.UpdateMode = null; } // an older app: on/off only
                 c.LightCopies = dto.LightCopies;
                 c.LightKeepDays = Math.Clamp(dto.LightKeepDays, 1, 365);
                 c.LightCacheGB = Math.Clamp(dto.LightCacheGB, 1, 2000);

@@ -33,6 +33,10 @@ public partial class HomeViewModel : ObservableObject
     [ObservableProperty] private bool _updateBanner;
     [ObservableProperty] private string _updateTitle = "";
     [ObservableProperty] private string _updateHint = "";
+    /// <summary>"Update now" (download, then install) or "Install now" (already downloaded).</summary>
+    [ObservableProperty] private string _updateAction = "Update now";
+    /// <summary>Downloading: the banner shows progress instead of its buttons.</summary>
+    [ObservableProperty] private bool _updateBusy;
 
     public void ApplyTop(TopDto top, MainViewModel main)
     {
@@ -599,33 +603,79 @@ public partial class MainViewModel : ObservableObject
         try { ApplyUpdate(await Api.GetAsync<UpdateStatusDto>("/api/update")); } catch { }
     }
 
+    /// <summary>The user clicked "Update now": once the download is complete, the installer starts by itself.</summary>
+    private bool _installWhenReady;
+
     private void ApplyUpdate(UpdateStatusDto? u)
     {
         if (u is null) return;
         Update = u;
         var ready = u.Ready && u.Available && u.InstallerPath is not null;
-        Home.UpdateBanner = ready && u.Latest != _updateDismissed;
-        Home.UpdateTitle = ready ? $"Ocean {u.Latest} is ready to install" : "";
-        Home.UpdateHint = ready ? $"You have {u.Current}. Installing takes about a minute; Ocean closes and opens again by itself." : "";
+        var available = u.Available && !ready;
+        Home.UpdateBanner = (ready || available) && u.Latest != _updateDismissed;
+        Home.UpdateBusy = u.Downloading;
+        Home.UpdateAction = ready ? "Install now" : "Update now";
+        Home.UpdateTitle = ready ? $"Ocean {u.Latest} is ready to install"
+            : u.Downloading ? $"Downloading Ocean {u.Latest}…  {u.Progress:P0}"
+            : available ? $"Ocean {u.Latest} is available" : "";
+        Home.UpdateHint = ready ? $"You have {u.Current}. Installing takes about a minute; Ocean closes and opens again by itself."
+            : u.Downloading ? (_installWhenReady ? "It installs as soon as the download is complete." : "You can keep using Ocean meanwhile.")
+            : available ? $"You have {u.Current}. Update now downloads it{(u.InstallerSize > 0 ? $" ({Format.Bytes(u.InstallerSize)})" : "")} and installs it; Ocean closes and opens again by itself."
+                          + (u.Error.Length > 0 ? "  " + u.Error : "")
+            : "";
         SettingsVm.RefreshUpdateText();
-        if (ready && u.Latest != _updateAnnounced && u.Latest != _updateDismissed)
+
+        // Tell once per version: as soon as it is out, or in auto-update mode once it is downloaded.
+        var tell = ready || (available && !u.Downloading && u.Mode != UpdateModes.AutoUpdate);
+        if (tell && u.Latest != _updateAnnounced && u.Latest != _updateDismissed)
         {
             _updateAnnounced = u.Latest;
-            if (_initialPeersLoaded) Toast("Update ready", $"Ocean {u.Latest} is downloaded. Install it from the home page or Settings.", "info", ShowHome);
+            var (title, text) = ready
+                ? ("Update ready", $"Ocean {u.Latest} is downloaded. Install it from the home page or Settings.")
+                : ("Update available", $"Ocean {u.Latest} is out (you have {u.Current}). Click Update now on the home page.");
+            if (_initialPeersLoaded) Toast(title, text, "info", ShowHome);
+            TrayNotify?.Invoke(title, text, ShowHome); // shown only while the window is closed to the tray
         }
+
+        if (_installWhenReady && ready) { _installWhenReady = false; _ = InstallUpdateAsync(confirm: false); }
+        else if (_installWhenReady && !u.Downloading && u.Error.StartsWith("Download failed", StringComparison.Ordinal))
+        {
+            _installWhenReady = false;
+            Toast("Update not downloaded", u.Error + " Try again from the home page.", "warn");
+        }
+    }
+
+    /// <summary>The banner's button: installs what is downloaded, or downloads it first and then installs.</summary>
+    [RelayCommand]
+    private async Task UpdateNow()
+    {
+        if (Update is { Ready: true }) { await InstallUpdateAsync(confirm: true); return; }
+        try
+        {
+            _installWhenReady = true;
+            AppLog.Info("Update", $"update now: downloading {Update?.Latest}");
+            ApplyUpdate(await Api.PostAsync<UpdateStatusDto>("/api/update/download", null));
+        }
+        catch (Exception ex) { _installWhenReady = false; Error("Could not download the update", ex); }
     }
 
     /// <summary>Runs the downloaded installer (silent, Windows asks for permission); it closes Ocean, updates and reopens it.</summary>
     [RelayCommand]
-    public async Task InstallUpdate()
+    public Task InstallUpdate() => InstallUpdateAsync(confirm: true);
+
+    private async Task InstallUpdateAsync(bool confirm)
     {
         if (Update is not { Ready: true, InstallerPath: { Length: > 0 } path, Latest: var version }) return;
         if (!File.Exists(path)) { Toast("Installer missing", "The downloaded file is gone; checking again.", "warn"); _ = CheckUpdatesAsync(); return; }
         var casting = MyCast is { Active: true };
-        var ok = await Dialogs.ConfirmAsync($"Install Ocean {version}?",
-            "Ocean closes, the new version installs in the background (Windows asks for permission first) and Ocean opens again in about a minute. " +
-            "Downloads continue afterwards." + (casting ? " Your multicast stops." : ""), "Install now");
-        if (!ok) return;
+        // "Update now" already said yes; still ask when it would stop a multicast others are watching
+        if (confirm || casting)
+        {
+            var ok = await Dialogs.ConfirmAsync($"Install Ocean {version}?",
+                "Ocean closes, the new version installs in the background (Windows asks for permission first) and Ocean opens again in about a minute. " +
+                "Downloads continue afterwards." + (casting ? " Your multicast stops." : ""), "Install now");
+            if (!ok) return;
+        }
         try
         {
             AppLog.Info("Update", $"installing {version} from {path}");
