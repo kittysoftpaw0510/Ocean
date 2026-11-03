@@ -64,34 +64,55 @@ check to GitHub is the only internet connection and carries nothing about peers.
 
 ## Discovery (UDP 38472)
 
-Every 4 s each node broadcasts a signed JSON `hello` to the directed broadcast address of each local network
-(see "Local network only"; never `255.255.255.255`, which Windows sends where the default route points, i.e.
-into a connected VPN). Each node answers other nodes' broadcasts with a unicast `reply` (right away for a
-newcomer, then at most every 8 s per node; a `reply` is never answered). Broadcasts are fragile: Wi-Fi
-drops them without retrying, and a firewall may block incoming broadcasts while still letting a unicast
-reply to the node's own broadcast in. With replies, a node only drops out of a list when both directions
-fail. A `reply` is never answered, whatever the node wants: until 1.3.7 a node asking another to connect back
-(reverse connection) answered all its beacons, replies included, so two nodes that each wanted the other to connect
-back answered each other's replies without end (about 1,200 packets a second, 20 Mbps, on a network of 24 PCs). Such
-a node now gets an answer to each `hello` at most once a second; others at most every 8 s. Broadcasts are at most
-one a second however many changes ask for one. Bridge lists (`/p/neighbors`) are asked from each directly heard node
-every 30 s (it was 5-10 s), and at once when such a node comes online; a route counts for 75 s and a bridged node
-stays online 80 s without news, so one missed answer is fine; a bridge going offline drops its routes at once. Older nodes treat `reply` like `hello`. A `bye` is sent on shutdown; nodes silent for 16 s go
-offline (logged), and stay listed as offline for a while. The beacon carries
-the catalog version and share count, so browsing nodes refetch a catalog only when it changed.
+Presence works the IPmsg way: a node speaks when something happens and is silent otherwise.
 
-Beacon: `{v, t, id, pk, name, user, host, port, realm, cat, shares, ts, sig}`.
+- **Hello on events.** At start a node asks who is there (a `hello` with `q`, three times over 15 s: a broadcast
+  can be lost); every node answers with a unicast `reply`, so the list is complete within a second. It also says
+  hello when its network changes (a question too), when its catalog, shares, name or secret change, when it needs a
+  node to connect back (`want`), and on the app's refresh (a question). A hello caused by a change also goes to each
+  node it hears, directly, since broadcasts are fragile (Wi-Fi drops them, firewalls block them). At most one
+  hello a second. `bye` on shutdown (twice, and to each node directly).
+- **Heartbeat.** Otherwise one `hello` every 5 min (`hb` = 300). A node heard directly goes offline after three
+  missed heartbeats and a margin (`Peer.Silence`, 15.5 min). Two things notice sooner: any authenticated request a
+  node makes counts as a sign of life (`PeerRegistry.Touch`), and when a node can't be connected to
+  (`PeerClient.DirectFailed`) it is asked "are you there?" (a unicast question) and taken offline if neither a
+  beacon nor a request comes within 5 s. One that only has its firewall in the way answers, and the reverse
+  connection takes over.
+- **Answers.** To a question, to a newcomer, to a node we ask to connect back (at most once a second each), and to
+  a heartbeat once per heartbeat, so a node whose broadcasts don't reach us still hears from us. A `reply` is never
+  answered: until 1.3.7 a node asking another to connect back answered all its beacons, replies included, and two
+  such nodes answered each other without end (about 1,200 packets a second, 20 Mbps, on a network of 24 PCs).
+- **Older nodes.** Ocean up to 1.3.8 takes a node silent for 16 s as gone and sends no `hb`. While any such node is
+  heard directly, a node keeps the old rhythm (a hello every 4 s, `hb` = 4, answers every 8 s) and goes quiet by
+  itself when the last one has left or been updated (and never in its first 20 s, before the startup questions are
+  answered). Its peers time it out by what it announced (16 s for `hb` = 4).
+- **Signatures.** `sig` covers the fields older nodes know; `xs` covers everything, `hb`, `nrev` and `q` included.
+  Without a valid `xs` the newer fields are dropped and the beacon counts as an older node's.
+- **Bridge lists** (`/p/neighbors`, below) are asked from a quiet node when it comes online and when the `nrev` in
+  its beacons (a fingerprint of the nodes it hears) changes: at once when we reach someone through it, else at most
+  every 5 min; each beacon with the same fingerprint confirms the routes through it (a route lasts three of the
+  bridge's heartbeats). An older node is asked every 30 s and its routes last 75 s.
+- **Reverse links** ask the other side to hold each poll up to 4 min (`X-Ocean-Hold`; an older node holds 25 s).
+
+Idle, with every node quiet: a heartbeat and one answer per node every 5 min, about 70 small packets per PC per 5
+minutes on a network of 24 PCs (0.002 Mbps); measured on two nodes with the heartbeat shortened to 10 s: 8 packets
+each in 40 s, no TCP at all over an idle reverse link. Beacons go to the directed broadcast address of each local
+network (see "Local network only"; never `255.255.255.255`, which Windows sends where the default route points,
+i.e. into a connected VPN). The beacon carries the catalog version and share count, so browsing nodes refetch a
+catalog only when it changed. Test switches: `OCEAN_TEST_HEARTBEAT` (seconds), `OCEAN_TEST_UNICAST_AS_BROADCAST`.
+
+Beacon: `{v, t, id, pk, name, user, host, port, realm, cat, shares, ts, want, sig, hb, nrev, q, xs}`.
 
 ### Reaching a PC through another one ("via", one bridge at most)
 
 When A and C have no network path to each other but both reach B, B bridges them:
 
-- Every 5 s each node asks the nodes it hears directly for `GET /p/neighbors`: the nodes they hear directly
+- Each node asks the nodes it hears directly for `GET /p/neighbors` (when, see Discovery): the nodes they hear directly
   (never nodes they reach through someone else, so there is never more than one PC in between), plus how many
   transfers they are passing on right now. The answer carries a revision; with `X-Ocean-Neighbors-Rev` the node
   answers 304 and only its load when nothing changed. A node not heard directly is listed as reached through
   every node that offers it (`Peer.Bridges`; `PeerDto.via` names the one in use, `viaCount` how many there are).
-  A direct beacon always wins: a node heard within 16 s is never bridged.
+  A direct beacon always wins: a node heard within its silence limit is never bridged.
 - A sends C's request to a bridge as `/p/via/{C's id}/p/…` (catalog, stream, thumb, access, ping only). The least
   busy bridge is chosen (its reported load plus what A itself started lately); a video keeps its bridge while it
   plays (sticky per path for 2 min), so seeking stays on one connection. A bridge that fails (connect error, or

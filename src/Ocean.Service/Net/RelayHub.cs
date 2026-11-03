@@ -54,8 +54,16 @@ public sealed class RelayHub
 
     public bool IsWanted(string peerId) => _wanted.ContainsKey(peerId);
 
-    /// <summary>True when the node has polled us recently, i.e. the reverse link is up.</summary>
-    public bool IsConnected(string peerId) => _lastPoll.TryGetValue(peerId, out var t) && DateTimeOffset.UtcNow - t < TimeSpan.FromSeconds(40);
+    /// <summary>Polls waiting right now, by node (a poll can be held for minutes).</summary>
+    private readonly ConcurrentDictionary<string, int> _holding = new();
+
+    /// <summary>True when the node is waiting in a poll or has polled us recently, i.e. the reverse link is up.</summary>
+    public bool IsConnected(string peerId)
+        => _holding.GetValueOrDefault(peerId) > 0 || (_lastPoll.TryGetValue(peerId, out var t) && DateTimeOffset.UtcNow - t < TimeSpan.FromSeconds(40));
+
+    /// <summary>The longest a poll is held (asked for with <see cref="HoldHeader"/>; an older node isn't asked and gets 25 s).</summary>
+    public const int MaxHoldSeconds = 240;
+    public const string HoldHeader = "X-Ocean-Hold";
 
     private Channel<RelayJob> Queue(string peerId) => _queues.GetOrAdd(peerId, _ => Channel.CreateUnbounded<RelayJob>());
 
@@ -90,12 +98,16 @@ public sealed class RelayHub
         }
     }
 
-    /// <summary>Called by the other node: wait up to 25 s for the next request for it.</summary>
-    public async Task<RelayJob?> PollAsync(string peerId, CancellationToken ct)
+    /// <summary>
+    /// Called by the other node: wait for the next request for it, up to <paramref name="holdSeconds"/> (25 s for an
+    /// older node; a newer one asks for up to 4 min, so an idle link costs a request every few minutes).
+    /// </summary>
+    public async Task<RelayJob?> PollAsync(string peerId, CancellationToken ct, int holdSeconds = 25)
     {
         _lastPoll[peerId] = DateTimeOffset.UtcNow;
+        _holding.AddOrUpdate(peerId, 1, (_, n) => n + 1);
         using var wait = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        wait.CancelAfter(TimeSpan.FromSeconds(25));
+        wait.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(holdSeconds, 5, MaxHoldSeconds)));
         try
         {
             while (true)
@@ -105,7 +117,7 @@ public sealed class RelayHub
             }
         }
         catch (OperationCanceledException) { return null; }
-        finally { _lastPoll[peerId] = DateTimeOffset.UtcNow; }
+        finally { _lastPoll[peerId] = DateTimeOffset.UtcNow; _holding.AddOrUpdate(peerId, 0, (_, n) => Math.Max(0, n - 1)); }
     }
 
     /// <summary>

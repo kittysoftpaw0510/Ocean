@@ -105,6 +105,13 @@ public sealed class PeerClient : IDisposable
     }
 
     /// <summary>
+    /// A node could not be reached directly. Discovery then asks it "are you there?" over UDP: no answer means it is
+    /// gone (between quiet heartbeats nothing else would notice for minutes); an answer means only its firewall is in
+    /// the way, and the reverse connection takes over.
+    /// </summary>
+    public event Action<Peer>? DirectFailed;
+
+    /// <summary>
     /// Sends the request: directly (trying each known address), or, when the node cannot be reached directly
     /// (typically because its firewall blocks incoming connections), through a reverse connection it opens to us.
     /// </summary>
@@ -137,6 +144,7 @@ public sealed class PeerClient : IDisposable
         {
             if (!peer.PreferRelay)
                 _log.LogInformation("{Peer} can't be reached directly ({Msg}); using a reverse connection", peer.Name, ex.InnerException?.Message ?? ex.Message);
+            DirectFailed?.Invoke(peer);
             peer.PreferRelay = true;
             peer.DirectRetryAt = DateTimeOffset.UtcNow.AddMinutes(2);
             return await _relay.SendAsync(peer.Id, req, ct);

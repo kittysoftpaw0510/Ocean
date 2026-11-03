@@ -71,7 +71,7 @@ public static class LocalApi
         // Manual refresh: say hello now (others answer right away) and re-check every online node's shares.
         g.MapPost("/peers/refresh", (PeerService peers, IEnumerable<IHostedService> hosted) =>
         {
-            hosted.OfType<DiscoveryService>().FirstOrDefault()?.AnnounceNow();
+            hosted.OfType<DiscoveryService>().FirstOrDefault()?.AnnounceNow(question: true);
             peers.RefreshAll();
             return Results.Ok();
         });

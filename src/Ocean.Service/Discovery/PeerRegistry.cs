@@ -34,6 +34,17 @@ public sealed class Peer
     /// <summary>When its own beacon was last heard here (a direct route exists).</summary>
     public DateTimeOffset DirectSeen { get; set; }
 
+    /// <summary>Seconds between its heartbeats, as it announced them (0: an Ocean up to 1.3.8, every 4 s).</summary>
+    public int Hb { get; set; }
+    /// <summary>Fingerprint of the nodes it hears (its bridge list), from its last beacon.</summary>
+    public string? Nrev { get; set; }
+
+    /// <summary>
+    /// How long it may stay silent before it counts as gone: 16 s for a node announcing every 4 s (and any older
+    /// Ocean), three heartbeats and a margin for a quiet one (15.5 min at the usual 5 min).
+    /// </summary>
+    public TimeSpan Silence => Hb <= 4 ? TimeSpan.FromSeconds(16) : TimeSpan.FromSeconds(3 * Hb + 30);
+
     /// <summary>
     /// Nodes this one can be reached through when there is no network path to it from here (it is never heard
     /// directly, but nodes we do hear can reach it), by bridge id. Several can be known at once: requests go to the
@@ -42,7 +53,7 @@ public sealed class Peer
     public ConcurrentDictionary<string, BridgeRoute> Bridges { get; } = new();
 
     /// <summary>Its own beacons arrive: the direct route is what we go by.</summary>
-    public bool HeardDirectly => DateTimeOffset.UtcNow - DirectSeen < PeerRegistry.DirectFresh;
+    public bool HeardDirectly => DateTimeOffset.UtcNow - DirectSeen < Silence;
 
     /// <summary>Reached only through other nodes.</summary>
     public bool Bridged => !HeardDirectly && LiveBridges().Count > 0;
@@ -51,7 +62,7 @@ public sealed class Peer
     public List<BridgeRoute> LiveBridges()
     {
         var now = DateTimeOffset.UtcNow;
-        return Bridges.Values.Where(b => now - b.Confirmed < PeerRegistry.BridgeFresh)
+        return Bridges.Values.Where(b => now - b.Confirmed < b.Fresh)
                       .OrderBy(b => b.Load).ThenByDescending(b => b.Confirmed).ToList();
     }
 
@@ -122,6 +133,11 @@ public sealed class BridgeRoute
     public int Load { get; set; }
     /// <summary>The node's catalog version as the bridge reported it.</summary>
     public long Cat { get; set; }
+    /// <summary>
+    /// How long the route counts without a new word from the bridge: 75 s for a bridge that is asked every 30 s (an
+    /// older Ocean), three of its heartbeats and a margin for a quiet one (it confirms its routes with each heartbeat).
+    /// </summary>
+    public TimeSpan Fresh { get; set; } = PeerRegistry.BridgeFresh;
 }
 
 /// <summary><see cref="Seen"/>: a beacon that changed nothing visible (not worth telling the UI about).</summary>
@@ -155,6 +171,15 @@ public sealed class PeerRegistry
         _peers.TryAdd(peer.Id, peer);
     }
 
+    /// <summary>
+    /// The node talked to us (an authenticated request): it is there, whatever its beacons do. Keeps quiet nodes listed
+    /// between heartbeats while they are in use, and nodes whose broadcasts don't reach us.
+    /// </summary>
+    public void Touch(string id)
+    {
+        if (_peers.TryGetValue(id, out var p) && p.Online) lock (p) p.LastSeen = DateTimeOffset.UtcNow;
+    }
+
     public void MarkOffline(string id)
     {
         if (!_peers.TryGetValue(id, out var p) || !p.Online) return;
@@ -178,7 +203,7 @@ public sealed class PeerRegistry
                 {
                     Id = b.Id, PublicKey = b.Pk, Name = b.Name, User = b.User, Host = b.Host, Port = b.Port,
                     Realm = b.Realm, CatalogVersion = b.Cat, ShareCount = b.Shares, LastTs = b.Ts, FirstSeen = now, LastSeen = now,
-                    DirectSeen = now,
+                    DirectSeen = now, Hb = b.Hb, Nrev = b.Nrev,
                 };
                 p.Seen(address, now);
                 return p;
@@ -198,6 +223,7 @@ public sealed class PeerRegistry
                     else if (p.Name != b.Name || p.User != b.User || p.Host != b.Host || p.Port != b.Port || p.ShareCount != b.Shares) change = PeerChange.Updated;
                     p.Name = b.Name; p.User = b.User; p.Host = b.Host; p.Port = b.Port;
                     p.Realm = b.Realm; p.CatalogVersion = b.Cat; p.ShareCount = b.Shares; p.LastTs = b.Ts;
+                    p.Hb = b.Hb; p.Nrev = b.Nrev;
                 }
                 return p;
             });
@@ -205,15 +231,12 @@ public sealed class PeerRegistry
         return isNew ? PeerChange.Added : change;
     }
 
-    /// <summary>A node's own beacons count as a direct route for this long (the discovery MaxAge).</summary>
-    public static readonly TimeSpan DirectFresh = TimeSpan.FromSeconds(16);
+    /// <summary>A node's own beacons count as a direct route as long as it may stay silent (<see cref="Peer.Silence"/>).</summary>
     /// <summary>
     /// A bridge that hasn't listed the node for this long is no longer used for it. Bridges are asked every 30 s
     /// (MeshService), so this tolerates one missed answer. A bridge that goes offline drops its routes at once.
     /// </summary>
     public static readonly TimeSpan BridgeFresh = TimeSpan.FromSeconds(75);
-    /// <summary>A bridged node goes offline when no bridge has listed it for this long.</summary>
-    public static readonly TimeSpan BridgedSilence = TimeSpan.FromSeconds(80);
 
     /// <summary>
     /// <paramref name="via"/> reports that it hears <paramref name="n"/>: remember it as one way to reach that node.
@@ -222,7 +245,11 @@ public sealed class PeerRegistry
     public void ConfirmBridge(NeighborDto n, Peer via, int load, string realm)
     {
         var now = DateTimeOffset.UtcNow;
-        var route = new BridgeRoute { Id = via.Id, Name = Core.DisplayNames.Of(via.User, via.Name), Confirmed = now, Load = load, Cat = n.Cat };
+        var route = new BridgeRoute
+        {
+            Id = via.Id, Name = Core.DisplayNames.Of(via.User, via.Name), Confirmed = now, Load = load, Cat = n.Cat,
+            Fresh = via.Hb > 4 ? TimeSpan.FromSeconds(3 * via.Hb + 30) : BridgeFresh,
+        };
         PeerChange? change = null;
         var peer = _peers.AddOrUpdate(n.Id,
             _ =>
@@ -281,16 +308,20 @@ public sealed class PeerRegistry
             if (predicate(p)) Remove(p.Id);
     }
 
-    /// <summary>Silent peers go offline after <paramref name="silence"/>; offline peers are forgotten after <paramref name="keepOffline"/>.</summary>
-    public void Expire(TimeSpan silence, TimeSpan keepOffline)
+    /// <summary>
+    /// Silent peers go offline (each after its own <see cref="Peer.Silence"/>; a bridged one when no bridge confirms
+    /// it any more); offline peers are forgotten after <paramref name="keepOffline"/>.
+    /// </summary>
+    public void Expire(TimeSpan keepOffline)
     {
         var now = DateTimeOffset.UtcNow;
         foreach (var p in _peers.Values.ToList())
         {
             foreach (var b in p.Bridges.Values.ToList())
-                if (now - b.Confirmed > BridgeFresh * 3) p.Bridges.TryRemove(b.Id, out _);
-            // a bridged node is confirmed by the bridges' answers (every 5-10 s), not by beacons every 4 s
-            var quiet = !p.HeardDirectly && p.LiveBridges().Count > 0 ? BridgedSilence : silence;
+                if (now - b.Confirmed > b.Fresh * 3) p.Bridges.TryRemove(b.Id, out _);
+            // a bridged node is confirmed by its bridges' answers, not by its own beacons
+            var live = !p.HeardDirectly ? p.LiveBridges() : new List<BridgeRoute>();
+            var quiet = live.Count > 0 ? live.Max(b => b.Fresh) + TimeSpan.FromSeconds(5) : p.Silence;
             if (p.Online && p.LastSeen < now - quiet) MarkOffline(p.Id);
             else if (!p.Online && (p.OfflineSince ?? p.LastSeen) < now - keepOffline) Remove(p.Id);
             else if (!p.Online && SuccessorOf(p) is { } successor)

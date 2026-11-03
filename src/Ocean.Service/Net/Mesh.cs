@@ -13,9 +13,11 @@ using Ocean.Service.State;
 namespace Ocean.Service.Net;
 
 /// <summary>
-/// Learns about nodes we have no network path to: every 30 s each node we hear directly is asked which nodes it hears
-/// (<c>/p/neighbors</c>), and those we can't hear ourselves are listed as reached through it. A node that just came
-/// online is asked at once, so routes appear quickly; between asks a route counts for 75 s (one missed ask is fine). Every node
+/// Learns about nodes we have no network path to: a node we hear directly is asked which nodes it hears
+/// (<c>/p/neighbors</c>), and those we can't hear ourselves are listed as reached through it. A quiet node (Ocean
+/// after 1.3.8) carries a fingerprint of that list in its beacons: it is asked when it comes online and when the
+/// fingerprint changes (at once when we reach someone through it, else at most every 5 min), and each beacon with
+/// the same fingerprint confirms the routes through it. An older node is asked every 30 s. Every node
 /// that offers one is kept as a bridge to it, so requests can spread over them and move when one fails.
 /// <para>
 /// The answer carries a revision: when nothing changed the node answers 304 with only its current load, so the
@@ -39,15 +41,27 @@ public sealed class MeshService : BackgroundService
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastAsk = new();
     private readonly ConcurrentDictionary<string, string> _lastRev = new();
     private readonly ConcurrentDictionary<string, List<NeighborDto>> _lastNodes = new();
+    /// <summary>The fingerprint a quiet node had in its beacon when we last asked it.</summary>
+    private readonly ConcurrentDictionary<string, string> _askedNrev = new();
+    /// <summary>The bridge's load at its last answer (kept for confirming its routes in between).</summary>
+    private readonly ConcurrentDictionary<string, int> _lastLoad = new();
+    /// <summary>When a bridge's routes were last confirmed from its beacon.</summary>
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _confirmedFrom = new();
+    private static readonly TimeSpan OldNodeEvery = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan ReliedOnGap = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan OtherwiseGap = TimeSpan.FromMinutes(5);
 
     public MeshService(PeerRegistry registry, PeerClient client, NodeIdentity identity, ConfigStore config, ViaForwarder forwarder, ILogger<MeshService> log)
     {
         _registry = registry; _client = client; _identity = identity; _config = config; _forwarder = forwarder; _log = log;
         _registry.Changed += (p, change) =>
         {
-            if (change is PeerChange.Offline or PeerChange.Removed) { _lastRev.TryRemove(p.Id, out _); _lastNodes.TryRemove(p.Id, out _); }
+            if (change is PeerChange.Offline or PeerChange.Removed)
+            {
+                _lastRev.TryRemove(p.Id, out _); _lastNodes.TryRemove(p.Id, out _); _askedNrev.TryRemove(p.Id, out _); _confirmedFrom.TryRemove(p.Id, out _);
+            }
             // a node we hear that just came online is asked at once (the loop looks every second), not up to 30 s later
-            if (!p.Bridged && change is PeerChange.Added or PeerChange.Online) _lastAsk.TryRemove(p.Id, out _);
+            if (!p.Bridged && change is PeerChange.Added or PeerChange.Online) { _lastAsk.TryRemove(p.Id, out _); _askedNrev.TryRemove(p.Id, out _); }
             if (p.Bridged && change is PeerChange.Added or PeerChange.Online)
                 _log.LogInformation("peer {State}: {Name} ({User}@{Host}), reached through {Via} (no network path from here)",
                     change == PeerChange.Added ? "online" : "back online", p.Name, p.User, p.Host, p.Via);
@@ -64,7 +78,10 @@ public sealed class MeshService : BackgroundService
         return Results.Json(dto, Json.Options);
     }
 
-    private NeighborsDto Neighbors(string callerId)
+    /// <summary>Fingerprint of the nodes we hear directly, for our beacons: others ask for the list only when it changes.</summary>
+    public string Revision() => Neighbors(null).Rev;
+
+    private NeighborsDto Neighbors(string? callerId)
     {
         var dto = new NeighborsDto { Bridging = _config.Current.AllowBridging, Load = _forwarder.Active };
         if (dto.Bridging)
@@ -87,27 +104,41 @@ public sealed class MeshService : BackgroundService
         return dto;
     }
 
-    /// <summary>
-    /// Each node we hear is asked every 30 s (it used to be 5-10 s: with two dozen PCs that was a few requests a second
-    /// for lists that rarely change). <see cref="PeerRegistry.BridgeFresh"/> must stay well above it.
-    /// </summary>
-    private static TimeSpan PollInterval(int direct) => TimeSpan.FromSeconds(30);
-
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
             var now = DateTimeOffset.UtcNow;
-            var direct = _registry.Snapshot().Where(p => p.Online && !p.Bridged).ToList(); // only nodes we reach ourselves
-            var every = PollInterval(direct.Count);
+            var all = _registry.Snapshot();
+            var direct = all.Where(p => p.Online && !p.Bridged).ToList(); // only nodes we reach ourselves
+            // bridges some node is reached through right now: their news matters at once
+            var reliedOn = all.Where(p => p.Online && !p.HeardDirectly).SelectMany(p => p.Bridges.Keys).ToHashSet();
             foreach (var p in direct)
             {
                 if (_skip.TryGetValue(p.Id, out var until) && now < until) continue;
-                if (now - _lastAsk.GetValueOrDefault(p.Id) < every) continue;
-                if (_busy.TryAdd(p.Id, 0)) { _lastAsk[p.Id] = now; _ = AskAsync(p, ct); }
+                var since = now - _lastAsk.GetValueOrDefault(p.Id);
+                bool due;
+                if (p.Hb == 0) due = since >= OldNodeEvery; // an older Ocean has no fingerprint: ask it regularly
+                else
+                {
+                    var changed = !_askedNrev.TryGetValue(p.Id, out var asked) || asked != (p.Nrev ?? "");
+                    due = changed && since >= (reliedOn.Contains(p.Id) ? ReliedOnGap : OtherwiseGap);
+                    if (!changed) ConfirmFromBeacon(p);
+                }
+                if (due && _busy.TryAdd(p.Id, 0)) { _lastAsk[p.Id] = now; _askedNrev[p.Id] = p.Nrev ?? ""; _ = AskAsync(p, ct); }
             }
-            try { await Task.Delay(TimeSpan.FromSeconds(1), ct); } catch (OperationCanceledException) { break; }
+            try { await Task.Delay(TimeSpan.FromSeconds(2), ct); } catch (OperationCanceledException) { break; }
         }
+    }
+
+    /// <summary>A quiet bridge's beacon with the same fingerprint: the nodes it listed are still reached through it.</summary>
+    private void ConfirmFromBeacon(Peer bridge)
+    {
+        if (!_lastNodes.TryGetValue(bridge.Id, out var known) || known.Count == 0) return;
+        if (_confirmedFrom.TryGetValue(bridge.Id, out var at) && bridge.LastSeen <= at) return;
+        _confirmedFrom[bridge.Id] = bridge.LastSeen;
+        var realm = Realm.Tag(_config.Current.Secret);
+        foreach (var k in known) _registry.ConfirmBridge(k, bridge, _lastLoad.GetValueOrDefault(bridge.Id), realm);
     }
 
     private async Task AskAsync(Peer peer, CancellationToken ct)
@@ -125,6 +156,7 @@ public sealed class MeshService : BackgroundService
                 return;
             }
             var load = resp.Headers.TryGetValues(Via.LoadHeader, out var l) && int.TryParse(l.FirstOrDefault(), out var n) ? n : 0;
+            _lastLoad[peer.Id] = load;
             var realm = Realm.Tag(_config.Current.Secret);
             if (resp.StatusCode == HttpStatusCode.NotModified)
             {

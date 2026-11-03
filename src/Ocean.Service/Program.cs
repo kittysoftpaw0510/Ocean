@@ -164,6 +164,7 @@ builder.WebHost.ConfigureKestrel(k =>
 var app = builder.Build();
 var log = app.Services.GetRequiredService<ILogger<Program>>();
 var peerService = app.Services.GetRequiredService<PeerService>();
+var peerRegistry = app.Services.GetRequiredService<PeerRegistry>();
 LanOnly.Log = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("LanOnly");
 foreach (var w in identityWarnings) log.LogWarning("{Warning}", w);
 // Stopping (Windows stopping the service, an update): requests that never end by themselves (the app's event feed,
@@ -213,7 +214,11 @@ app.Use(async (ctx, next) =>
             return;
         }
         // Each PC on the way builds its own request, so the version on it is the connecting PC's (never our own relay).
-        if (connectedId != identity.NodeId) peerService.NoteVersion(connectedId, ctx.Request.Headers.UserAgent.ToString());
+        if (connectedId != identity.NodeId)
+        {
+            peerService.NoteVersion(connectedId, ctx.Request.Headers.UserAgent.ToString());
+            peerRegistry.Touch(connectedId); // it talks to us: it is there (quiet nodes beacon only every few minutes)
+        }
         // Carried by other nodes (Via): the caller is a relay; the origin signed the request. Checked by every node on
         // the way; the destination serves it as the origin's (its grants, its download slots).
         if (ctx.Request.Headers.ContainsKey(Ocean.Core.Protocol.Via.OriginHeader))

@@ -76,9 +76,12 @@ public sealed class RelayWorker : IDisposable
                 if (!_registry.TryGetOnline(peerId, out var peer)) break;
                 try
                 {
+                    // ask for a long hold: an idle link then costs one request every few minutes (an older node
+                    // ignores the header and answers after 25 s, as before)
                     var req = _client.Build(peer, HttpMethod.Post, "/p/relay/poll");
+                    req.Headers.TryAddWithoutValidation(RelayHub.HoldHeader, RelayHub.MaxHoldSeconds.ToString());
                     using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    cts.CancelAfter(TimeSpan.FromSeconds(40));
+                    cts.CancelAfter(TimeSpan.FromSeconds(RelayHub.MaxHoldSeconds + 20));
                     using var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseContentRead, cts.Token);
                     failures = 0;
                     if (resp.StatusCode == HttpStatusCode.NoContent) continue;

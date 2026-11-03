@@ -120,7 +120,8 @@ public static class PeerApi
         // ---- reverse connection (the caller is a node we could not reach directly) ----
         g.MapPost("/relay/poll", async (HttpContext ctx, RelayHub hub) =>
         {
-            var job = await hub.PollAsync(PeerContext.Get(ctx).ClientId, ctx.RequestAborted);
+            var hold = int.TryParse(ctx.Request.Headers[RelayHub.HoldHeader].ToString(), out var h) ? h : 25;
+            var job = await hub.PollAsync(PeerContext.Get(ctx).ClientId, ctx.RequestAborted, hold);
             return job is null ? Results.NoContent() : Results.Json(job, Json.Options);
         });
 
