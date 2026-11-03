@@ -67,7 +67,8 @@ The setup:
 - upgrades in place (run a newer setup over an older one; settings and shares are kept).
 
 **Updates.** Ocean looks at this project's [GitHub releases](https://github.com/kittysoftpaw0510/Ocean/releases)
-every 4 hours (sleep and restarts don't reset that). *Settings > App > Updates* picks how: **Auto-check** (default)
+every time it starts (trying again after 10 s, 1 min and 10 min while there is no connection) and then every 4 hours.
+Without internet it stays silent; only *Check for updates* says it couldn't reach GitHub. *Settings > App > Updates* picks how: **Auto-check** (default)
 tells you when a new version is out and downloads it when you click **Update now**; **Auto-update** also downloads
 it in the background, so **Install now** is one click; **Manual** never looks by itself (*Settings > About > Check
 for updates*). Nothing is installed until you click: the installer then closes Ocean, updates it and opens it again. PCs without internet simply never see the banner. A release must be tagged

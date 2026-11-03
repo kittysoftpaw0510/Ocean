@@ -598,9 +598,11 @@ public partial class MainViewModel : ObservableObject
 
     // ------------------------------------------------------------------ updates
 
+    /// <summary>At the app's start: what the service knows, and a look for a new version (silent without a connection).</summary>
     public async Task LoadUpdateAsync()
     {
         try { ApplyUpdate(await Api.GetAsync<UpdateStatusDto>("/api/update")); } catch { }
+        try { await Api.PostAsync("/api/update/startup"); } catch (Exception ex) { AppLog.Warn("Update", "startup check", ex); } // the result comes as an event
     }
 
     /// <summary>The user clicked "Update now": once the download is complete, the installer starts by itself.</summary>

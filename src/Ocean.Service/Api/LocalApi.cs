@@ -132,6 +132,8 @@ public static class LocalApi
         // ---- updates (GitHub releases): status, a check now; the app runs the downloaded installer ----
         g.MapGet("/update", (Update.Updater updater) => Results.Json(updater.Status, Json.Options));
         g.MapPost("/update/check", async (HttpContext ctx, Update.Updater updater) => Results.Json(await updater.CheckAsync(ctx.RequestAborted), Json.Options));
+        // the app started: look for a new version (unless one was looked for a moment ago); silent without a connection
+        g.MapPost("/update/startup", (Update.Updater updater) => { updater.AppStarted(); return Results.Json(updater.Status, Json.Options); });
         // "Update now": downloads the newest version in the background (progress as "update" events)
         g.MapPost("/update/download", async (HttpContext ctx, Update.Updater updater) => Results.Json(await updater.DownloadNowAsync(ctx.RequestAborted), Json.Options));
 

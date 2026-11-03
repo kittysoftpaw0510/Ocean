@@ -330,7 +330,10 @@ by online then newest. The result carries per-node counts for the chips and the 
 Three modes (`ServiceConfig.UpdateMode`; settings from before it map `CheckUpdates` on/off to auto-check/manual):
 `auto-update` downloads a newer version by itself, `auto-check` (default) only announces it (`POST /api/update/download`
 fetches it when the user clicks Update now; the app then runs the installer by itself), `manual` never looks by itself.
-Checks are due 4 h after the last one, 30 min after a failed one, by the wall clock: `update-state.json` keeps the time
+Every start looks at once: the service starting, and the app starting (`POST /api/update/startup`) unless a check
+succeeded in the last 10 min; while there is no connection it tries again after 10 s, 1 min and 10 min. A check or a
+background download that fails stays silent (logged only, nothing in the status); only "Check for updates" reports
+it. After that, checks are due 4 h after the last one, 30 min after a failed one, by the wall clock: `update-state.json` keeps the time
 and the newest release seen, the service looks every 5 min whether a check is due, so sleep and restarts neither skip
 nor repeat checks, and a known newer version is announced right after a restart. The service asks
 `api.github.com/repos/kittysoftpaw0510/Ocean/releases/latest`; when the API refuses (60 requests an hour per internet

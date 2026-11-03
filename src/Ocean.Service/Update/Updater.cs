@@ -16,9 +16,11 @@ namespace Ocean.Service.Update;
 /// <item><b>auto-check</b> (default): checks by itself and tells the user; it downloads when they click Update.</item>
 /// <item><b>manual</b>: only "Check for updates" looks.</item>
 /// </list>
-/// Checks are scheduled by the clock, not a timer: the time of the last one is kept on disk, and every few minutes the
-/// service looks whether 4 h have passed (30 min after a failed one), so sleep and restarts neither skip nor repeat
-/// checks. The newest release seen is kept too, so the app hears about it again right after a restart. When GitHub's
+/// Every start looks at once (the service starting, and the app starting unless a check succeeded in the last 10 min),
+/// and when there is no connection yet tries again after 10 s, 1 min and 10 min. After that checks follow the clock,
+/// not a timer: the time of the last one is kept on disk, and every few minutes the service looks whether 4 h have
+/// passed (30 min after a failed one), so sleep and restarts don't skip checks. A check or a background download that
+/// can't reach the internet stays silent (the log says so); only "Check for updates" reports it, since the user asked. The newest release seen is kept too, so the app hears about it again right after a restart. When GitHub's
 /// API refuses (60 requests an hour for one internet address, shared by every PC behind it), the release page is read
 /// instead. No internet: the check fails, is logged, and is tried again later.
 /// </summary>
@@ -28,7 +30,24 @@ public sealed class Updater : BackgroundService
     private static readonly TimeSpan Every = TimeSpan.FromHours(4);
     private static readonly TimeSpan AfterFailure = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan Look = TimeSpan.FromMinutes(5);
-    private static readonly TimeSpan FirstLook = TimeSpan.FromSeconds(OceanDefaults.EnvPort("OCEAN_TEST_UPDATE_FIRST_AFTER", 60));
+    /// <summary>At start: the check itself (after a few seconds for the network to settle), then 3 more tries.</summary>
+    private static readonly TimeSpan[] StartupWaits = TestWaits() ??
+        new[] { TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(10) };
+    /// <summary>The app starting doesn't look again when a check succeeded this recently (the PC just booted).</summary>
+    private static readonly TimeSpan RecentEnough = TimeSpan.FromMinutes(10);
+
+    /// <summary>Developers only: OCEAN_TEST_UPDATE_WAITS = the startup waits in seconds ("1,2,3,4").</summary>
+    private static TimeSpan[]? TestWaits()
+    {
+        var raw = Environment.GetEnvironmentVariable("OCEAN_TEST_UPDATE_WAITS");
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var waits = raw.Split(',').Select(x => double.TryParse(x, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? TimeSpan.FromSeconds(v) : (TimeSpan?)null).ToList();
+        return waits.All(w => w is not null) && waits.Count > 0 ? waits.Select(w => w!.Value).ToArray() : null;
+    }
+
+    /// <summary>Developers only: OCEAN_TEST_UPDATE_FAIL = how many checks fail as if there were no connection.</summary>
+    private int _simulatedOffline = OceanDefaults.EnvPort("OCEAN_TEST_UPDATE_FAIL", 0);
+    private int _startupRunning;
 
     private readonly ConfigStore _config;
     private readonly EventHub _events;
@@ -61,7 +80,7 @@ public sealed class Updater : BackgroundService
             lock (_lock) { before = _status.Mode; _status.Mode = mode; _status.AutoCheck = mode != UpdateModes.Manual; }
             if (before == mode) return;
             _log.LogInformation("updates: {Mode}", mode);
-            if (mode == UpdateModes.AutoUpdate && _found is { } rel && !Status.Ready) _ = DownloadInBackground(rel); // fetch what was only announced so far
+            if (mode == UpdateModes.AutoUpdate && _found is { } rel && !Status.Ready) _ = DownloadInBackground(rel, quiet: true); // fetch what was only announced so far
             CheckSoon();
         };
     }
@@ -86,10 +105,10 @@ public sealed class Updater : BackgroundService
         _stopping = ct;
         try { Directory.CreateDirectory(_dir); } catch { }
         Restore();
-        await Task.Delay(FirstLook, ct).ContinueWith(_ => { }, CancellationToken.None);
+        await StartupChecksAsync("the service started", ct);
         while (!ct.IsCancellationRequested)
         {
-            if (ModeOf(_config.Current) != UpdateModes.Manual && Due()) await CheckAsync(ct);
+            if (ModeOf(_config.Current) != UpdateModes.Manual && Due()) await CheckCoreAsync(ct, userAsked: false);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _wake.Token);
             try { await Task.Delay(Look, linked.Token); } catch (OperationCanceledException) { }
             if (_wake.IsCancellationRequested) { _wake.Dispose(); _wake = new CancellationTokenSource(); }
@@ -106,38 +125,85 @@ public sealed class Updater : BackgroundService
         return since >= (_saved.LastAttemptOk ? Every : AfterFailure);
     }
 
-    /// <summary>Looks now ("Check for updates", or when due); the result is in the status it returns.</summary>
-    public async Task<UpdateStatusDto> CheckAsync(CancellationToken ct)
+    /// <summary>
+    /// At start: looks, and while there is no connection tries again after 10 s, 1 min and 10 min (silently). One run at
+    /// a time; Manual never looks by itself.
+    /// </summary>
+    private async Task StartupChecksAsync(string why, CancellationToken ct)
     {
-        if (!await _checkLock.WaitAsync(0, ct)) { await _checkLock.WaitAsync(ct); _checkLock.Release(); return Status; }
+        if (Interlocked.Exchange(ref _startupRunning, 1) == 1) return;
         try
         {
-            Set(s => { s.Checking = true; s.Error = ""; });
+            for (var i = 0; i < StartupWaits.Length; i++)
+            {
+                try { await Task.Delay(StartupWaits[i], ct); } catch (OperationCanceledException) { return; }
+                if (ModeOf(_config.Current) == UpdateModes.Manual) return;
+                if (await CheckCoreAsync(ct, userAsked: false)) return;
+                if (i + 1 < StartupWaits.Length)
+                    _log.LogInformation("update check ({Why}): no connection; trying again in {Wait}", why, Wait(StartupWaits[i + 1]));
+            }
+            _log.LogInformation("update check ({Why}): still no connection after {Tries} tries; next look in {Min} min", why, StartupWaits.Length, (int)AfterFailure.TotalMinutes);
+        }
+        finally { Interlocked.Exchange(ref _startupRunning, 0); }
+    }
+
+    private static string Wait(TimeSpan t) => t.TotalMinutes >= 1 ? $"{t.TotalMinutes:0} min" : $"{t.TotalSeconds:0} s";
+
+    /// <summary>The app started: look as at the service's start, unless a check succeeded a moment ago (the PC just booted).</summary>
+    public void AppStarted()
+    {
+        if (ModeOf(_config.Current) == UpdateModes.Manual) return;
+        if (_saved is { LastAttemptOk: true, LastAttempt: { } at } && DateTimeOffset.UtcNow - at is var since && since >= TimeSpan.Zero && since < RecentEnough) return;
+        _ = StartupChecksAsync("the app started", _stopping);
+    }
+
+    /// <summary>"Check for updates": looks now and reports a failure (the user asked); the result is in the status.</summary>
+    public async Task<UpdateStatusDto> CheckAsync(CancellationToken ct)
+    {
+        await CheckCoreAsync(ct, userAsked: true);
+        return Status;
+    }
+
+    /// <summary>
+    /// Looks once. True when GitHub answered (whatever it said). A failure only shows in the status when the user asked;
+    /// otherwise it is silent (logged).
+    /// </summary>
+    private async Task<bool> CheckCoreAsync(CancellationToken ct, bool userAsked)
+    {
+        if (!await _checkLock.WaitAsync(0, ct)) { await _checkLock.WaitAsync(ct); _checkLock.Release(); return _saved.LastAttemptOk; }
+        try
+        {
+            Set(s => { s.Checking = true; if (userAsked) s.Error = ""; });
             Release? rel;
             string via;
-            try { (rel, via) = await FindLatestAsync(ct); }
+            try
+            {
+                if (_simulatedOffline > 0) { _simulatedOffline--; throw new HttpRequestException("no connection (simulated)"); }
+                (rel, via) = await FindLatestAsync(ct);
+            }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _log.LogInformation("update check failed: {Msg}; trying again in {Min} min", ex.Message, (int)AfterFailure.TotalMinutes);
+                _log.LogInformation("update check failed: {Msg}", ex.Message);
                 Remember(ok: false, null);
-                Set(s => { s.Checking = false; s.CheckedAt = DateTimeOffset.UtcNow; s.Error = "Could not reach GitHub: " + ex.Message; });
-                return Status;
+                if (userAsked) Set(s => { s.Checking = false; s.CheckedAt = DateTimeOffset.UtcNow; s.Error = "Could not reach GitHub: " + ex.Message; });
+                else Set(s => s.Checking = false); // silent: no connection is nothing to tell anyone
+                return false;
             }
             Remember(ok: true, rel);
             if (rel is null)
             {
                 _log.LogInformation("update check ({Via}): no release with an installer", via);
-                Set(s => { s.Checking = false; s.CheckedAt = DateTimeOffset.UtcNow; s.Error = "No release with an installer found"; });
-                return Status;
+                Set(s => { s.Checking = false; s.CheckedAt = DateTimeOffset.UtcNow; s.Error = userAsked ? "No release with an installer found" : ""; });
+                return true;
             }
             var newer = IsNewer(rel.Version, Current);
             _log.LogInformation("update check ({Via}): latest {Latest}, this PC {Current}{Note}", via, rel.Version, Current, newer ? " - newer version available" : "");
             Announce(rel, newer);
-            if (!newer) { Cleanup(null); return Status; }
+            if (!newer) { Cleanup(null); return true; }
             // Already downloaded and complete: ready, whatever the mode. Otherwise only auto-update fetches it now.
             if (InstallerOnDisk(rel) is { } path) Set(s => { s.Ready = true; s.InstallerPath = path; s.InstallerSize = rel.AssetSize; });
-            else if (ModeOf(_config.Current) == UpdateModes.AutoUpdate) await DownloadAsync(rel, ct);
-            return Status;
+            else if (ModeOf(_config.Current) == UpdateModes.AutoUpdate) await DownloadAsync(rel, ct, quiet: !userAsked);
+            return true;
         }
         finally { _checkLock.Release(); }
     }
@@ -148,11 +214,11 @@ public sealed class Updater : BackgroundService
     public async Task<UpdateStatusDto> DownloadNowAsync(CancellationToken ct)
     {
         if (_found is null || !IsNewer(_found.Version, Current)) await CheckAsync(ct);
-        if (_found is { } rel && IsNewer(rel.Version, Current) && !Status.Ready) _ = DownloadInBackground(rel);
+        if (_found is { } rel && IsNewer(rel.Version, Current) && !Status.Ready) _ = DownloadInBackground(rel, quiet: false);
         return Status;
     }
 
-    private Task DownloadInBackground(Release rel) => Task.Run(() => DownloadAsync(rel, _stopping));
+    private Task DownloadInBackground(Release rel, bool quiet) => Task.Run(() => DownloadAsync(rel, _stopping, quiet));
 
     private void Announce(Release rel, bool newer, DateTimeOffset? checkedAt = null)
     {
@@ -184,7 +250,7 @@ public sealed class Updater : BackgroundService
         Announce(rel, newer, _saved.LastAttempt); // the app hears about a known newer version right away, not hours later
         if (!newer) { Cleanup(null); return; }
         if (InstallerOnDisk(rel) is { } path) Set(s => { s.Ready = true; s.InstallerPath = path; s.InstallerSize = rel.AssetSize; });
-        else if (ModeOf(_config.Current) == UpdateModes.AutoUpdate) _ = DownloadInBackground(rel);
+        else if (ModeOf(_config.Current) == UpdateModes.AutoUpdate) _ = DownloadInBackground(rel, quiet: true);
     }
 
     private void Remember(bool ok, Release? latest)
@@ -205,7 +271,8 @@ public sealed class Updater : BackgroundService
         return File.Exists(path) && (rel.AssetSize <= 0 || new FileInfo(path).Length == rel.AssetSize) ? path : null;
     }
 
-    private async Task DownloadAsync(Release rel, CancellationToken ct)
+    /// <summary><paramref name="quiet"/>: in the background (auto-update), a failure is only logged; tried again at the next check.</summary>
+    private async Task DownloadAsync(Release rel, CancellationToken ct, bool quiet = false)
     {
         if (!await _downloadLock.WaitAsync(0, ct)) return; // one at a time; the running one reports
         var path = Path.Combine(_dir, rel.AssetName);
@@ -252,7 +319,7 @@ public sealed class Updater : BackgroundService
         {
             _log.LogWarning("download of Ocean {Version} failed: {Msg}", rel.Version, ex.Message);
             try { File.Delete(part); } catch { }
-            Set(s => { s.Downloading = false; s.Error = "Download failed: " + ex.Message; });
+            Set(s => { s.Downloading = false; if (!quiet) s.Error = "Download failed: " + ex.Message; });
         }
         catch (OperationCanceledException) { try { File.Delete(part); } catch { } Set(s => s.Downloading = false); }
         finally { _downloadLock.Release(); }
