@@ -353,6 +353,22 @@
                     <Button Style="{StaticResource BtnPrimary}" Margin="0,0,6,0" Command="{Binding MoveToCommand}" Visibility="{Binding SelectedItemCount, Converter={StaticResource CountToVis}}">
                         <TextBlock Foreground="{StaticResource AccentText}"><Run Text="Move "/><Run Text="{Binding SelectedItemCount, Mode=OneWay}"/><Run Text=" to…"/></TextBlock>
                     </Button>
+                    <Button x:Name="SortButton" Style="{StaticResource BtnGhost}" Margin="0,0,4,0" Click="Sort_Click" ToolTip="Sort the videos and folders shown here">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE8CB;" Style="{StaticResource Icon}" Margin="0,0,8,0"/>
+                            <TextBlock Text="{Binding SortLabel}"/>
+                            <TextBlock Text="&#xE70D;" Style="{StaticResource Icon}" FontSize="9" Margin="8,1,0,0"/>
+                        </StackPanel>
+                        <Button.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Newest first" Command="{Binding PlacementTarget.DataContext.SetSortCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Newest"/>
+                                <MenuItem Header="Oldest first" Command="{Binding PlacementTarget.DataContext.SetSortCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Oldest"/>
+                                <MenuItem Header="Name" Command="{Binding PlacementTarget.DataContext.SetSortCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Name"/>
+                                <MenuItem Header="Largest first" Command="{Binding PlacementTarget.DataContext.SetSortCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Size"/>
+                                <MenuItem Header="Longest first" Command="{Binding PlacementTarget.DataContext.SetSortCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Duration"/>
+                            </ContextMenu>
+                        </Button.ContextMenu>
+                    </Button>
                     <Button x:Name="AddButton" Style="{StaticResource BtnGhost}" Click="Add_Click" ToolTip="Add videos or a folder from your disk into the folder shown here">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="&#xE710;" Style="{StaticResource Icon}" Margin="0,0,8,0"/>

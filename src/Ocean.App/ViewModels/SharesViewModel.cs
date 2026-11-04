@@ -98,6 +98,8 @@ public partial class LocalFolderVm : ObservableObject
     public int Count { get; }
     public long TotalBytes { get; }
     public LocalItemVm? Cover { get; }
+    /// <summary>When the most recent video inside was added (for sorting by date).</summary>
+    public DateTimeOffset Newest { get; }
     [ObservableProperty] private bool _isSelected;
     [ObservableProperty] private bool _isDropTarget;
 
@@ -107,6 +109,7 @@ public partial class LocalFolderVm : ObservableObject
         Count = contents.Count;
         TotalBytes = contents.Sum(i => i.Dto.Size);
         Cover = contents.OrderByDescending(i => i.Dto.AddedAt).FirstOrDefault();
+        Newest = Cover?.Dto.AddedAt ?? DateTimeOffset.MinValue;
         if (Cover is not null) Cover.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(LocalItemVm.Thumb) or "") OnPropertyChanged(nameof(Thumb)); };
     }
 
@@ -346,7 +349,7 @@ public partial class SharesViewModel : ObservableObject
         FolderMode = f.Length == 0;
         if (!FolderMode)
         {
-            Items = _allItems.Where(i => i.Name.Contains(f, StringComparison.CurrentCultureIgnoreCase) || i.Folder.Contains(f, StringComparison.CurrentCultureIgnoreCase)).ToList();
+            Items = SortItems(_allItems.Where(i => i.Name.Contains(f, StringComparison.CurrentCultureIgnoreCase) || i.Folder.Contains(f, StringComparison.CurrentCultureIgnoreCase)));
             Entries = Items.Cast<object>().ToList();
             Crumbs = new();
             OnSelectionChanged();
@@ -357,19 +360,52 @@ public partial class SharesViewModel : ObservableObject
             CurrentFolder = ""; // removed or renamed elsewhere; re-enters here
             return;
         }
-        var subFolders = Folders
+        var subFolders = SortFolders(Folders
             .Where(p => string.Equals(FolderPath.Parent(p), CurrentFolder, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(p => p, StringComparer.CurrentCultureIgnoreCase)
-            .Select(p => new LocalFolderVm(p, _allItems.Where(i => FolderPath.IsUnder(i.Dto.Folder, p)).ToList()))
-            .ToList();
-        Items = _allItems.Where(i => string.Equals(i.Dto.Folder, CurrentFolder, StringComparison.OrdinalIgnoreCase))
-                         .OrderBy(i => i.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+            .Select(p => new LocalFolderVm(p, _allItems.Where(i => FolderPath.IsUnder(i.Dto.Folder, p)).ToList())));
+        Items = SortItems(_allItems.Where(i => string.Equals(i.Dto.Folder, CurrentFolder, StringComparison.OrdinalIgnoreCase)));
         Entries = subFolders.Cast<object>().Concat(Items).ToList();
         var crumbs = new List<Crumb> { new(Selected?.Name ?? "Share", "", CurrentFolder.Length == 0) };
         crumbs.AddRange(FolderPath.SelfAndAncestors(CurrentFolder).Select(p => new Crumb(FolderPath.Name(p), p, string.Equals(p, CurrentFolder, StringComparison.OrdinalIgnoreCase))));
         Crumbs = crumbs;
         OnSelectionChanged();
     }
+
+    // ------------------------------------------------------------------ sorting
+
+    private static SortMode _lastSort = SortMode.Name; // kept while the app runs, like Browse
+    [ObservableProperty] private SortMode _sort = _lastSort;
+    partial void OnSortChanged(SortMode value) { _lastSort = value; OnPropertyChanged(nameof(SortLabel)); ApplyItemFilter(); }
+    [RelayCommand] private void SetSort(string mode) => Sort = Enum.Parse<SortMode>(mode, true);
+
+    public string SortLabel => Sort switch
+    {
+        SortMode.Newest => "Newest first",
+        SortMode.Oldest => "Oldest first",
+        SortMode.Size => "Largest first",
+        SortMode.Duration => "Longest first",
+        _ => "Name",
+    };
+
+    private static readonly StringComparer ByName = StringComparer.CurrentCultureIgnoreCase;
+
+    private List<LocalItemVm> SortItems(IEnumerable<LocalItemVm> q) => (Sort switch
+    {
+        SortMode.Newest => q.OrderByDescending(i => i.Dto.AddedAt).ThenBy(i => i.Name, ByName),
+        SortMode.Oldest => q.OrderBy(i => i.Dto.AddedAt).ThenBy(i => i.Name, ByName),
+        SortMode.Size => q.OrderByDescending(i => i.Dto.Size).ThenBy(i => i.Name, ByName),
+        SortMode.Duration => q.OrderByDescending(i => i.Dto.DurationMs).ThenBy(i => i.Name, ByName),
+        _ => q.OrderBy(i => i.Name, ByName),
+    }).ToList();
+
+    /// <summary>Folders stay above the videos; by date they go by the newest video inside.</summary>
+    private List<LocalFolderVm> SortFolders(IEnumerable<LocalFolderVm> q) => (Sort switch
+    {
+        SortMode.Newest => q.OrderByDescending(f => f.Newest).ThenBy(f => f.Name, ByName),
+        SortMode.Oldest => q.OrderBy(f => f.Newest).ThenBy(f => f.Name, ByName),
+        SortMode.Size => q.OrderByDescending(f => f.TotalBytes).ThenBy(f => f.Name, ByName),
+        _ => q.OrderBy(f => f.Name, ByName),
+    }).ToList();
 
     public void OnSelectionChanged() => SelectedItemCount = Entries.OfType<LocalItemVm>().Count(i => i.IsSelected);
 

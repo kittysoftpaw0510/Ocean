@@ -58,6 +58,8 @@
             <Setter Property="Cursor" Value="Hand"/>
             <!-- the whole row (not just its text) opens the menu -->
             <Setter Property="ContextMenu" Value="{StaticResource PeerMenu}"/>
+            <!-- right-click only opens the menu; it doesn't select (= open) the node -->
+            <EventSetter Event="PreviewMouseRightButtonDown" Handler="PeerItem_RightButtonDown"/>
             <Setter Property="Tag" Value="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"/>
             <Setter Property="Template">
                 <Setter.Value>

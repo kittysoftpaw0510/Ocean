@@ -465,6 +465,7 @@
                     <Button.ContextMenu>
                         <ContextMenu>
                             <MenuItem Header="Newest first" Command="{Binding PlacementTarget.DataContext.SetSortCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Newest"/>
+                            <MenuItem Header="Oldest first" Command="{Binding PlacementTarget.DataContext.SetSortCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Oldest"/>
                             <MenuItem Header="Name" Command="{Binding PlacementTarget.DataContext.SetSortCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Name"/>
                             <MenuItem Header="Largest first" Command="{Binding PlacementTarget.DataContext.SetSortCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Size"/>
                             <MenuItem Header="Longest first" Command="{Binding PlacementTarget.DataContext.SetSortCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Duration"/>

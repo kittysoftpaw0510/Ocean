@@ -6,7 +6,7 @@ using Ocean.Core.Protocol;
 namespace Ocean.App.ViewModels;
 
 public enum ViewMode { Grid, Tiles, List }
-public enum SortMode { Newest, Name, Size, Duration, Folder }
+public enum SortMode { Newest, Oldest, Name, Size, Duration, Folder }
 
 /// <summary>Dialogs the view layer provides to view models.</summary>
 public interface IDialogs

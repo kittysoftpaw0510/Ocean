@@ -32,6 +32,12 @@ public partial class MainWindow : Window, IDialogs
 
     public void ForceClose() { _forceClose = true; Close(); }
 
+    /// <summary>
+    /// A right-click on a node shows its menu without opening the node: a ListBoxItem would otherwise select itself
+    /// on the right button too, and selecting a node navigates to it. The menu still opens (on the button's release).
+    /// </summary>
+    private void PeerItem_RightButtonDown(object sender, MouseButtonEventArgs e) => e.Handled = true;
+
     protected override void OnClosing(CancelEventArgs e)
     {
         if (!_forceClose)

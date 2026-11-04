@@ -74,6 +74,7 @@ public partial class BrowseViewModel : ObservableObject
     public string SortLabel => Sort switch
     {
         SortMode.Newest => "Newest first",
+        SortMode.Oldest => "Oldest first",
         SortMode.Name => "Name",
         SortMode.Size => "Largest first",
         SortMode.Duration => "Longest first",
@@ -232,6 +233,7 @@ public partial class BrowseViewModel : ObservableObject
 
     private List<ItemVm> SortItems(IEnumerable<ItemVm> q) => (Sort switch
     {
+        SortMode.Oldest => q.OrderBy(i => i.AddedAt).ThenBy(i => i.Name),
         SortMode.Name => q.OrderBy(i => i.Name, StringComparer.CurrentCultureIgnoreCase),
         SortMode.Size => q.OrderByDescending(i => i.Size),
         SortMode.Duration => q.OrderByDescending(i => i.DurationMs).ThenBy(i => i.Name),
@@ -242,6 +244,7 @@ public partial class BrowseViewModel : ObservableObject
     private List<FolderVm> SortFolders(IEnumerable<FolderVm> q) => (Sort switch
     {
         SortMode.Newest => q.OrderByDescending(f => f.Newest).ThenBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase),
+        SortMode.Oldest => q.OrderBy(f => f.Newest).ThenBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase),
         SortMode.Size => q.OrderByDescending(f => f.TotalBytes),
         _ => q.OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase),
     }).ToList();

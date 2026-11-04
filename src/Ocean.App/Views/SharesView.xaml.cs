@@ -72,6 +72,14 @@ public partial class SharesView : UserControl
 
     // ------------------------------------------------------------------ adding videos from disk
 
+    private void Sort_Click(object sender, RoutedEventArgs e)
+    {
+        if (SortButton.ContextMenu is not { } menu) return;
+        menu.PlacementTarget = SortButton;
+        menu.Placement = PlacementMode.Bottom;
+        menu.IsOpen = true;
+    }
+
     private void Add_Click(object sender, RoutedEventArgs e)
     {
         if (AddButton.ContextMenu is not { } menu) return;
