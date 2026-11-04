@@ -1,0 +1,84 @@
+<Window x:Class="Ocean.App.Views.PipWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="{Binding Title}" Width="480" Height="270" MinWidth="240" MinHeight="135"
+        WindowStyle="None" ResizeMode="CanResize" Background="Black" ShowInTaskbar="True"
+        ShowActivated="True">
+    <!-- borderless, but resizable from every edge -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="0" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False"/>
+    </WindowChrome.WindowChrome>
+    <Grid x:Name="Host" Background="Black">
+        <!-- the player's video element is put here (first child) while picture in picture is on -->
+
+        <!-- controls, shown while the mouse is over the window -->
+        <Grid x:Name="Controls" Visibility="Collapsed">
+            <!-- top: title, pin, back to the full player, close -->
+            <Border VerticalAlignment="Top" Padding="10,6,6,14">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop Color="#D9000000" Offset="0"/>
+                        <GradientStop Color="#00000000" Offset="1"/>
+                    </LinearGradientBrush>
+                </Border.Background>
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <Button x:Name="PinButton" Width="30" Height="28" FontSize="13" Click="Pin_Click" AutomationProperties.Name="Keep on top">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource BtnIcon}">
+                                    <Setter Property="Content" Value="&#xE77A;"/>
+                                    <Setter Property="ToolTip" Value="Not on top: click to keep this window above all others"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding PipPinned}" Value="True">
+                                            <Setter Property="Content" Value="&#xE718;"/>
+                                            <Setter Property="Foreground" Value="{StaticResource Accent}"/>
+                                            <Setter Property="ToolTip" Value="Kept on top of all windows: click to let others cover it"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button Style="{StaticResource BtnIcon}" Width="30" Height="28" FontSize="13" Content="&#xE73F;" Click="Back_Click"
+                                ToolTip="Back to the full player (double-click, Esc)" AutomationProperties.Name="Back to the full player"/>
+                        <Button Style="{StaticResource BtnIcon}" Width="30" Height="28" FontSize="12" Content="&#xE711;" Click="Close_Click"
+                                ToolTip="Stop and close" AutomationProperties.Name="Close"/>
+                    </StackPanel>
+                    <TextBlock Text="{Binding Title}" Foreground="White" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"/>
+                </DockPanel>
+            </Border>
+
+            <!-- middle: back 10 s, play / pause, forward 10 s -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Button Style="{StaticResource BtnIcon}" Width="40" Height="40" FontSize="16" Content="&#xEB9E;" Click="Rewind_Click" ToolTip="Back 10 s (←)" Background="#80000000"/>
+                <Button Width="54" Height="54" Margin="14,0" Click="PlayPause_Click" ToolTip="Play / pause (Space)" Background="#99000000">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource BtnIcon}">
+                            <Setter Property="Content" Value="&#xE768;"/>
+                            <Setter Property="FontSize" Value="22"/>
+                            <Style.Triggers><DataTrigger Binding="{Binding IsPlaying}" Value="True"><Setter Property="Content" Value="&#xE769;"/></DataTrigger></Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button Style="{StaticResource BtnIcon}" Width="40" Height="40" FontSize="16" Content="&#xEB9D;" Click="Forward_Click" ToolTip="Forward 10 s (→)" Background="#80000000"/>
+            </StackPanel>
+
+            <!-- bottom: time and progress -->
+            <Border VerticalAlignment="Bottom" Padding="10,14,10,8">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                        <GradientStop Color="#00000000" Offset="0"/>
+                        <GradientStop Color="#D9000000" Offset="1"/>
+                    </LinearGradientBrush>
+                </Border.Background>
+                <StackPanel>
+                    <TextBlock Text="{Binding TimeText}" Foreground="White" FontFamily="Consolas" FontSize="12" Margin="0,0,0,5"/>
+                    <ProgressBar Height="4" Minimum="0" Maximum="{Binding DurationSeconds}" Value="{Binding PositionSeconds, Mode=OneWay}" IsHitTestVisible="False"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- a thin progress line while the controls are hidden -->
+        <ProgressBar x:Name="IdleProgress" Height="2" VerticalAlignment="Bottom" Minimum="0" Maximum="{Binding DurationSeconds}" Value="{Binding PositionSeconds, Mode=OneWay}"
+                     IsHitTestVisible="False" Background="Transparent"/>
+    </Grid>
+</Window>

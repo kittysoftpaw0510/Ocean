@@ -32,6 +32,12 @@ public partial class PlayerView : UserControl
     // Forward/back pressed several times in a row (or a held arrow key): the steps add up on the bar and the player
     // jumps once, when the presses pause. Every press used to be a jump of its own, each one a new request over
     // the network, and a burst of them stalled playback.
+    // Picture in picture: the video element moves into a small window of its own and back (PipWindow).
+    private PipWindow? _pip;
+
+    // Seek bar: the time under the mouse, shown after it rests there a moment (SeekTip).
+    private readonly System.Windows.Threading.DispatcherTimer _seekTipDelay = new() { Interval = TimeSpan.FromMilliseconds(500) };
+
     private readonly System.Windows.Threading.DispatcherTimer _stepTimer = new() { Interval = TimeSpan.FromMilliseconds(300) };
     private double? _stepTarget;
     private DateTime _lastStep;
@@ -42,6 +48,9 @@ public partial class PlayerView : UserControl
         DataContextChanged += OnDataContextChanged;
         IsVisibleChanged += OnVisibleChanged;
         _tick.Tick += (_, _) => UpdatePosition();
+        _seekTipDelay.Tick += (_, _) => { _seekTipDelay.Stop(); if (Seek.IsMouseOver) SeekTip.IsOpen = true; };
+        Seek.MouseMove += Seek_MouseMove;
+        Seek.MouseLeave += (_, _) => { _seekTipDelay.Stop(); SeekTip.IsOpen = false; };
         _stepTimer.Tick += (_, _) => { _stepTimer.Stop(); if (_stepTarget is { } t) { _stepTarget = null; SeekTo(t); } };
         _idle.Tick += (_, _) => { if (_vm is { IsFullscreen: true, IsPlaying: true }) SetChrome(false); };
         _osd.Tick += (_, _) => { _osd.Stop(); SpeedOsd.Visibility = Visibility.Collapsed; };
@@ -61,7 +70,7 @@ public partial class PlayerView : UserControl
     private void OnVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
         if (IsVisible) { Focus(); Keyboard.Focus(this); }
-        else Stop();
+        else if (_vm?.IsPip != true) Stop(); // hidden because the video went into its small window: it plays on
     }
 
     private void Vm_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -94,6 +103,9 @@ public partial class PlayerView : UserControl
                 break;
             case nameof(PlayerViewModel.IsOpen):
                 if (!_vm.IsOpen) Stop();
+                break;
+            case nameof(PlayerViewModel.IsPip):
+                if (_vm.IsPip) EnterPip(); else LeavePip();
                 break;
             case nameof(PlayerViewModel.Notice):
                 if (_vm.Notice is { Length: > 0 } notice) ShowOsd(notice);
@@ -427,8 +439,61 @@ public partial class PlayerView : UserControl
     }
     private void Media_BufferingEnded(object sender, RoutedEventArgs e) { if (_vm is not null) _vm.IsBuffering = false; }
 
+    /// <summary>The video goes into the small window, playing on as it is (the element moves, nothing reloads).</summary>
+    private void EnterPip()
+    {
+        if (_pip is not null || _vm is null) return;
+        SeekTip.IsOpen = false;
+        Root.Children.Remove(Media);
+        var pip = new PipWindow(_vm);
+        pip.PlayPause += TogglePlay;
+        pip.Step += Step;
+        pip.BackToPlayer += () => { if (_vm is not null) _vm.IsPip = false; };
+        pip.CloseVideo += () => _vm?.CloseCommand.Execute(null);
+        pip.Attach(Media);
+        _pip = pip;
+        pip.Show();
+        pip.Activate();
+    }
+
+    /// <summary>The video comes back into the full player (or the player closed).</summary>
+    private void LeavePip()
+    {
+        if (_pip is not { } pip) return;
+        _pip = null;
+        pip.Detach(Media);
+        Root.Children.Insert(0, Media);
+        pip.CloseFromPlayer();
+        // back to the full player: Ocean's window may be minimized or in the tray meanwhile
+        if (_vm?.IsOpen == true && Window.GetWindow(this) is { } main)
+        {
+            if (!main.IsVisible) main.Show();
+            if (main.WindowState == WindowState.Minimized) main.WindowState = WindowState.Normal;
+            main.Activate(); Focus(); Keyboard.Focus(this);
+        }
+    }
+
+    /// <summary>The time under the mouse on the seek bar (shown after it rests there half a second).</summary>
+    private void Seek_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (_vm is null || _vm.DurationSeconds <= 0) { SeekTip.IsOpen = false; return; }
+        double seconds;
+        if (Seek.Template?.FindName("PART_Track", Seek) is System.Windows.Controls.Primitives.Track track && track.ActualWidth > 0)
+            seconds = track.ValueFromPoint(e.GetPosition(track));
+        else
+            seconds = e.GetPosition(Seek).X / Math.Max(1, Seek.ActualWidth) * _vm.DurationSeconds;
+        seconds = Math.Clamp(seconds, 0, _vm.DurationSeconds);
+        SeekTipText.Text = Core.Format.Duration(TimeSpan.FromSeconds(seconds));
+        var tip = (FrameworkElement)SeekTip.Child;
+        tip.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        SeekTip.HorizontalOffset = e.GetPosition(Seek).X - tip.DesiredSize.Width / 2;
+        SeekTip.VerticalOffset = -tip.DesiredSize.Height - 6;
+        if (!SeekTip.IsOpen && !_seekTipDelay.IsEnabled) _seekTipDelay.Start();
+    }
+
     private void Media_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        if (_pip is not null) { _pip.OnMouseDown(sender, e); return; } // in the small window: drag it, double-click: back
         if (e.ClickCount == 2) _vm?.ToggleFullscreenCommand.Execute(null);
         else TogglePlay();
         Focus();
@@ -509,6 +574,7 @@ public partial class PlayerView : UserControl
             case Key.Up: _vm.Volume = Math.Min(1, _vm.Volume + 0.05); break;
             case Key.Down: _vm.Volume = Math.Max(0, _vm.Volume - 0.05); break;
             case Key.F: _vm.ToggleFullscreenCommand.Execute(null); break;
+            case Key.P: _vm.TogglePipCommand.Execute(null); break;
             case Key.M: _vm.ToggleMuteCommand.Execute(null); break;
             default: return;
         }

@@ -55,6 +55,18 @@ public partial class PlayerViewModel : ObservableObject
     [ObservableProperty] private double _volume = 0.8;
     [ObservableProperty] private bool _isMuted;
     [ObservableProperty] private bool _isFullscreen;
+
+    // ---- picture in picture: the video in a small window of its own, Ocean stays usable behind it
+    /// <summary>The video plays in the small window (PipWindow) instead of over the main window.</summary>
+    [ObservableProperty] private bool _isPip;
+    /// <summary>The small window stays on top of all others.</summary>
+    [ObservableProperty] private bool _pipPinned = true;
+    /// <summary>The player covers the main window (open and not in its small window).</summary>
+    public bool ShowInWindow => IsOpen && !IsPip;
+    partial void OnIsOpenChanged(bool value) { if (!value) IsPip = false; OnPropertyChanged(nameof(ShowInWindow)); }
+    partial void OnIsPipChanged(bool value) { if (value) IsFullscreen = false; OnPropertyChanged(nameof(ShowInWindow)); }
+    [RelayCommand] private void TogglePip() { if (IsOpen) IsPip = !IsPip; }
+    [RelayCommand] private void TogglePin() => PipPinned = !PipPinned;
     [ObservableProperty] private string? _error;
     [ObservableProperty] private int _generation;
     /// <summary>The next (re)open keeps quiet about resuming (switching between the original and the lighter copy).</summary>
@@ -205,7 +217,7 @@ public partial class PlayerViewModel : ObservableObject
     /// <summary>The window goes to the tray: close the player without questions (a hosted multicast runs on).</summary>
     public void CloseForHide()
     {
-        if (!IsOpen) return;
+        if (!IsOpen || IsPip) return; // the small window plays on while Ocean is in the tray
         LeaveCastForNewVideo(why: "the window was closed to the tray");
         EndLight();
         IsOpen = false; IsFullscreen = false; IsPlaying = false;

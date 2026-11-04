@@ -98,6 +98,13 @@
                     </Canvas>
                     <Slider x:Name="Seek" Minimum="0" Maximum="{Binding DurationSeconds}" Value="{Binding PositionSeconds, Mode=OneWay}"
                             Thumb.DragStarted="Seek_DragStarted" Thumb.DragCompleted="Seek_DragCompleted" PreviewMouseLeftButtonUp="Seek_MouseUp" IsMoveToPointEnabled="True"/>
+                    <!-- the time under the mouse, above the bar -->
+                    <Popup x:Name="SeekTip" PlacementTarget="{Binding ElementName=Seek}" Placement="Relative" AllowsTransparency="True"
+                           IsHitTestVisible="False" Focusable="False" StaysOpen="True">
+                        <Border Background="#E6111827" BorderBrush="#40FFFFFF" BorderThickness="1" CornerRadius="5" Padding="8,3">
+                            <TextBlock x:Name="SeekTipText" Foreground="White" FontFamily="Consolas" FontSize="13"/>
+                        </Border>
+                    </Popup>
                     <Canvas IsHitTestVisible="False">
                         <StackPanel x:Name="MarkA" Visibility="Collapsed">
                             <TextBlock Text="A" FontSize="10" FontWeight="Bold" Foreground="{StaticResource Warn}" HorizontalAlignment="Center"/>
@@ -170,6 +177,14 @@
                             </TextBlock>
                         </Button>
                         <Slider Minimum="0" Maximum="1" Value="{Binding Volume}" Width="100" VerticalAlignment="Center" Margin="4,0,12,0"/>
+                        <Button x:Name="PipButton" Style="{StaticResource BtnIcon}" Command="{Binding TogglePipCommand}" Margin="0,0,2,0"
+                                ToolTip="Picture in picture: a small window that can stay on top while you use other programs (P)" AutomationProperties.Name="Picture in picture">
+                            <Grid Width="17" Height="13">
+                                <Rectangle Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.4" RadiusX="1.5" RadiusY="1.5"/>
+                                <Rectangle Width="8" Height="5.5" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,2.5,2.5" RadiusX="1" RadiusY="1"
+                                           Fill="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                            </Grid>
+                        </Button>
                         <Button Style="{StaticResource BtnIcon}" Command="{Binding ToggleFullscreenCommand}" ToolTip="Fullscreen (F)">
                             <TextBlock>
                                 <TextBlock.Style>

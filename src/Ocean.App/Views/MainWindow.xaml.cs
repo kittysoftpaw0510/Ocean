@@ -30,7 +30,7 @@ public partial class MainWindow : Window, IDialogs
         DragOver += (_, e) => { e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None; e.Handled = true; };
     }
 
-    public void ForceClose() { _forceClose = true; Close(); }
+    public void ForceClose() { _vm.Player.IsPip = false; _forceClose = true; Close(); } // quitting: the small window goes too
 
     /// <summary>
     /// A right-click on a node shows its menu without opening the node: a ListBoxItem would otherwise select itself
@@ -56,11 +56,11 @@ public partial class MainWindow : Window, IDialogs
         {
             VideoSearchBox.Focus(); VideoSearchBox.SelectAll(); e.Handled = true;
         }
-        else if (e.Key == Key.Escape && !_vm.Player.IsOpen && VideoSearchBox.IsKeyboardFocused)
+        else if (e.Key == Key.Escape && !_vm.Player.ShowInWindow && VideoSearchBox.IsKeyboardFocused)
         {
             _vm.VideoQuery = ""; Keyboard.ClearFocus(); e.Handled = true;
         }
-        else if (e.Key == Key.Escape && !_vm.Player.IsOpen && SearchBox.IsKeyboardFocused)
+        else if (e.Key == Key.Escape && !_vm.Player.ShowInWindow && SearchBox.IsKeyboardFocused)
         {
             _vm.SearchText = ""; Keyboard.ClearFocus(); e.Handled = true;
         }
