@@ -141,6 +141,18 @@ public sealed class CastScheduleDto
     public string? Error { get; set; }
 }
 
+/// <summary>
+/// A multicast a node has set to start later, in its catalog (<see cref="CatalogDto.CastPlan"/>) so every node sees
+/// it coming. Older nodes ignore it.
+/// </summary>
+public sealed class CastPlanDto
+{
+    public string ItemId { get; set; } = "";
+    public string ItemName { get; set; } = "";
+    public string ShareName { get; set; } = "";
+    public DateTimeOffset At { get; set; }
+}
+
 public sealed class CastScheduleRequestDto
 {
     public string ItemId { get; set; } = "";

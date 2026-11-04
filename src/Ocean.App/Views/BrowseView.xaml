@@ -527,6 +527,17 @@
                 </DockPanel>
             </Border>
 
+            <!-- this node has a multicast scheduled: everyone sees it coming -->
+            <Border Margin="24,2,24,8" Background="#1AE11D48" BorderBrush="#E11D48" BorderThickness="1.5" CornerRadius="8" Padding="12,8"
+                    Visibility="{Binding Peer.IsScheduled, Converter={StaticResource BoolToVis}}">
+                <DockPanel>
+                    <TextBlock Text="&#xE823;" Style="{StaticResource Icon}" FontSize="16" Foreground="#FB7185" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                    <TextBlock VerticalAlignment="Center" TextWrapping="Wrap">
+                        <Run Text="{Binding Peer.Label, Mode=OneWay}" FontWeight="SemiBold"/><Run Text=":  "/><Run Text="{Binding Peer.PlanText, Mode=OneWay}"/><Run Text=". You'll get a notice when it starts; join to watch together." Foreground="{StaticResource TextMuted}"/>
+                    </TextBlock>
+                </DockPanel>
+            </Border>
+
             <!-- breadcrumb: where am I inside the share -->
             <Border Margin="24,2,24,4" Visibility="{Binding FolderMode, Converter={StaticResource BoolToVis}}">
                 <StackPanel Orientation="Horizontal">

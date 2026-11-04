@@ -49,7 +49,17 @@ public partial class PeerVm : ObservableObject
     [ObservableProperty] private CastInfoDto? _cast;
     public bool IsLive => Cast is not null && Online;
     public string LiveText => Cast is null ? "" : $"Multicasting “{Cast.ItemName}”";
-    partial void OnCastChanged(CastInfoDto? value) { OnPropertyChanged(nameof(IsLive)); OnPropertyChanged(nameof(LiveText)); }
+    partial void OnCastChanged(CastInfoDto? value) { OnPropertyChanged(nameof(IsLive)); OnPropertyChanged(nameof(LiveText)); OnPlanChanged(); }
+
+    /// <summary>The multicast this node has scheduled to start later (null when none).</summary>
+    [ObservableProperty] private CastPlanDto? _castPlan;
+    /// <summary>A multicast is coming (and isn't running yet).</summary>
+    public bool IsScheduled => CastPlan is not null && Cast is null && Online;
+    public string PlanTime => CastPlan is null ? "" : CastPlan.At.ToLocalTime().ToString("HH:mm");
+    public string PlanText => CastPlan is null ? "" : $"Multicast of “{CastPlan.ItemName}” at {Format.ClockTime(CastPlan.At)} ({Format.Until(CastPlan.At)})";
+    partial void OnCastPlanChanged(CastPlanDto? value) => OnPlanChanged();
+    /// <summary>Also every half minute (the countdown).</summary>
+    public void OnPlanChanged() { OnPropertyChanged(nameof(IsScheduled)); OnPropertyChanged(nameof(PlanTime)); OnPropertyChanged(nameof(PlanText)); }
 
     public PeerVm(PeerDto d) { Id = d.Id; Update(d); }
 
@@ -75,12 +85,26 @@ public partial class PeerVm : ObservableObject
     {
         Name = d.Name; User = d.User; Host = d.Host; Address = d.Address;
         NewCount = d.NewCount; ItemCount = d.ItemCount; ShareCount = d.ShareCount; CatalogLoaded = d.CatalogLoaded; FirstSeen = d.FirstSeen;
-        Online = d.Online; OfflineSince = d.OfflineSince; Via = d.Via; ViaCount = d.ViaCount; Cast = d.Cast;
+        Online = d.Online; OfflineSince = d.OfflineSince; Via = d.Via; ViaCount = d.ViaCount; Cast = d.Cast; CastPlan = d.CastPlan;
         OnPropertyChanged(nameof(Initials)); OnPropertyChanged(nameof(Subtitle)); OnPropertyChanged(nameof(Label)); OnPropertyChanged(nameof(OfflineText)); OnPropertyChanged(nameof(IsLive));
+        OnPlanChanged();
     }
 }
 
 /// <summary>A multicast on the network, for the home page's "Live now" list.</summary>
+/// <summary>Home, "Coming up": a multicast a node has scheduled.</summary>
+public sealed partial class UpcomingCastVm : ObservableObject
+{
+    public UpcomingCastVm(PeerVm peer, CastPlanDto plan) { Peer = peer; Plan = plan; }
+    public PeerVm Peer { get; }
+    public CastPlanDto Plan { get; }
+    public string Title => Plan.ItemName;
+    public string Who => $"{Peer.Label} will multicast";
+    public string Time => Format.ClockTime(Plan.At);
+    public string Meta => $"Starts {Format.Until(Plan.At)}  ·  you'll get a notice when it does";
+    public void Tick() => OnPropertyChanged(nameof(Meta));
+}
+
 public sealed class LiveCastVm
 {
     public LiveCastVm(PeerVm peer, CastInfoDto cast) { Peer = peer; Cast = cast; }

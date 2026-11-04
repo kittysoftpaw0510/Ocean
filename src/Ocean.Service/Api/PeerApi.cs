@@ -86,7 +86,7 @@ public static class PeerApi
                 {
                     NodeId = cat.NodeId, NodeName = cat.NodeName, UserName = cat.UserName, Host = cat.Host,
                     Version = changes.Version, GeneratedAt = cat.GeneratedAt, DeltaFrom = baseVersion,
-                    RemovedItems = changes.Removed.ToList(), Cast = cat.Cast,
+                    RemovedItems = changes.Removed.ToList(), Cast = cat.Cast, CastPlan = cat.CastPlan,
                 };
                 foreach (var s in cat.Shares)
                     delta.Shares.Add(new ShareDto

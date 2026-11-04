@@ -260,6 +260,7 @@ public sealed class PeerService : IDisposable
             Id = p.Id, Name = p.Name, User = p.User, Host = p.Host, Port = p.Port,
             Address = p.Bridged ? "" : p.DisplayAddress.ToString(), Via = p.Via, ViaCount = p.Bridged ? p.LiveBridges().Count : 0,
             Cast = p.Online ? cat?.Cast : null,
+            CastPlan = p.Online ? cat?.CastPlan : null,
             CatalogVersion = p.CatalogVersion, LastSeen = p.LastSeen, FirstSeen = p.FirstSeen, Online = p.Online, OfflineSince = p.OfflineSince,
             ShareCount = p.ShareCount,
             ItemCount = cat?.Shares.Sum(s => s.ItemCount) ?? 0,
@@ -287,6 +288,8 @@ public sealed class PeerService : IDisposable
 
     // the item a multicast I'm watching streams (its size and time may be newer than the catalog I hold)
     private readonly ConcurrentDictionary<string, ItemDto> _castItems = new(StringComparer.Ordinal);
+    private static string? PlanKey(CastPlanDto? p) => p is null ? null : $"{p.ItemId}|{p.At.ToUnixTimeSeconds()}";
+
     public void RegisterCastItem(string peerId, ItemDto item) => _castItems[peerId + "|" + item.Id] = item;
     public void UnregisterCastItem(string peerId, string itemId) => _castItems.TryRemove(peerId + "|" + itemId, out _);
 
@@ -507,9 +510,9 @@ public sealed class PeerService : IDisposable
                     return await FetchCatalogAsync(peerId, ct, fullOnly: true);
                 }
                 var changedItems = cat.Shares.Sum(s => s.Items.Count);
-                var deltaCast = cat.Cast;
+                var deltaCast = cat.Cast; var deltaPlan = cat.CastPlan;
                 cat = MergeDelta(previous, cat);
-                cat.Cast = deltaCast;
+                cat.Cast = deltaCast; cat.CastPlan = deltaPlan;
                 _log.LogDebug("catalog v{Version} from {Peer}: {Changed} changed, {Removed} removed since v{From}",
                     cat.Version, peer.Name, changedItems, cat.RemovedItems?.Count ?? 0, from);
                 cat.RemovedItems = null;
@@ -520,8 +523,8 @@ public sealed class PeerService : IDisposable
             _catalogs[peerId] = cat;
             SaveSnapshot(peer, cat);
             NoteVersion(peerId, cat.AppVersion);
-            if (previous?.Cast?.SessionId != cat.Cast?.SessionId)
-                _events.Publish("peerCast", new { peerId, peerName = DisplayNames.Of(cat.UserName, cat.NodeName), cast = cat.Cast });
+            if (previous?.Cast?.SessionId != cat.Cast?.SessionId || PlanKey(previous?.CastPlan) != PlanKey(cat.CastPlan))
+                _events.Publish("peerCast", new { peerId, peerName = DisplayNames.Of(cat.UserName, cat.NodeName), cast = cat.Cast, plan = cat.CastPlan });
             var itemCount = cat.Shares.Sum(s => s.ItemCount);
             var newCount = cat.Shares.Sum(s => s.Items.Count(i => i.IsNew));
             _events.Publish("peerCatalog", new { peerId, version = cat.Version, newCount, itemCount });

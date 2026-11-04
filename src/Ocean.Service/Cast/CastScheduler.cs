@@ -35,6 +35,14 @@ public sealed class CastScheduler : BackgroundService
         try { if (File.Exists(_path)) _plan = Json.Deserialize<CastScheduleDto>(File.ReadAllText(_path)); }
         catch (Exception ex) { _log.LogWarning("cast-schedule.json unreadable, ignored: {Msg}", ex.Message); }
         if (_plan is { Active: false }) _plan = null;
+        _catalog.CastPlanLookup = Plan;
+    }
+
+    /// <summary>For my catalog: what everyone sees coming.</summary>
+    private CastPlanDto? Plan()
+    {
+        lock (_lock)
+            return _plan is { ItemId: { } id } p ? new CastPlanDto { ItemId = id, ItemName = p.ItemName, ShareName = p.ShareName, At = p.At } : null;
     }
 
     public CastScheduleDto Status()
@@ -52,6 +60,7 @@ public sealed class CastScheduler : BackgroundService
         var plan = new CastScheduleDto { Active = true, ItemId = req.ItemId, ItemName = item.Name, ShareName = share.Name, At = at, PreferLight = req.PreferLight };
         lock (_lock) { _plan = plan; _retryUntil = null; Save(); }
         _log.LogInformation("multicast scheduled: {Name} at {At:yyyy-MM-dd HH:mm} (in {Min:0} min)", plan.ItemName, at.ToLocalTime(), (at - DateTimeOffset.UtcNow).TotalMinutes);
+        _catalog.NotifyCastChanged(); // everyone sees it coming
         Wake();
         var st = Status();
         _events.Publish("castSchedule", st);
@@ -64,6 +73,7 @@ public sealed class CastScheduler : BackgroundService
         lock (_lock) { was = _plan; _plan = null; _retryUntil = null; Save(); }
         if (was is null) return;
         _log.LogInformation("scheduled multicast cancelled: {Name}", was.ItemName);
+        _catalog.NotifyCastChanged();
         Wake();
         _events.Publish("castSchedule", new CastScheduleDto());
     }
@@ -97,6 +107,7 @@ public sealed class CastScheduler : BackgroundService
         {
             _cast.Detach(); // nobody drives it yet: it plays from the start by itself until the host opens the player
             lock (_lock) { if (Same(_plan, plan)) { _plan = null; _retryUntil = null; Save(); } }
+            _catalog.NotifyCastChanged(); // the plan is gone, the multicast is in the catalog now
             _log.LogInformation("scheduled multicast started: {Name}", plan.ItemName);
             _events.Publish("castSchedule", new CastScheduleDto { ItemId = plan.ItemId, ItemName = plan.ItemName, ShareName = plan.ShareName, At = plan.At, Started = true });
             return;
@@ -110,6 +121,7 @@ public sealed class CastScheduler : BackgroundService
             {
                 _log.LogInformation("scheduled multicast waits: {Reason}", limit.Reason);
                 lock (_lock) { if (Same(_plan, plan)) _plan!.At = now + RetryEvery; }
+                _catalog.NotifyCastChanged(); // the new time
                 return;
             }
         }
@@ -119,6 +131,7 @@ public sealed class CastScheduler : BackgroundService
     private void Drop(CastScheduleDto plan, string why)
     {
         lock (_lock) { if (Same(_plan, plan)) { _plan = null; _retryUntil = null; Save(); } }
+        _catalog.NotifyCastChanged();
         _log.LogWarning("scheduled multicast of {Name} dropped: {Why}", plan.ItemName, why);
         _events.Publish("castSchedule", new CastScheduleDto { ItemId = plan.ItemId, ItemName = plan.ItemName, ShareName = plan.ShareName, At = plan.At, Error = why });
     }

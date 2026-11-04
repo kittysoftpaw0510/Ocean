@@ -45,6 +45,8 @@ public partial class LocalItemVm : ObservableObject
     [ObservableProperty] private int _viewers;
     /// <summary>I'm multicasting this video.</summary>
     [ObservableProperty] private bool _isCasting;
+    /// <summary>When I've scheduled this video's multicast ("18:30"), or null.</summary>
+    [ObservableProperty] private string? _scheduledAt;
     public bool HasViewers => Viewers > 0;
     public string ViewersText => Viewers == 1 ? "1 watching" : $"{Viewers} watching";
     partial void OnViewersChanged(int value) { OnPropertyChanged(nameof(HasViewers)); OnPropertyChanged(nameof(ViewersText)); }
@@ -254,6 +256,7 @@ public partial class SharesViewModel : ObservableObject
                 vms.Add(vm);
             }
             _allItems = vms;
+            MarkScheduled();
             ApplyItemFilter();
         }
         catch (Exception ex) { _main.Error("Could not load items", ex); }
@@ -650,10 +653,16 @@ public partial class SharesViewModel : ObservableObject
     partial void OnScheduleChanged(CastScheduleDto? value)
     {
         OnPropertyChanged(nameof(HasSchedule)); OnPropertyChanged(nameof(ScheduleText));
+        MarkScheduled();
         if (value is null) { _scheduleClock?.Stop(); return; }
         _scheduleClock ??= new System.Windows.Threading.DispatcherTimer(TimeSpan.FromSeconds(20), System.Windows.Threading.DispatcherPriority.Background,
             (_, _) => OnPropertyChanged(nameof(ScheduleText)), System.Windows.Threading.Dispatcher.CurrentDispatcher);
         _scheduleClock.Start();
+    }
+
+    private void MarkScheduled()
+    {
+        foreach (var (id, vm) in _itemVms) vm.ScheduledAt = Schedule?.ItemId == id ? Format.ClockTime(Schedule.At) : null;
     }
 
     /// <summary>From the service: scheduled, cancelled, started, or could not start.</summary>

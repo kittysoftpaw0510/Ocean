@@ -24,6 +24,24 @@ public static class Format
 
     public static string Speed(double bps) => bps <= 0 ? "" : Bytes((long)bps) + "/s";
 
+    /// <summary>"in 9 min", "in 1.5 h", "now" (for something that starts later).</summary>
+    public static string Until(DateTimeOffset t)
+    {
+        var left = t - DateTimeOffset.UtcNow;
+        if (left.TotalSeconds < 30) return "any moment now";
+        if (left.TotalMinutes < 60) return $"in {Math.Ceiling(left.TotalMinutes):0} min";
+        if (left.TotalHours < 24) return $"in {left.TotalHours:0.#} h";
+        return $"in {left.TotalDays:0} days";
+    }
+
+    /// <summary>"18:30", "tomorrow 18:30", "Fri 7 Nov 18:30" (local time).</summary>
+    public static string ClockTime(DateTimeOffset t)
+    {
+        var local = t.ToLocalTime();
+        var day = local.Date == DateTime.Today ? "" : local.Date == DateTime.Today.AddDays(1) ? "tomorrow " : local.ToString("ddd d MMM ");
+        return day + local.ToString("HH:mm");
+    }
+
     public static string Ago(DateTimeOffset t)
     {
         var d = DateTimeOffset.UtcNow - t;

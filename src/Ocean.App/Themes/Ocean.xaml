@@ -621,19 +621,40 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="MenuItem">
-                    <Border x:Name="Bd" Background="Transparent" CornerRadius="5" Padding="12,7" MinWidth="180">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="22"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <ContentPresenter Grid.Column="0" ContentSource="Icon" VerticalAlignment="Center"/>
-                            <ContentPresenter Grid.Column="1" ContentSource="Header" VerticalAlignment="Center" RecognizesAccessKey="True"/>
-                            <TextBlock Grid.Column="2" Text="{TemplateBinding InputGestureText}" Style="{StaticResource Dim}" Margin="24,0,0,0" VerticalAlignment="Center"/>
-                        </Grid>
-                    </Border>
+                    <Grid>
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="5" Padding="12,7" MinWidth="180">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="22"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <ContentPresenter Grid.Column="0" ContentSource="Icon" VerticalAlignment="Center"/>
+                                <ContentPresenter Grid.Column="1" ContentSource="Header" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+                                <TextBlock x:Name="Gesture" Grid.Column="2" Text="{TemplateBinding InputGestureText}" Style="{StaticResource Dim}" Margin="24,0,0,0" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="Arrow" Grid.Column="2" Text="&#xE76C;" Style="{StaticResource Icon}" FontSize="10" Foreground="{StaticResource TextMuted}"
+                                           Margin="24,0,0,0" VerticalAlignment="Center" Visibility="Collapsed"/>
+                            </Grid>
+                        </Border>
+                        <!-- the sub-menu (an item with items of its own), opened by hovering or with the right arrow key -->
+                        <Popup x:Name="PART_Popup" Placement="Right" HorizontalOffset="-2" VerticalOffset="-11" AllowsTransparency="True" Focusable="False"
+                               PopupAnimation="Fade" IsOpen="{Binding IsSubmenuOpen, RelativeSource={RelativeSource TemplatedParent}}">
+                            <Border Background="{StaticResource Bg2}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" CornerRadius="8" Padding="4" Margin="6">
+                                <Border.Effect>
+                                    <DropShadowEffect BlurRadius="16" ShadowDepth="2" Opacity="0.5"/>
+                                </Border.Effect>
+                                <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                            </Border>
+                        </Popup>
+                    </Grid>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="HasItems" Value="True">
+                            <Setter TargetName="Arrow" Property="Visibility" Value="Visible"/>
+                            <Setter TargetName="Gesture" Property="Visibility" Value="Collapsed"/>
+                        </Trigger>
+                        <Trigger Property="IsSubmenuOpen" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Bg3}"/>
+                        </Trigger>
                         <Trigger Property="IsHighlighted" Value="True">
                             <Setter TargetName="Bd" Property="Background" Value="{StaticResource Bg3}"/>
                         </Trigger>

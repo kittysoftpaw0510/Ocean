@@ -38,6 +38,8 @@ public sealed class CatalogDto
     public List<string>? RemovedItems { get; set; }
     /// <summary>The multicast this node is hosting right now, if any.</summary>
     public CastInfoDto? Cast { get; set; }
+    /// <summary>The multicast this node has scheduled to start later, if any.</summary>
+    public CastPlanDto? CastPlan { get; set; }
 }
 
 public sealed class ShareDto
@@ -172,6 +174,8 @@ public sealed class PeerDto
     public int ViaCount { get; set; }
     /// <summary>The multicast it is hosting right now, if any.</summary>
     public CastInfoDto? Cast { get; set; }
+    /// <summary>The multicast it has scheduled to start later, if any.</summary>
+    public CastPlanDto? CastPlan { get; set; }
 }
 
 public sealed class ItemOverrideDto

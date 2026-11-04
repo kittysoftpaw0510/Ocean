@@ -601,7 +601,7 @@ public sealed class CatalogService : IDisposable
         {
             NodeId = nodeId, NodeName = nodeName, UserName = userName, Host = Environment.MachineName,
             AppVersion = OceanDefaults.AppVersion, Os = Ocean.Service.State.SystemInfo.Windows,
-            Version = Version, GeneratedAt = DateTimeOffset.UtcNow, Cast = CastLookup?.Invoke(),
+            Version = Version, GeneratedAt = DateTimeOffset.UtcNow, Cast = CastLookup?.Invoke(), CastPlan = CastPlanLookup?.Invoke(),
         };
         if (paused) return cat;
         foreach (var share in Shares)
@@ -916,6 +916,8 @@ public sealed class CatalogService : IDisposable
 
     /// <summary>Set by the multicast host: what I'm multicasting now, carried in my catalog.</summary>
     public Func<CastInfoDto?>? CastLookup { get; set; }
+    /// <summary>My scheduled multicast (set by CastScheduler): in my catalog, so everyone sees it coming.</summary>
+    public Func<CastPlanDto?>? CastPlanLookup { get; set; }
     /// <summary>Set by the viewer tracker: how many PCs watch an item right now (for my own listing).</summary>
     public Func<string, int>? ViewerLookup { get; set; }
     /// <summary>A multicast started or ended: everyone should learn it at once.</summary>

@@ -162,6 +162,14 @@
                                             Visibility="{Binding IsLive, Converter={StaticResource BoolToVis}}" ToolTip="{Binding LiveText}">
                                         <TextBlock Text="LIVE" FontSize="10" FontWeight="Bold" Foreground="White"/>
                                     </Border>
+                                    <!-- a multicast scheduled to start later -->
+                                    <Border Grid.Column="2" BorderBrush="#E11D48" BorderThickness="1.5" Background="#26E11D48" CornerRadius="4" Padding="4,0,5,1" Margin="0,0,4,0" VerticalAlignment="Center"
+                                            Visibility="{Binding IsScheduled, Converter={StaticResource BoolToVis}}" ToolTip="{Binding PlanText}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xE823;" Style="{StaticResource Icon}" FontSize="10" Foreground="#FB7185" Margin="0,1,4,0" VerticalAlignment="Center"/>
+                                            <TextBlock Text="{Binding PlanTime}" FontSize="10" FontWeight="Bold" Foreground="#FB7185" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Border>
                                     <Border x:Name="NewBadge" Grid.Column="3" Style="{StaticResource Badge}" Visibility="{Binding NewCount, Converter={StaticResource CountToVis}}" ToolTip="New videos since your last visit">
                                         <TextBlock Text="{Binding NewCount}" FontSize="11" FontWeight="SemiBold" Foreground="#042F2E"/>
                                     </Border>

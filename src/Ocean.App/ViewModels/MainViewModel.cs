@@ -21,6 +21,9 @@ public partial class HomeViewModel : ObservableObject
     /// <summary>Multicasts running on the network right now.</summary>
     public ObservableCollection<LiveCastVm> Live { get; } = new();
     [ObservableProperty] private bool _anyLive;
+    /// <summary>Multicasts scheduled on the network ("Coming up").</summary>
+    public ObservableCollection<UpcomingCastVm> Upcoming { get; } = new();
+    [ObservableProperty] private bool _anyUpcoming;
 
     /// <summary>"Top on the network": the best-rated videos of everyone (mine included), optionally for one tag.</summary>
     public ObservableCollection<NetItemVm> Top { get; } = new();
@@ -506,10 +509,19 @@ public partial class MainViewModel : ObservableObject
                     using var doc = JsonDocument.Parse(data);
                     var id = doc.RootElement.GetProperty("peerId").GetString() ?? "";
                     var cast = doc.RootElement.TryGetProperty("cast", out var ce) && ce.ValueKind == JsonValueKind.Object ? Json.Deserialize<CastInfoDto>(ce.GetRawText()) : null;
+                    var plan = doc.RootElement.TryGetProperty("plan", out var pe) && pe.ValueKind == JsonValueKind.Object ? Json.Deserialize<CastPlanDto>(pe.GetRawText()) : null;
                     var p = Peers.FirstOrDefault(x => x.Id == id);
-                    if (p is not null) p.Cast = cast;
+                    var castStarted = cast is not null && p?.Cast?.SessionId != cast.SessionId;
+                    var newPlan = plan is not null && cast is null && (p?.CastPlan is not { } had || had.ItemId != plan.ItemId || had.At != plan.At);
+                    if (p is not null) { p.Cast = cast; p.CastPlan = plan; }
                     RefreshLive();
-                    if (cast is not null && p is not null && _initialPeersLoaded)
+                    if (newPlan && p is not null && _initialPeersLoaded)
+                    {
+                        AppLog.Info("Cast", $"{p.Label} scheduled a multicast of {plan!.ItemName} at {Format.ClockTime(plan.At)}");
+                        Toast($"Multicast at {Format.ClockTime(plan.At)}", $"{p.Label} will multicast “{plan.ItemName}” {Format.Until(plan.At)}. You'll get a notice when it starts.", "info", () => SelectPeerById(id));
+                        TrayNotify?.Invoke($"Multicast at {Format.ClockTime(plan.At)}", $"{p.Label}: {plan.ItemName}", () => SelectPeerById(id));
+                    }
+                    if (castStarted && p is not null && _initialPeersLoaded)
                     {
                         AppLog.Info("Cast", $"{p.Label} started multicasting {cast.ItemName}");
                         Toast("Multicast started", $"{p.Label} is multicasting “{cast.ItemName}”. Click to join and watch together.", "info", () => _ = JoinCastAsync(p, cast));
@@ -890,6 +902,25 @@ public partial class MainViewModel : ObservableObject
         Home.Live.Clear();
         foreach (var l in live) Home.Live.Add(l);
         Home.AnyLive = live.Count > 0;
+        var upcoming = Peers.Where(p => p.IsScheduled).OrderBy(p => p.CastPlan!.At).Select(p => new UpcomingCastVm(p, p.CastPlan!)).ToList();
+        Home.Upcoming.Clear();
+        foreach (var u in upcoming) Home.Upcoming.Add(u);
+        Home.AnyUpcoming = upcoming.Count > 0;
+        if (upcoming.Count > 0) _planClock.Start(); else _planClock.Stop();
+    }
+
+    /// <summary>Counts down "starts in 9 min" while any multicast is scheduled.</summary>
+    private System.Windows.Threading.DispatcherTimer? _planClockTimer;
+    private System.Windows.Threading.DispatcherTimer _planClock => _planClockTimer ??= NewPlanClock();
+    private System.Windows.Threading.DispatcherTimer NewPlanClock()
+    {
+        var t = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+        t.Tick += (_, _) =>
+        {
+            foreach (var p in Peers) if (p.CastPlan is not null) p.OnPlanChanged();
+            foreach (var u in Home.Upcoming) u.Tick();
+        };
+        return t;
     }
 
     [RelayCommand] private Task JoinLive(LiveCastVm? live) => live is null ? Task.CompletedTask : JoinCastAsync(live.Peer, live.Cast);

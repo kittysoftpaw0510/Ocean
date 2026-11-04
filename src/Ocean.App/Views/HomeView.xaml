@@ -49,6 +49,29 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
 
+            <!-- Coming up: multicasts scheduled on the network -->
+            <ItemsControl ItemsSource="{Binding Upcoming}" Margin="0,28,0,0" Visibility="{Binding AnyUpcoming, Converter={StaticResource BoolToVis}}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Style="{StaticResource Card}" BorderBrush="#E11D48" BorderThickness="1.5" Padding="12" Margin="0,0,0,8" AutomationProperties.Name="Coming up">
+                            <DockPanel>
+                                <Border DockPanel.Dock="Right" BorderBrush="#E11D48" BorderThickness="1.5" Background="#26E11D48" CornerRadius="6" Padding="10,4" Margin="12,0,0,0" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="&#xE823;" Style="{StaticResource Icon}" FontSize="13" Foreground="#FB7185" Margin="0,1,6,0" VerticalAlignment="Center"/>
+                                        <TextBlock Text="{Binding Time}" FontSize="14" FontWeight="Bold" Foreground="#FB7185" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Who}" Style="{StaticResource Muted}"/>
+                                    <TextBlock Text="{Binding Title}" Style="{StaticResource H2}" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{Binding Meta}" Style="{StaticResource Dim}"/>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
             <!-- Continue watching: the last video played and where it stopped -->
             <Border Style="{StaticResource Card}" Margin="0,28,0,0" Padding="12" DataContext="{Binding Resume}"
                     Visibility="{Binding Converter={StaticResource NullToVis}}"

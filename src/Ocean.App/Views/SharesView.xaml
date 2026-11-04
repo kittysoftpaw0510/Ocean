@@ -71,6 +71,14 @@
                                 <TextBlock Text="LIVE" FontSize="11" FontWeight="Bold" Foreground="#FB7185"/>
                             </StackPanel>
                         </Border>
+                        <!-- I've scheduled its multicast -->
+                        <Border CornerRadius="10" BorderBrush="#E11D48" BorderThickness="1.5" Background="#26E11D48" Padding="7,1" Margin="0,0,6,0"
+                                Visibility="{Binding ScheduledAt, Converter={StaticResource NullToVis}}" ToolTip="Its multicast is scheduled; everyone sees it coming">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE823;" Style="{StaticResource Icon}" FontSize="10" Foreground="#FB7185" Margin="0,1,5,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding ScheduledAt}" FontSize="11" FontWeight="Bold" Foreground="#FB7185"/>
+                            </StackPanel>
+                        </Border>
                         <!-- who is watching it right now -->
                         <Border CornerRadius="10" Background="{StaticResource AccentSoft}" Padding="8,2" Margin="0,0,6,0" Visibility="{Binding HasViewers, Converter={StaticResource BoolToVis}}" ToolTip="PCs streaming this video from you right now">
                             <StackPanel Orientation="Horizontal">
