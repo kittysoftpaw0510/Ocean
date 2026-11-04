@@ -29,12 +29,20 @@ public partial class PlayerView : UserControl
     private DateTime _seekStarted, _seekIssued;
     private int _seekTries;
 
+    // Forward/back pressed several times in a row (or a held arrow key): the steps add up on the bar and the player
+    // jumps once, when the presses pause. Every press used to be a jump of its own, each one a new request over
+    // the network, and a burst of them stalled playback.
+    private readonly System.Windows.Threading.DispatcherTimer _stepTimer = new() { Interval = TimeSpan.FromMilliseconds(300) };
+    private double? _stepTarget;
+    private DateTime _lastStep;
+
     public PlayerView()
     {
         InitializeComponent();
         DataContextChanged += OnDataContextChanged;
         IsVisibleChanged += OnVisibleChanged;
         _tick.Tick += (_, _) => UpdatePosition();
+        _stepTimer.Tick += (_, _) => { _stepTimer.Stop(); if (_stepTarget is { } t) { _stepTarget = null; SeekTo(t); } };
         _idle.Tick += (_, _) => { if (_vm is { IsFullscreen: true, IsPlaying: true }) SetChrome(false); };
         _osd.Tick += (_, _) => { _osd.Stop(); SpeedOsd.Visibility = Visibility.Collapsed; };
         MouseMove += (_, _) => { SetChrome(true); _idle.Stop(); _idle.Start(); };
@@ -102,7 +110,7 @@ public partial class PlayerView : UserControl
         try
         {
             _opened = false; _ended = false;
-            _seekTarget = null; _queuedSeek = null;
+            _seekTarget = null; _queuedSeek = null; _stepTarget = null; _stepTimer.Stop();
             Media.Stop();
             Media.Close();
             Media.Volume = _vm.Volume;
@@ -123,7 +131,7 @@ public partial class PlayerView : UserControl
     {
         RememberNow();
         _opened = false;
-        _seekTarget = null; _queuedSeek = null; _pressed = false;
+        _seekTarget = null; _queuedSeek = null; _pressed = false; _stepTarget = null; _stepTimer.Stop();
         _tick.Stop();
         _idle.Stop();
         try { Media.Stop(); Media.Close(); Media.Source = null; } catch { }
@@ -146,6 +154,7 @@ public partial class PlayerView : UserControl
             _pressed = false;
             SeekTo(Seek.Value);
         }
+        if (_stepTarget is { } stepping) { _vm.PositionSeconds = stepping; return; } // steps still adding up
         try
         {
             if (Media.NaturalDuration.HasTimeSpan)
@@ -426,8 +435,28 @@ public partial class PlayerView : UserControl
     }
 
     private void PlayPause_Click(object sender, RoutedEventArgs e) => TogglePlay();
-    private void Back_Click(object sender, RoutedEventArgs e) => SeekTo((_vm?.PositionSeconds ?? 0) - 10);
-    private void Fwd_Click(object sender, RoutedEventArgs e) => SeekTo((_vm?.PositionSeconds ?? 0) + 10);
+    private void Back_Click(object sender, RoutedEventArgs e) => Step(-10);
+    private void Fwd_Click(object sender, RoutedEventArgs e) => Step(+10);
+
+    /// <summary>
+    /// Forward/back by <paramref name="delta"/> seconds. A single press jumps at once; presses that follow within
+    /// 0.4 s add up and the player jumps once they pause (see <see cref="_stepTimer"/>).
+    /// </summary>
+    private void Step(double delta)
+    {
+        if (_vm is null) return;
+        if (_vm.ControlsLocked) { ShowOsd("The host controls playback"); return; }
+        var now = DateTime.UtcNow;
+        var from = _stepTarget ?? CurrentSeconds();
+        var d = _vm.DurationSeconds;
+        var to = Math.Max(0, d > 0 ? Math.Min(from + delta, d) : from + delta);
+        var burst = _stepTarget is not null || (now - _lastStep).TotalMilliseconds < 400;
+        _lastStep = now;
+        if (!burst) { SeekTo(to); return; }
+        _stepTarget = to;
+        _vm.PositionSeconds = to;
+        _stepTimer.Stop(); _stepTimer.Start();
+    }
 
     // Seek bar. Dragging the thumb jumps when it is let go. A click on the track moves the thumb there at once
     // (IsMoveToPointEnabled) and jumps when the button is released, wherever that happens: the bar takes the mouse
@@ -475,8 +504,8 @@ public partial class PlayerView : UserControl
                 if (_vm.IsFullscreen) _vm.IsFullscreen = false; else _vm.CloseCommand.Execute(null);
                 break;
             case Key.Space: case Key.K: TogglePlay(); break;
-            case Key.Left: case Key.J: SeekTo(_vm.PositionSeconds - 10); break;
-            case Key.Right: case Key.L: SeekTo(_vm.PositionSeconds + 10); break;
+            case Key.Left: case Key.J: Step(-10); break;
+            case Key.Right: case Key.L: Step(+10); break;
             case Key.Up: _vm.Volume = Math.Min(1, _vm.Volume + 0.05); break;
             case Key.Down: _vm.Volume = Math.Max(0, _vm.Volume - 0.05); break;
             case Key.F: _vm.ToggleFullscreenCommand.Execute(null); break;
