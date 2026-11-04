@@ -224,6 +224,7 @@ public partial class MainViewModel : ObservableObject
                 {
                     failures++;
                     AppLog.Warn("Events", $"live updates from the service interrupted (attempt {failures})", ex);
+                    if (failures == 1) NoteServiceLoss();
                     await Application.Current.Dispatcher.InvokeAsync(() => { Connected = false; UpdateStatusText(); });
                     await Task.Delay(Math.Min(10000, 1000 * failures), cts.Token).ContinueWith(_ => { });
                     if (cts.IsCancellationRequested) break;
@@ -276,23 +277,37 @@ public partial class MainViewModel : ObservableObject
                 "administrator, run\n    netsh winsock reset\nand restart Windows (that program may need to be reinstalled afterwards).");
     }
 
+    /// <summary>
+    /// Counts the service going away (a request failing or the live updates dropping; the two together within 10 s
+    /// are one loss). When it keeps dying (3 times within 3 minutes) say so, once, with what may cause it: otherwise
+    /// the only visible symptom is "Reconnecting..." again and again.
+    /// </summary>
+    private void NoteServiceLoss()
+    {
+        bool tell;
+        lock (_recentLosses)
+        {
+            var now = DateTime.UtcNow;
+            if (_recentLosses.Count > 0 && now - _lastLoss < TimeSpan.FromSeconds(10)) return;
+            _lastLoss = now;
+            _recentLosses.Enqueue(now);
+            while (_recentLosses.Count > 0 && now - _recentLosses.Peek() > TimeSpan.FromMinutes(3)) _recentLosses.Dequeue();
+            tell = !_addOnsExplained && _recentLosses.Count >= 3;
+            if (tell) _addOnsExplained = true;
+        }
+        if (!tell) return;
+        AppLog.Warn("Main", $"service keeps stopping; telling the user (network add-ons found: {NetworkAddOns.Count})");
+        Application.Current.Dispatcher.InvokeAsync(() => Dialogs.ShowError("Ocean's service keeps stopping", NetworkAddOnAdvice()));
+    }
+    private DateTime _lastLoss;
+
     public void ConnectionLost()
     {
         Connected = false;
         UpdateStatusText();
         if (Interlocked.Exchange(ref _recovering, 1) == 1) return;
         AppLog.Warn("Main", "lost the connection to the service; reconnecting");
-        // The service keeps dying (3 times within 3 minutes) and an add-on known to cause that is installed: say so,
-        // once. Otherwise the only visible symptom would be "Reconnecting..." again and again.
-        var now = DateTime.UtcNow;
-        _recentLosses.Enqueue(now);
-        while (_recentLosses.Count > 0 && now - _recentLosses.Peek() > TimeSpan.FromMinutes(3)) _recentLosses.Dequeue();
-        if (!_addOnsExplained && _recentLosses.Count >= 3)
-        {
-            _addOnsExplained = true;
-            AppLog.Warn("Main", $"service keeps stopping; telling the user (network add-ons found: {NetworkAddOns.Count})");
-            Application.Current.Dispatcher.InvokeAsync(() => Dialogs.ShowError("Ocean's service keeps stopping", NetworkAddOnAdvice()));
-        }
+        NoteServiceLoss();
         _ = Task.Run(async () =>
         {
             try
@@ -343,8 +358,11 @@ public partial class MainViewModel : ObservableObject
                     var name = doc.RootElement.TryGetProperty("user", out var u) && u.GetString() is { Length: > 0 } us ? us : doc.RootElement.GetProperty("name").GetString() ?? "";
                     var id = doc.RootElement.GetProperty("id").GetString() ?? "";
                     if (change is not ("updated" or "versionchanged")) AppLog.Info("Peers", $"{change}: {name} ({(id.Length > 12 ? id[..12] : id)})");
-                    if (change == "added" && _initialPeersLoaded) Toast("Node online", $"{name} joined your network.", "info", () => SelectPeerById(id));
-                    if (change == "online" && _initialPeersLoaded) Toast("Back online", $"{name} is reachable again.", "success", () => SelectPeerById(id));
+                    // A node this app already shows as online isn't news: after the service restarts it reports every
+                    // node again as "added", which would otherwise toast the whole network.
+                    var shownOnline = Peers.FirstOrDefault(x => x.Id == id)?.Online == true;
+                    if (change == "added" && _initialPeersLoaded && !shownOnline) Toast("Node online", $"{name} joined your network.", "info", () => SelectPeerById(id));
+                    if (change == "online" && _initialPeersLoaded && !shownOnline) Toast("Back online", $"{name} is reachable again.", "success", () => SelectPeerById(id));
                     if (change == "offline")
                     {
                         // The node stays in the list (dimmed) with its last known shares; it is forgotten later.

@@ -210,6 +210,9 @@ public sealed class PeerRegistry
             },
             (_, p) =>
             {
+                // Under contention ConcurrentDictionary may run the add factory, lose the race and then update:
+                // whatever the factory claimed ("new") doesn't hold any more.
+                isNew = false; change = PeerChange.Seen;
                 lock (p)
                 {
                     // Only fresh beacons count (a replayed old one must neither revive nor change a peer). The same
@@ -265,6 +268,9 @@ public sealed class PeerRegistry
             },
             (_, p) =>
             {
+                // Bridges answer at the same moment (all asked at start): an add factory that lost the race must not
+                // report "added" again, or the app announces the node once per bridge ("joined" toasts in a row).
+                change = null;
                 lock (p)
                 {
                     p.Bridges[via.Id] = route;
