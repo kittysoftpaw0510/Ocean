@@ -70,8 +70,8 @@ public sealed class Updater : BackgroundService
         _config = config; _events = events; _log = log;
         _dir = Path.Combine(OceanDefaults.DataDir, "updates");
         _statePath = Path.Combine(OceanDefaults.DataDir, "update-state.json");
-        _http = Client(new HttpClientHandler());
-        _noRedirect = Client(new HttpClientHandler { AllowAutoRedirect = false });
+        _http = Client(Handler(redirect: true));
+        _noRedirect = Client(Handler(redirect: false));
         _status = new UpdateStatusDto { Current = Current, Mode = ModeOf(config.Current), AutoCheck = ModeOf(config.Current) != UpdateModes.Manual };
         config.Changed += c =>
         {
@@ -84,6 +84,15 @@ public sealed class Updater : BackgroundService
             CheckSoon();
         };
     }
+
+    /// <summary>
+    /// In classic networking (a network add-on such as Astrill's ASProxy breaks asynchronous socket I/O) the
+    /// connection to GitHub uses blocking sockets too: a normal handler there kills the service within a second of
+    /// the first check, i.e. 3 s after every start (see <see cref="NetworkCompat"/>).
+    /// </summary>
+    private static HttpMessageHandler Handler(bool redirect) => NetworkCompat.Classic
+        ? new SocketsHttpHandler { ConnectCallback = NetworkCompat.ConnectAsync, AllowAutoRedirect = redirect, ConnectTimeout = TimeSpan.FromSeconds(30) }
+        : new HttpClientHandler { AllowAutoRedirect = redirect };
 
     private static HttpClient Client(HttpMessageHandler handler)
     {
