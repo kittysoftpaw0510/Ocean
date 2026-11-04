@@ -347,12 +347,9 @@
                 </StackPanel>
             </Grid>
 
-            <!-- folder bar: where am I + organize actions -->
+            <!-- folder bar: where am I + organize actions (the actions move to a second line when both don't fit) -->
             <Grid Grid.Row="1" Margin="24,6,24,6">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
+                <c:FitBar>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Style="{StaticResource BtnIcon}" Width="28" Height="28" FontSize="12" Content="&#xE74A;" ToolTip="Up one folder (Backspace)" Command="{Binding UpCommand}" Margin="0,0,6,0"
                             Visibility="{Binding CurrentFolder, Converter={StaticResource NullToVis}}" AutomationProperties.Name="Up one folder"/>
@@ -380,7 +377,7 @@
                     </ItemsControl>
                     <TextBlock Text="Search results" Style="{StaticResource Muted}" Visibility="{Binding FolderMode, Converter={StaticResource InvBoolToVis}}"/>
                 </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Style="{StaticResource BtnPrimary}" Margin="0,0,6,0" Command="{Binding MoveToCommand}" Visibility="{Binding SelectedItemCount, Converter={StaticResource CountToVis}}">
                         <TextBlock Foreground="{StaticResource AccentText}"><Run Text="Move "/><Run Text="{Binding SelectedItemCount, Mode=OneWay}"/><Run Text=" to…"/></TextBlock>
                     </Button>
@@ -420,7 +417,8 @@
                         </StackPanel>
                     </Button>
                 </StackPanel>
-                <ProgressBar Grid.ColumnSpan="2" IsIndeterminate="True" Height="3" VerticalAlignment="Bottom" Margin="0,0,0,-6" Visibility="{Binding ItemsLoading, Converter={StaticResource BoolToVis}}"/>
+                </c:FitBar>
+                <ProgressBar IsIndeterminate="True" Height="3" VerticalAlignment="Bottom" Margin="0,0,0,-6" Visibility="{Binding ItemsLoading, Converter={StaticResource BoolToVis}}"/>
             </Grid>
 
             <ListBox x:Name="ItemsList" Grid.Row="2" ItemsSource="{Binding Entries}" Margin="12,0,12,0" SelectionMode="Extended"

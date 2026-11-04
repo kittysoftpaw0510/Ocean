@@ -427,8 +427,8 @@
             </StackPanel>
         </ScrollViewer>
 
-        <!-- toolbar -->
-        <Grid Grid.Row="3" Margin="24,10,24,6">
+        <!-- toolbar (the actions on the right move to a second line when both don't fit) -->
+        <c:FitBar Grid.Row="3" Margin="24,10,24,6">
             <StackPanel Orientation="Horizontal">
                 <Border Background="{StaticResource Bg1}" CornerRadius="7" Padding="2" BorderBrush="{StaticResource Border}" BorderThickness="1">
                     <StackPanel Orientation="Horizontal">
@@ -487,7 +487,7 @@
                 </Button>
             </StackPanel>
 
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <StackPanel Orientation="Horizontal">
                 <Button Style="{StaticResource BtnPrimary}" Command="{Binding DownloadSelectedCommand}" Visibility="{Binding SelectedCount, Converter={StaticResource CountToVis}}" Margin="0,0,8,0">
                     <TextBlock Foreground="{StaticResource AccentText}"><Run Text="Download "/><Run Text="{Binding SelectedCount, Mode=OneWay}"/><Run Text=" selected"/></TextBlock>
                 </Button>
@@ -498,7 +498,7 @@
                     </StackPanel>
                 </Button>
             </StackPanel>
-        </Grid>
+        </c:FitBar>
 
         <StackPanel Grid.Row="4">
             <!-- offline node: last known shares -->
