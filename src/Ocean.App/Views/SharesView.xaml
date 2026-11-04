@@ -16,6 +16,15 @@
                                   ToolTip="Send this video once to everyone who joins; you control playback">
                             <MenuItem.Icon><TextBlock Text="&#xE93E;" Style="{StaticResource Icon}"/></MenuItem.Icon>
                         </MenuItem>
+                        <MenuItem Header="Schedule multicast" Visibility="{Binding IsCasting, Converter={StaticResource InvBoolToVis}}"
+                                  ToolTip="Start the multicast later by itself; every PC is told when it starts">
+                            <MenuItem.Icon><TextBlock Text="&#xE823;" Style="{StaticResource Icon}"/></MenuItem.Icon>
+                            <MenuItem Header="In 5 minutes" Tag="5" Click="ScheduleCast_Click"/>
+                            <MenuItem Header="In 10 minutes" Tag="10" Click="ScheduleCast_Click"/>
+                            <MenuItem Header="In 30 minutes" Tag="30" Click="ScheduleCast_Click"/>
+                            <MenuItem Header="In 1 hour" Tag="60" Click="ScheduleCast_Click"/>
+                            <MenuItem Header="Custom…" Tag="custom" Click="ScheduleCast_Click"/>
+                        </MenuItem>
                         <MenuItem Header="Stop multicast" Click="StopCast_Click" Visibility="{Binding IsCasting, Converter={StaticResource BoolToVis}}"/>
                         <Separator/>
                         <MenuItem Header="Move to…" Click="MoveTo_Click">
@@ -185,6 +194,20 @@
                             <WrapPanel Margin="17,8,0,0">
                                 <Button Style="{StaticResource BtnGhost}" Content="Open player" Margin="0,0,6,0" Command="{Binding OpenCastPlayerCommand}" ToolTip="{Binding OpenCastPlayerTip}"/>
                                 <Button Style="{StaticResource BtnGhost}" Content="Stop multicast" Command="{Binding StopCastCommand}"/>
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+                    <!-- a multicast set to start later -->
+                    <Border Margin="24,6,24,0" Background="{StaticResource AccentSoft}" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" CornerRadius="8" Padding="12,10"
+                            Visibility="{Binding HasSchedule, Converter={StaticResource BoolToVis}}">
+                        <StackPanel>
+                            <DockPanel>
+                                <TextBlock Text="&#xE823;" Style="{StaticResource Icon}" Foreground="{StaticResource Accent}" Margin="0,2,9,0" VerticalAlignment="Top"/>
+                                <TextBlock Text="{Binding ScheduleText}" TextWrapping="Wrap"/>
+                            </DockPanel>
+                            <WrapPanel Margin="21,8,0,0">
+                                <Button Style="{StaticResource BtnGhost}" Content="Start now" Margin="0,0,6,0" Command="{Binding StartScheduledNowCommand}"/>
+                                <Button Style="{StaticResource BtnGhost}" Content="Cancel" Command="{Binding CancelScheduleCommand}" ToolTip="Don't start it"/>
                             </WrapPanel>
                         </StackPanel>
                     </Border>

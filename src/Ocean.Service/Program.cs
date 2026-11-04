@@ -101,6 +101,8 @@ builder.Services.AddSingleton<Ocean.Service.Social.NetSearch>();
 builder.Services.AddSingleton<Ocean.Service.Update.Updater>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Ocean.Service.Update.Updater>());
 builder.Services.AddSingleton<Ocean.Service.Cast.CastHost>();
+builder.Services.AddSingleton<Ocean.Service.Cast.CastScheduler>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Ocean.Service.Cast.CastScheduler>());
 builder.Services.AddSingleton<Ocean.Service.Cast.CastReceiver>();
 builder.Services.AddSingleton<DownloadManager>();
 builder.Services.AddSingleton(new UploadScheduler { BytesPerSecond = cfg.UploadLimitKBps * 1024L });

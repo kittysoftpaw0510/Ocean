@@ -148,6 +148,15 @@ public static class LocalApi
             return Results.Json(st, Json.Options); // Error says why it could not start
         });
         g.MapPost("/cast/stop", (CastHost cast) => { cast.Stop(); return Results.Ok(); });
+        // a multicast that starts by itself later ("in 10 minutes"); one at a time
+        g.MapGet("/cast/schedule", (CastScheduler sched) => Results.Json(sched.Status(), Json.Options));
+        g.MapPost("/cast/schedule", async (HttpContext ctx, CastScheduler sched) =>
+        {
+            var req = await ctx.Request.ReadFromJsonAsync<CastScheduleRequestDto>(Json.Options, ctx.RequestAborted);
+            if (req is null || string.IsNullOrEmpty(req.ItemId)) return Results.BadRequest();
+            return Results.Json(sched.Schedule(req), Json.Options); // Error says why it could not be scheduled
+        });
+        g.MapDelete("/cast/schedule", (CastScheduler sched) => { sched.Cancel(); return Results.Ok(); });
         g.MapPost("/cast/detach", (CastHost cast) => { cast.Detach(); return Results.Ok(); }); // the player closed; keep it running
         g.MapPost("/cast/state", async (HttpContext ctx, CastHost cast) =>
         {

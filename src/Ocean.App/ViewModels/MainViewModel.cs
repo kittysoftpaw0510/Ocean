@@ -491,6 +491,9 @@ public partial class MainViewModel : ObservableObject
                     if (MyCast is not null) Player.HostUpdate(MyCast); else Player.EndCastIf(PlayerViewModel.CastRoles.Host);
                     break;
                 }
+                case "castSchedule":
+                    SharesVm.ApplySchedule(Json.Deserialize<CastScheduleDto>(data));
+                    break;
                 case "castView":
                 {
                     var v = Json.Deserialize<CastViewDto>(data);
@@ -1232,6 +1235,9 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand] private Task Deny(PendingAccessVm req) => DecideAsync(req, "deny");
 
     // ------------------------------------------------------------------ toasts
+
+    /// <summary>A Windows notification from the tray (seen also when the window is hidden).</summary>
+    public void Notify(string title, string text, Action? onClick) => TrayNotify?.Invoke(title, text, onClick);
 
     public void Toast(string title, string message, string kind = "info", Action? onClick = null)
     {

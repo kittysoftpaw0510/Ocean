@@ -219,6 +219,7 @@ public partial class SharesViewModel : ObservableObject
             if (Selected is null || !ids.Contains(Selected.Id)) Selected = Shares.FirstOrDefault(s => s.Id == keep) ?? Shares.FirstOrDefault();
             else _ = LoadItemsAsync();
             await RefreshGrantsAsync();
+            await LoadScheduleAsync();
         }
         catch (Exception ex) { _main.Error("Could not load shares", ex); }
     }
@@ -625,6 +626,139 @@ public partial class SharesViewModel : ObservableObject
     {
         if (MyCast is null || Selected is null || !_itemVms.TryGetValue(MyCast.ItemId ?? "", out var vm)) return;
         _main.Player.OpenLocal(vm, Selected.Name); // routes to ReopenCastAsync for the multicast video
+    }
+
+    // ------------------------------------------------------------------ scheduled multicast
+
+    /// <summary>The multicast set to start later (the service keeps and starts it), or null.</summary>
+    [ObservableProperty] private CastScheduleDto? _schedule;
+    public bool HasSchedule => Schedule is not null;
+    public string ScheduleText
+    {
+        get
+        {
+            if (Schedule is not { } s) return "";
+            var local = s.At.ToLocalTime();
+            var left = s.At - DateTimeOffset.UtcNow;
+            var day = local.Date == DateTime.Today ? "" : local.Date == DateTime.Today.AddDays(1) ? "tomorrow " : local.ToString("ddd d MMM ");
+            var inText = left.TotalMinutes < 1 ? "in less than a minute" : left.TotalHours < 1 ? $"in {Math.Ceiling(left.TotalMinutes):0} min" : $"in {left.TotalHours:0.#} h";
+            return $"“{s.ItemName}” will be multicast to everyone {day}at {local:HH:mm} ({inText}). Ocean starts it even if this window is closed; open the player then to control it.";
+        }
+    }
+    private System.Windows.Threading.DispatcherTimer? _scheduleClock;
+
+    partial void OnScheduleChanged(CastScheduleDto? value)
+    {
+        OnPropertyChanged(nameof(HasSchedule)); OnPropertyChanged(nameof(ScheduleText));
+        if (value is null) { _scheduleClock?.Stop(); return; }
+        _scheduleClock ??= new System.Windows.Threading.DispatcherTimer(TimeSpan.FromSeconds(20), System.Windows.Threading.DispatcherPriority.Background,
+            (_, _) => OnPropertyChanged(nameof(ScheduleText)), System.Windows.Threading.Dispatcher.CurrentDispatcher);
+        _scheduleClock.Start();
+    }
+
+    /// <summary>From the service: scheduled, cancelled, started, or could not start.</summary>
+    public void ApplySchedule(CastScheduleDto? dto)
+    {
+        Schedule = dto is { Active: true } ? dto : null;
+        if (dto is null) return;
+        if (dto.Started)
+        {
+            Services.AppLog.Info("Cast", $"scheduled multicast started: {dto.ItemName}");
+            _main.Toast("Scheduled multicast started", $"“{dto.ItemName}” is live; every PC was told. Click to open the player and control it.", "success", OpenCastPlayerOrShare);
+            _main.Notify("Scheduled multicast started", dto.ItemName, OpenCastPlayerOrShare);
+        }
+        else if (dto.Error is { } err)
+        {
+            _main.Toast("Scheduled multicast didn't start", $"“{dto.ItemName}”: {err}", "warn");
+            _main.Notify("Scheduled multicast didn't start", $"{dto.ItemName}: {err}", null);
+        }
+    }
+
+    /// <summary>The player on my multicast; if its share isn't the one shown, show that share first.</summary>
+    private void OpenCastPlayerOrShare()
+    {
+        if (MyCast?.ItemId is { } id && !_itemVms.ContainsKey(id)
+            && Shares.FirstOrDefault(s => s.Id == MyCast.ShareId) is { } share)
+        {
+            Selected = share; // the player opens once its videos are loaded (next click), the banner offers it too
+            return;
+        }
+        OpenCastPlayer();
+    }
+
+    public async Task LoadScheduleAsync()
+    {
+        try { ApplySchedule(await _main.Api.GetAsync<CastScheduleDto>("/api/cast/schedule")); }
+        catch (Exception ex) { Services.AppLog.Warn("Cast", "could not load the scheduled multicast", ex); }
+    }
+
+    /// <summary>Row menu: start the multicast in <paramref name="minutes"/> ("custom" asks for a time).</summary>
+    public async Task ScheduleCastAsync(LocalItemVm item, string minutes)
+    {
+        DateTimeOffset at;
+        if (int.TryParse(minutes, out var m)) at = DateTimeOffset.Now.AddMinutes(m);
+        else
+        {
+            var text = await _main.Dialogs.PromptAsync("Schedule multicast",
+                $"When should “{item.Name}” start for everyone?\n\nMinutes from now (e.g. 45), or a time of day (e.g. 18:30).", "15", "Schedule");
+            if (string.IsNullOrWhiteSpace(text)) return;
+            if (ParseWhen(text) is not { } when) { _main.Toast("Not a time", $"“{text.Trim()}”: type minutes (45) or a time of day (18:30).", "warn"); return; }
+            at = when;
+        }
+        if (Schedule is { } existing && !await _main.Dialogs.ConfirmAsync("Replace the scheduled multicast?",
+                $"“{existing.ItemName}” is set to start at {existing.At.ToLocalTime():HH:mm}. Only one multicast can be scheduled; replace it with “{item.Name}”?", "Replace"))
+            return;
+        try
+        {
+            var st = await _main.Api.PostAsync<CastScheduleDto>("/api/cast/schedule", new CastScheduleRequestDto { ItemId = item.Id, At = at, PreferLight = true });
+            if (st is null || st.Error is not null || !st.Active) { _main.Toast("Can't schedule the multicast", st?.Error ?? "Unknown error", "warn"); return; }
+            Schedule = st;
+            _main.Toast("Multicast scheduled", $"“{item.Name}” starts at {st.At.ToLocalTime():HH:mm}. Everyone gets a notice when it starts.", "success");
+        }
+        catch (Services.ApiException ex) { _main.Toast("Can't schedule the multicast", ex.Message, "warn"); }
+        catch (Exception ex) { _main.Error("Can't schedule the multicast", ex); }
+    }
+
+    /// <summary>"45" = minutes from now; "18:30" / "6:30 PM" = that time today (tomorrow if it has passed).</summary>
+    public static DateTimeOffset? ParseWhen(string text)
+    {
+        text = text.Trim();
+        if (int.TryParse(text.TrimEnd('m', 'M', ' ').Replace("min", "", StringComparison.OrdinalIgnoreCase), out var minutes))
+            return minutes is > 0 and <= 7 * 24 * 60 ? DateTimeOffset.Now.AddMinutes(minutes) : null;
+        if (text.Contains(':') && DateTime.TryParse(text, System.Globalization.CultureInfo.CurrentCulture, System.Globalization.DateTimeStyles.NoCurrentDateDefault, out var t))
+        {
+            var when = DateTime.Today + t.TimeOfDay;
+            if (when <= DateTime.Now) when = when.AddDays(1);
+            return new DateTimeOffset(when);
+        }
+        return null;
+    }
+
+    [RelayCommand]
+    private async Task CancelSchedule()
+    {
+        try { await _main.Api.DeleteAsync("/api/cast/schedule"); Schedule = null; }
+        catch (Exception ex) { _main.Error("Could not cancel", ex); }
+    }
+
+    /// <summary>Banner: start the scheduled multicast right now (with the player, like a normal start).</summary>
+    [RelayCommand]
+    private async Task StartScheduledNow()
+    {
+        if (Schedule is not { } s) return;
+        if (s.ItemId is { } id && _itemVms.TryGetValue(id, out var vm) && Selected is not null)
+        {
+            await CancelSchedule();
+            await StartCastAsync(vm);
+            return;
+        }
+        // its share isn't shown: let the service start it now (it plays on by itself until the player is opened)
+        try
+        {
+            var st = await _main.Api.PostAsync<CastScheduleDto>("/api/cast/schedule", new CastScheduleRequestDto { ItemId = s.ItemId ?? "", At = DateTimeOffset.Now, PreferLight = s.PreferLight });
+            if (st?.Error is { } err) _main.Toast("Can't start the multicast", err, "warn");
+        }
+        catch (Exception ex) { _main.Error("Can't start the multicast", ex); }
     }
 
     /// <summary>Start multicasting one of my videos: the player opens and drives everyone who joins.</summary>

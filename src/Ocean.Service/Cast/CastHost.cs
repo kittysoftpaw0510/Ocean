@@ -191,7 +191,7 @@ public sealed class CastHost : IDisposable
         var live = LiveViewers(s);
         return new MyCastDto
         {
-            Active = true, SessionId = s.Id.ToString("N"), ItemId = s.ItemId, ItemName = s.Name, ShareName = s.ShareName, Light = s.Light,
+            Active = true, SessionId = s.Id.ToString("N"), ItemId = s.ItemId, ItemName = s.Name, ShareName = s.ShareName, ShareId = s.ShareId, Light = s.Light,
             Viewers = live.Count, ViewersMulticast = live.Count(v => v.Receiving), Position = s.Now(), Playing = s.Playing, StartedAt = s.StartedAt,
             Unattended = s.Unattended,
         };

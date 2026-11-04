@@ -76,6 +76,7 @@ public sealed class MyCastDto
     public string? ItemId { get; set; }
     public string ItemName { get; set; } = "";
     public string ShareName { get; set; } = "";
+    public string? ShareId { get; set; }
     public bool Light { get; set; }
     public int Viewers { get; set; }
     /// <summary>How many of them receive the multicast packets (the others fall back to a direct stream).</summary>
@@ -119,4 +120,30 @@ public sealed class CastLimitDto
     public int Nodes { get; set; }
     public int MaxAllowed { get; set; }
     public string? Reason { get; set; }
+}
+
+/// <summary>
+/// A multicast I set to start later (host side). The service keeps it (also across restarts) and starts it at
+/// <see cref="At"/> by itself; the multicast then plays on without the player until the host opens it. Everyone is
+/// told when it starts, the same way as any multicast (it appears in my catalog).
+/// </summary>
+public sealed class CastScheduleDto
+{
+    public bool Active { get; set; }
+    public string? ItemId { get; set; }
+    public string ItemName { get; set; } = "";
+    public string ShareName { get; set; } = "";
+    public DateTimeOffset At { get; set; }
+    public bool PreferLight { get; set; } = true;
+    /// <summary>Set on the event when the scheduled multicast has just started.</summary>
+    public bool Started { get; set; }
+    /// <summary>Why it could not be scheduled or started (it is dropped then).</summary>
+    public string? Error { get; set; }
+}
+
+public sealed class CastScheduleRequestDto
+{
+    public string ItemId { get; set; } = "";
+    public DateTimeOffset At { get; set; }
+    public bool PreferLight { get; set; } = true;
 }
