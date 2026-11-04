@@ -23,8 +23,8 @@ and every byte between them travels over mutually authenticated, end-to-end encr
 - **Quiet when idle**: like IP Messenger, Ocean speaks when something happens (a PC starts, shares change, a
   PC leaves) and otherwise sends one small "still here" every 5 minutes, so an idle PC uses next to no network or
   CPU. A PC that crashes or loses its network is noticed as soon as anyone tries to reach it (within seconds), or
-  after 15 minutes of silence. While PCs on Ocean 1.3.8 or older are on the network, newer PCs keep the old
-  4-second rhythm for them, and go quiet by themselves once those are updated.
+  after 15 minutes of silence. PCs on Ocean 1.3.8 or older need a sign of life every few seconds: each of them
+  gets a small direct one every 4 seconds, which they never answer, and the rest of the network stays quiet.
 - **Local network only**: Ocean only ever talks to PCs on the PC's own local networks (private addresses on an
   Ethernet or Wi-Fi network it is plugged into). Never over the internet, never through a VPN: with a VPN such as
   Astrill connected, Ocean neither announces itself nor answers on the VPN adapter, and refuses connections from

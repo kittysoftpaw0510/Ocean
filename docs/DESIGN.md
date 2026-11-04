@@ -79,13 +79,17 @@ Presence works the IPmsg way: a node speaks when something happens and is silent
   beacon nor a request comes within 5 s. One that only has its firewall in the way answers, and the reverse
   connection takes over.
 - **Answers.** To a question, to a newcomer, to a node we ask to connect back (at most once a second each), and to
-  a heartbeat once per heartbeat, so a node whose broadcasts don't reach us still hears from us. A `reply` is never
+  a node's hello once per our own heartbeat, so a node our broadcasts don't reach still hears from us before it
+  gives us up. An older node gets no such answers (it has our keep-alive, below). A `reply` is never
   answered: until 1.3.7 a node asking another to connect back answered all its beacons, replies included, and two
   such nodes answered each other without end (about 1,200 packets a second, 20 Mbps, on a network of 24 PCs).
-- **Older nodes.** Ocean up to 1.3.8 takes a node silent for 16 s as gone and sends no `hb`. While any such node is
-  heard directly, a node keeps the old rhythm (a hello every 4 s, `hb` = 4, answers every 8 s) and goes quiet by
-  itself when the last one has left or been updated (and never in its first 20 s, before the startup questions are
-  answered). Its peers time it out by what it announced (16 s for `hb` = 4).
+- **Older nodes.** Ocean up to 1.3.8 takes a node silent for 16 s as gone and sends no `hb`. Each such node heard
+  directly gets a unicast `reply` every 4 s: older Ocean counts any beacon as a sign of life and never answers a
+  reply. Everything else stays quiet. Until 1.4.3 one older node put every node on the old rhythm (a broadcast
+  every 4 s, answers to every node every 8 s): with 5 older and 23 new PCs, about 900 discovery packets a minute
+  per PC (0.1 Mbps); now about 75 sent (the keep-alives) and the older nodes' own broadcasts received. A node is on
+  the 4 s rhythm only in its first 20 s, until the startup questions are answered; its peers time it out by what
+  it announced (16 s for `hb` = 4, 15.5 min for 300).
 - **Signatures.** `sig` covers the fields older nodes know; `xs` covers everything, `hb`, `nrev` and `q` included.
   Without a valid `xs` the newer fields are dropped and the beacon counts as an older node's.
 - **Bridge lists** (`/p/neighbors`, below) are asked from a quiet node when it comes online and when the `nrev` in

@@ -21,14 +21,16 @@ namespace Ocean.Service.Discovery;
 /// "are you there?" and taken offline when it doesn't answer within 5 s.</item>
 /// <item>Answers: to questions, to newcomers, to nodes we ask to connect back, and to a heartbeat once per heartbeat
 /// (so a node whose broadcasts don't reach us still knows we're here). A reply is never answered.</item>
-/// <item>Older Ocean (up to 1.3.8) takes a node silent for 16 s as gone: while any is heard here, this node keeps the
-/// old rhythm, a hello every 4 s, and goes quiet by itself once the last one has left or been updated.</item>
+/// <item>Older Ocean (up to 1.3.8) takes a node silent for 16 s as gone. Each such node heard here gets a direct
+/// "reply" every 4 s, which older Ocean counts as a sign of life but never answers. The rest of the network stays
+/// quiet: one older PC used to keep every PC on the 4 s rhythm, every PC answering every other one every 8 s.</item>
 /// </list>
 /// Only nodes of the same realm (shared secret) are kept.
 /// </summary>
 public sealed class DiscoveryService : BackgroundService
 {
-    /// <summary>The rhythm older Ocean needs (it takes a node silent for 16 s as gone).</summary>
+    /// <summary>The rhythm older Ocean needs (it takes a node silent for 16 s as gone): at start (for everyone, until the
+    /// startup questions are answered) and afterwards directly to each older node.</summary>
     private static readonly TimeSpan LoudEvery = TimeSpan.FromSeconds(4);
     /// <summary>The heartbeat once every node heard here is quiet-capable (OCEAN_TEST_HEARTBEAT, seconds: developers only).</summary>
     private static readonly TimeSpan QuietEvery = TimeSpan.FromSeconds(OceanDefaults.EnvPort("OCEAN_TEST_HEARTBEAT", 300));
@@ -39,7 +41,7 @@ public sealed class DiscoveryService : BackgroundService
     private static readonly bool UnicastAsBroadcast = Environment.GetEnvironmentVariable("OCEAN_TEST_UNICAST_AS_BROADCAST") == "1";
     /// <summary>Beacon type of a direct answer to a node's broadcast. Older nodes treat it as a hello.</summary>
     private const string ReplyType = "reply";
-    /// <summary>An older node, heard every 4 s, is answered at most this often.</summary>
+    /// <summary>While this node is still on the 4 s rhythm (its first 20 s), a node is answered at most this often.</summary>
     private const long ReplyEveryMs = 8000;
     /// <summary>At most one broadcast, and one answer to a node, per second (however many changes ask for one).</summary>
     private const int MinGapMs = 1000;
@@ -65,8 +67,8 @@ public sealed class DiscoveryService : BackgroundService
     private long _lastNoLanLog = -600_000;
     /// <summary>Quiet only after the startup questions had time to be answered (older nodes would be missed before).</summary>
     private readonly long _started = Environment.TickCount64;
-    /// <summary>The rhythm is written to the log once the startup questions are answered, then at every change.</summary>
-    private bool _rhythmLogged;
+    /// <summary>How many older nodes get the 4 s keep-alive, as last written to the log (-1: not yet).</summary>
+    private int _olderLogged = -1;
 
     public DiscoveryService(ConfigStore config, NodeIdentity identity, PeerRegistry registry, CatalogService catalog,
         EventHub events, Net.RelayHub relay, Net.RelayWorker relayWorker, Net.MeshService mesh, Peers.PeerClient client,
@@ -155,12 +157,24 @@ public sealed class DiscoveryService : BackgroundService
         await Task.WhenAny(receive, send, expire);
     }
 
-    /// <summary>Older nodes are heard here: keep their rhythm, or they would take us for gone after 16 s of quiet.</summary>
-    private bool OlderNodesAround(out string names)
+    /// <summary>Older nodes heard here directly: they take us for gone after 16 s without a beacon from us.</summary>
+    private List<Peer> OlderNodes() => _registry.Snapshot().Where(p => p.Online && p.HeardDirectly && p.Hb == 0).ToList();
+
+    private bool StartupOver => Environment.TickCount64 - _started > 20_000;
+
+    /// <summary>
+    /// A direct "reply" to each older node, every 4 s: it keeps us in their list (any beacon does) and, being a
+    /// reply, is never answered. One broadcast every 4 s did the same for them but woke every PC on the network.
+    /// </summary>
+    private void KeepOlderNodes(List<Peer> older)
     {
-        var older = _registry.Snapshot().Where(p => p.Online && p.HeardDirectly && p.Hb == 0).Select(p => p.Name).ToList();
-        names = string.Join(", ", older.Take(5)) + (older.Count > 5 ? $" and {older.Count - 5} more" : "");
-        return older.Count > 0;
+        if (older.Count == 0) return;
+        var reply = Build(ReplyType);
+        foreach (var p in older)
+        {
+            SendTo(reply, p);
+            if (UnicastAsBroadcast) break; // that one broadcast reached all of them
+        }
     }
 
     private async Task SendLoop(CancellationToken ct)
@@ -176,22 +190,25 @@ public sealed class DiscoveryService : BackgroundService
         }, CancellationToken.None);
 
         var last = Environment.TickCount64 - (long)QuietEvery.TotalMilliseconds;
+        var lastKeep = 0L;
         while (!ct.IsCancellationRequested)
         {
-            var quiet = !OlderNodesAround(out var older) && Environment.TickCount64 - _started > 20_000;
-            var startupOver = Environment.TickCount64 - _started > 20_000;
-            if (quiet != _quiet || (startupOver && !_rhythmLogged))
+            // quiet once the startup questions had time to be answered (older nodes would be missed before)
+            var quiet = StartupOver;
+            if (quiet != _quiet) { Interlocked.Exchange(ref _pendingEvent, 1); _quiet = quiet; } // tell the new rhythm at once
+            var older = _quiet ? OlderNodes() : new List<Peer>();
+            if (_quiet && older.Count != _olderLogged)
             {
-                if (quiet != _quiet) Interlocked.Exchange(ref _pendingEvent, 1); // tell the new rhythm at once
-                _quiet = quiet;
-                if (startupOver)
-                {
-                    _rhythmLogged = true;
-                    if (quiet) _log.LogInformation("discovery: quiet, a heartbeat every {Every} (every node heard here is quiet-capable)",
-                        QuietEvery.TotalMinutes >= 1 ? $"{QuietEvery.TotalMinutes:0} min" : $"{QuietEvery.TotalSeconds:0} s");
-                    else _log.LogInformation("discovery: a hello every 4 s while {Count} node(s) with an older Ocean are heard here ({Names})",
-                        _registry.Snapshot().Count(p => p.Online && p.HeardDirectly && p.Hb == 0), older);
-                }
+                var hb = QuietEvery.TotalMinutes >= 1 ? $"{QuietEvery.TotalMinutes:0} min" : $"{QuietEvery.TotalSeconds:0} s";
+                if (older.Count == 0) _log.LogInformation("discovery: quiet, a heartbeat every {Every} (every node heard here is quiet-capable)", hb);
+                else _log.LogInformation("discovery: quiet, a heartbeat every {Every}; directly every 4 s to {Count} node(s) with an older Ocean ({Names})",
+                    hb, older.Count, string.Join(", ", older.Take(5).Select(p => p.Name)) + (older.Count > 5 ? $" and {older.Count - 5} more" : ""));
+                _olderLogged = older.Count;
+            }
+            if (older.Count > 0 && Environment.TickCount64 - lastKeep >= LoudEvery.TotalMilliseconds)
+            {
+                try { KeepOlderNodes(older); } catch (Exception ex) { _log.LogDebug(ex, "keep-alive"); }
+                lastKeep = Environment.TickCount64;
             }
             var every = _quiet ? QuietEvery : LoudEvery;
             var change = Interlocked.Exchange(ref _pendingEvent, 0) == 1;
@@ -211,6 +228,11 @@ public sealed class DiscoveryService : BackgroundService
                 last = Environment.TickCount64;
             }
             var next = every - TimeSpan.FromMilliseconds(Environment.TickCount64 - last);
+            if (older.Count > 0)
+            {
+                var keepNext = LoudEvery - TimeSpan.FromMilliseconds(Environment.TickCount64 - lastKeep);
+                if (keepNext < next) next = keepNext;
+            }
             if (next < TimeSpan.FromMilliseconds(MinGapMs)) next = TimeSpan.FromMilliseconds(MinGapMs);
             try { await _wake.WaitAsync(next, ct); } catch (OperationCanceledException) { break; }
         }
@@ -224,8 +246,7 @@ public sealed class DiscoveryService : BackgroundService
             try { await Task.Delay(TimeSpan.FromSeconds(10), ct); } catch (OperationCanceledException) { break; }
             try { _registry.Expire(TimeSpan.FromHours(Math.Max(1, _config.Current.OfflineKeepHours))); }
             catch (Exception ex) { _log.LogDebug(ex, "expire"); }
-            var shouldBeQuiet = !OlderNodesAround(out _) && Environment.TickCount64 - _started > 20_000;
-            if (_quiet != shouldBeQuiet) Wake(); // rhythm to change
+            if (_quiet != StartupOver) Wake(); // startup over: go quiet
         }
     }
 
@@ -315,10 +336,10 @@ public sealed class DiscoveryService : BackgroundService
                 // Answer directly ("reply"), but never a reply: two nodes that each wanted the other to connect back
                 // used to answer each other's replies without end (20 Mbps on a busy network). Answered: a question,
                 // a newcomer, a node we ask to connect back (it carries our request), and otherwise a node's hello once
-                // per its rhythm (every 8 s for an older node, once per heartbeat for a quiet one), so a node whose
-                // broadcasts don't reach us still hears from us.
+                // per our own heartbeat, so a node our broadcasts don't reach still hears from us before it gives us up
+                // (it waits three of our heartbeats). An older node isn't: it gets our keep-alive every 4 s anyway.
                 var since = Environment.TickCount64 - _lastReply.GetValueOrDefault(b.Id);
-                var every = b.Hb <= 4 ? ReplyEveryMs : (long)(b.Hb * 1000 * 0.9);
+                var every = !_quiet ? ReplyEveryMs : b.Hb == 0 ? long.MaxValue : (long)(QuietEvery.TotalMilliseconds * 0.9);
                 var due = b.T != ReplyType && since >= MinGapMs
                           && (b.Q == true || isNew || _relay.IsWanted(b.Id) || since >= every);
                 if (due)
