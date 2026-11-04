@@ -219,6 +219,24 @@ public sealed class PeerService : IDisposable
         => _state.TryGetValue(peerId, out var st) && st.Version is { } v && System.Version.TryParse(v, out var ver) ? ver >= new System.Version(1, 3, 2) : null;
 
     /// <summary>Everything this PC knows about one node, for the "Node info" window.</summary>
+    /// <summary>
+    /// <see cref="Info"/>, but first fetches the node's whole list once when the Windows edition is missing although
+    /// its Ocean reports it (1.3.5 on): until 1.4.4 a delta update dropped it, so the list we keep may have lost it.
+    /// </summary>
+    public async Task<PeerInfoDto?> InfoAsync(string peerId, CancellationToken ct)
+    {
+        if (_registry.TryGetOnline(peerId, out _) && _catalogs.TryGetValue(peerId, out var cat) && cat.Os is null
+            && ReportsWindows(peerId) == true && _osRefetched.TryAdd(peerId, 0))
+        {
+            try { await FetchCatalogAsync(peerId, ct, fullOnly: true); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { _log.LogDebug(ex, "catalog for node info"); }
+        }
+        return Info(peerId);
+    }
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _osRefetched = new();
+    private bool? ReportsWindows(string peerId)
+        => _state.TryGetValue(peerId, out var st) && st.Version is { } v && System.Version.TryParse(v, out var ver) ? ver >= new System.Version(1, 3, 5) : null;
+
     public PeerInfoDto? Info(string peerId)
     {
         if (!_registry.TryGet(peerId, out var p)) return null;
@@ -576,6 +594,9 @@ public sealed class PeerService : IDisposable
                 share.Items = kept.Concat(share.Items).ToList();
             }
         }
+        // Up to 1.4.4 a delta left out the owner's Ocean version and Windows edition: keep what we knew.
+        delta.AppVersion ??= previous.AppVersion;
+        delta.Os ??= previous.Os;
         delta.DeltaFrom = null;
         return delta;
     }

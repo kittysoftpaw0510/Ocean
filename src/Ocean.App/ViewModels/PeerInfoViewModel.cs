@@ -39,11 +39,15 @@ public sealed class PeerInfoViewModel
         if (p.User.Length > 0) rows.Add(new("User", p.User));
         rows.Add(new("Ocean name", p.Name));
         rows.Add(new("PC name", p.Host.Length > 0 ? p.Host : "Unknown"));
-        rows.Add(new("Windows", p.Os ?? "Not reported (its Ocean is 1.3.3 or older)"));
+        rows.Add(new("Windows", p.Os ?? (ReportsWindows(p.AppVersion) == false ? "Not reported (its Ocean is 1.3.3 or older)" : "Not known yet")));
         rows.Add(VersionRow(p));
         rows.Add(new("Node ID", NodeIdShort(p.Id), Copy: p.Id));
         return rows;
     }
+
+    /// <summary>Ocean reports its Windows edition from 1.3.5 on (null: its version isn't known).</summary>
+    private static bool? ReportsWindows(string? version)
+        => System.Version.TryParse(version, out var v) ? v >= new System.Version(1, 3, 5) : null;
 
     private static InfoRow VersionRow(PeerInfoDto p)
     {

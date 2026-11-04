@@ -85,6 +85,7 @@ public static class PeerApi
                 var delta = new CatalogDto
                 {
                     NodeId = cat.NodeId, NodeName = cat.NodeName, UserName = cat.UserName, Host = cat.Host,
+                    AppVersion = cat.AppVersion, Os = cat.Os,
                     Version = changes.Version, GeneratedAt = cat.GeneratedAt, DeltaFrom = baseVersion,
                     RemovedItems = changes.Removed.ToList(), Cast = cat.Cast, CastPlan = cat.CastPlan,
                 };

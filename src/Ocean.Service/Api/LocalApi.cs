@@ -56,8 +56,8 @@ public static class LocalApi
 
         // ---------------------------------------------------------------- peers
         g.MapGet("/peers", (PeerService peers) => Results.Json(peers.Peers(), Json.Options));
-        g.MapGet("/peers/{peerId}/info", (string peerId, PeerService peers) =>
-            peers.Info(peerId) is { } info ? Results.Json(info, Json.Options) : Results.NotFound());
+        g.MapGet("/peers/{peerId}/info", async (string peerId, HttpContext ctx, PeerService peers) =>
+            await peers.InfoAsync(peerId, ctx.RequestAborted) is { } info ? Results.Json(info, Json.Options) : Results.NotFound());
 
         // Forget an offline node now (its snapshot is deleted). An online node would reappear at once, so refuse.
         g.MapDelete("/peers/{peerId}", (string peerId, PeerRegistry registry) =>
