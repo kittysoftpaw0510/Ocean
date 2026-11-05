@@ -121,6 +121,12 @@ public partial class MainViewModel : ObservableObject
         SettingsVm = new SettingsViewModel(this);
         SearchVm = new SearchViewModel(this);
         Player = new PlayerViewModel(this);
+        // updates wait while a video plays: what was held back (a notice, an install) happens once it is closed
+        Player.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(PlayerViewModel.IsOpen) && !Player.IsOpen && Update is { } u)
+                Application.Current?.Dispatcher.InvokeAsync(() => ApplyUpdate(u));
+        };
         _peersView = System.Windows.Data.CollectionViewSource.GetDefaultView(Peers);
         _peersView.Filter = o => o is PeerVm p && PeerMatches(p, SearchText);
         Page = Home;
@@ -662,7 +668,8 @@ public partial class MainViewModel : ObservableObject
 
         // Tell once per version: as soon as it is out, or in auto-update mode once it is downloaded.
         var tell = ready || (available && !u.Downloading && u.Mode != UpdateModes.AutoUpdate);
-        if (tell && u.Latest != _updateAnnounced && u.Latest != _updateDismissed)
+        // nobody watches a video to hear about updates: the notice waits until the player is closed
+        if (tell && u.Latest != _updateAnnounced && u.Latest != _updateDismissed && !Player.IsOpen)
         {
             _updateAnnounced = u.Latest;
             var (title, text) = ready
@@ -672,7 +679,9 @@ public partial class MainViewModel : ObservableObject
             TrayNotify?.Invoke(title, text, ShowHome); // shown only while the window is closed to the tray
         }
 
-        if (_installWhenReady && ready) { _installWhenReady = false; _ = InstallUpdateAsync(confirm: false); }
+        if (_installWhenReady && ready && Player.IsOpen)
+            Home.UpdateHint = "It installs when you close the video."; // never in the middle of one
+        else if (_installWhenReady && ready) { _installWhenReady = false; _ = InstallUpdateAsync(confirm: false); }
         else if (_installWhenReady && !u.Downloading && u.Error.StartsWith("Download failed", StringComparison.Ordinal))
         {
             _installWhenReady = false;
@@ -703,12 +712,19 @@ public partial class MainViewModel : ObservableObject
         if (Update is not { Ready: true, InstallerPath: { Length: > 0 } path, Latest: var version }) return;
         if (!File.Exists(path)) { Toast("Installer missing", "The downloaded file is gone; checking again.", "warn"); _ = CheckUpdatesAsync(); return; }
         var casting = MyCast is { Active: true };
-        // "Update now" already said yes; still ask when it would stop a multicast others are watching
-        if (confirm || casting)
+        var viewers = SharesVm.TotalViewers;
+        var downloading = DownloadsVm.Jobs.Count(j => j.Status == DownloadStatus.Running);
+        // "Update now" already said yes; still ask when it would interrupt others or running work
+        if (confirm || casting || viewers > 0 || downloading > 0)
         {
+            var interrupts = new List<string>();
+            if (casting) interrupts.Add("your multicast stops");
+            if (viewers > 0) interrupts.Add(viewers == 1 ? "1 PC watching one of your videos is interrupted for about a minute" : $"{viewers} PCs watching your videos are interrupted for about a minute");
+            if (downloading > 0) interrupts.Add(downloading == 1 ? "a running download pauses (it continues afterwards)" : $"{downloading} running downloads pause (they continue afterwards)");
             var ok = await Dialogs.ConfirmAsync($"Install Ocean {version}?",
-                "Ocean closes, the new version installs in the background (Windows asks for permission first) and Ocean opens again in about a minute. " +
-                "Downloads continue afterwards." + (casting ? " Your multicast stops." : ""), "Install now");
+                "Ocean closes, the new version installs in the background (Windows asks for permission first) and Ocean opens again in about a minute." +
+                (interrupts.Count > 0 ? " Meanwhile " + string.Join("; ", interrupts) + "." : " Downloads continue afterwards."),
+                interrupts.Count > 0 ? "Install anyway" : "Install now");
             if (!ok) return;
         }
         try

@@ -78,6 +78,9 @@ public sealed class StreamCache
 
     public long UsedBytes { get { lock (_lock) return _entries.Values.Sum(e => e.Bytes); } }
 
+    /// <summary>A video is being streamed through the cache right now (watched here, or passed on as a bridge).</summary>
+    public bool InUse { get { lock (_lock) return _entries.Values.Any(e => e.Refs > 0); } }
+
     // ------------------------------------------------------------------ external feeds (multicast)
 
     private readonly Dictionary<string, ExternalFeed> _feeds = new();

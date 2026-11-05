@@ -20,7 +20,13 @@ namespace Ocean.Service.Update;
 /// and when there is no connection yet tries again after 10 s, 1 min and 10 min. After that checks follow the clock,
 /// not a timer: the time of the last one is kept on disk, and every few minutes the service looks whether 4 h have
 /// passed (30 min after a failed one), so sleep and restarts don't skip checks. A check or a background download that
-/// can't reach the internet stays silent (the log says so); only "Check for updates" reports it, since the user asked. The newest release seen is kept too, so the app hears about it again right after a restart. When GitHub's
+/// can't reach the internet stays silent (the log says so); only "Check for updates" reports it, since the user asked.
+/// <para>
+/// Updating is what nobody comes to Ocean for, so it never gets in the way: a download in the background
+/// (auto-update) waits until nothing is being watched, streamed to others, multicast or downloaded, pauses when that
+/// starts, goes at most 2 MB/s, and picks up where it stopped (also after a failure, 30 min later). "Update now"
+/// downloads at full speed (the user asked) and resumes too. Installing is always the user's click (the app).
+/// </para> The newest release seen is kept too, so the app hears about it again right after a restart. When GitHub's
 /// API refuses (60 requests an hour for one internet address, shared by every PC behind it), the release page is read
 /// instead. No internet: the check fails, is logged, and is tried again later.
 /// </summary>
@@ -64,10 +70,17 @@ public sealed class Updater : BackgroundService
     private Release? _found;
     private CancellationTokenSource _wake = new();
     private CancellationToken _stopping = CancellationToken.None;
+    private readonly IServiceProvider _services;
+    /// <summary>A background download (auto-update) is not tried before this (after a failure, or while Ocean is busy).</summary>
+    private DateTimeOffset _nextBackgroundTry = DateTimeOffset.MinValue;
+    private string? _waitingFor;
+    /// <summary>A download in the background goes at most this fast (bytes a second): it must never crowd the network.</summary>
+    private const double BackgroundRate = 2 * 1024 * 1024;
+    private static readonly TimeSpan RetryDownloadAfter = TimeSpan.FromMinutes(30);
 
-    public Updater(ConfigStore config, EventHub events, ILogger<Updater> log)
+    public Updater(ConfigStore config, EventHub events, ILogger<Updater> log, IServiceProvider services)
     {
-        _config = config; _events = events; _log = log;
+        _config = config; _events = events; _log = log; _services = services;
         _dir = Path.Combine(OceanDefaults.DataDir, "updates");
         _statePath = Path.Combine(OceanDefaults.DataDir, "update-state.json");
         _http = Client(Handler(redirect: true));
@@ -118,6 +131,10 @@ public sealed class Updater : BackgroundService
         while (!ct.IsCancellationRequested)
         {
             if (ModeOf(_config.Current) != UpdateModes.Manual && Due()) await CheckCoreAsync(ct, userAsked: false);
+            // auto-update: a newer version known but not downloaded yet (it waited for a quiet moment, or failed)
+            if (ModeOf(_config.Current) == UpdateModes.AutoUpdate && _found is { } pending && IsNewer(pending.Version, Current)
+                && !Status.Ready && !Status.Downloading && DateTimeOffset.UtcNow >= _nextBackgroundTry)
+                _ = DownloadInBackground(pending, quiet: true);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, _wake.Token);
             try { await Task.Delay(Look, linked.Token); } catch (OperationCanceledException) { }
             if (_wake.IsCancellationRequested) { _wake.Dispose(); _wake = new CancellationTokenSource(); }
@@ -280,9 +297,38 @@ public sealed class Updater : BackgroundService
         return File.Exists(path) && (rel.AssetSize <= 0 || new FileInfo(path).Length == rel.AssetSize) ? path : null;
     }
 
-    /// <summary><paramref name="quiet"/>: in the background (auto-update), a failure is only logged; tried again at the next check.</summary>
+    /// <summary>What Ocean is busy with right now that a background download must not compete with (null: nothing).</summary>
+    private string? Busy()
+    {
+        try
+        {
+            if (_services.GetService<Cast.CastHost>()?.Status().Active == true) return "a multicast you are hosting";
+            if (_services.GetService<Cast.CastReceiver>()?.Status() is { Active: true }) return "a multicast being watched";
+            if (_services.GetService<Peers.StreamCache>()?.InUse == true) return "a video being watched";
+            if (_services.GetService<Cast.ViewerTracker>()?.Counts().Values.Sum() > 0) return "others watching your videos";
+            if (_services.GetService<Downloads.DownloadManager>()?.List().Any(j => j.Status == DownloadStatus.Running) == true) return "downloads";
+        }
+        catch { }
+        return null;
+    }
+
+    private sealed class PausedForActivity(string what) : Exception($"paused for {what}");
+
+    /// <summary>
+    /// <paramref name="quiet"/>: in the background (auto-update): only while Ocean is otherwise idle, paced, pausing when
+    /// something starts; a failure is only logged and tried again 30 min later. Either way a broken download goes on
+    /// from where it stopped (the ".part" file is kept), and the installer is checked before it counts as ready.
+    /// </summary>
     private async Task DownloadAsync(Release rel, CancellationToken ct, bool quiet = false)
     {
+        if (quiet && Busy() is { } busy)
+        {
+            if (_waitingFor != busy) _log.LogInformation("update download waits: {What}", busy);
+            _waitingFor = busy;
+            _nextBackgroundTry = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(5);
+            return;
+        }
+        _waitingFor = null;
         if (!await _downloadLock.WaitAsync(0, ct)) return; // one at a time; the running one reports
         var path = Path.Combine(_dir, rel.AssetName);
         var part = path + ".part";
@@ -294,21 +340,43 @@ public sealed class Updater : BackgroundService
                 Cleanup(path);
                 return;
             }
-            Set(s => { s.Downloading = true; s.Progress = 0; s.Ready = false; s.InstallerPath = null; s.Error = ""; });
-            _log.LogInformation("downloading Ocean {Version} ({Size} MB)", rel.Version, rel.AssetSize / 1048576);
+            long have = 0;
+            try { if (File.Exists(part)) have = new FileInfo(part).Length; } catch { }
+            if (rel.AssetSize > 0 && have >= rel.AssetSize) { try { File.Delete(part); } catch { } have = 0; }
+            Set(s => { s.Downloading = true; s.Progress = rel.AssetSize > 0 ? (double)have / rel.AssetSize : 0; s.Ready = false; s.InstallerPath = null; s.Error = ""; });
+            _log.LogInformation("downloading Ocean {Version} ({Size} MB){From}{How}", rel.Version, rel.AssetSize / 1048576,
+                have > 0 ? $", going on from {have / 1048576} MB" : "", quiet ? " in the background (at most 2 MB/s, pauses while Ocean is in use)" : "");
             long size;
-            using (var resp = await _http.GetAsync(rel.AssetUrl, HttpCompletionOption.ResponseHeadersRead, ct))
+            using (var req = new HttpRequestMessage(HttpMethod.Get, rel.AssetUrl))
             {
+                if (have > 0) req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(have, null);
+                using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
                 resp.EnsureSuccessStatusCode();
-                size = rel.AssetSize > 0 ? rel.AssetSize : resp.Content.Headers.ContentLength ?? 0;
+                var resumed = have > 0 && resp.StatusCode == System.Net.HttpStatusCode.PartialContent;
+                if (!resumed) have = 0; // the server sends the whole file: start over
+                size = rel.AssetSize > 0 ? rel.AssetSize : (resp.Content.Headers.ContentLength ?? 0) + have;
                 await using var src = await resp.Content.ReadAsStreamAsync(ct);
-                await using var dst = new FileStream(part, FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16, FileOptions.Asynchronous);
-                var buf = new byte[1 << 16]; long done = 0; var lastShown = DateTime.UtcNow;
+                await using var dst = new FileStream(part, resumed ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16, FileOptions.Asynchronous);
+                var buf = new byte[1 << 16]; long done = have; var lastShown = DateTime.UtcNow; var lastBusyCheck = DateTime.UtcNow;
+                var paced = System.Diagnostics.Stopwatch.StartNew(); long pacedBytes = 0;
                 int n;
                 while ((n = await src.ReadAsync(buf, ct)) > 0)
                 {
                     await dst.WriteAsync(buf.AsMemory(0, n), ct);
                     done += n;
+                    if (quiet)
+                    {
+                        // never faster than BackgroundRate
+                        pacedBytes += n;
+                        var ahead = pacedBytes / BackgroundRate - paced.Elapsed.TotalSeconds;
+                        if (ahead > 0.02) await Task.Delay(TimeSpan.FromSeconds(ahead), ct);
+                        // Ocean got busy: stop here, the rest comes later from this point
+                        if (DateTime.UtcNow - lastBusyCheck > TimeSpan.FromSeconds(2))
+                        {
+                            lastBusyCheck = DateTime.UtcNow;
+                            if (Busy() is { } what) throw new PausedForActivity(what);
+                        }
+                    }
                     if (DateTime.UtcNow - lastShown > TimeSpan.FromSeconds(1))
                     {
                         lastShown = DateTime.UtcNow;
@@ -318,19 +386,29 @@ public sealed class Updater : BackgroundService
                 }
             }
             if (size > 0 && new FileInfo(part).Length != size) throw new IOException("the download is incomplete");
-            if (!await VerifyAsync(part, rel, ct)) throw new IOException("the installer's checksum does not match the release");
+            if (!await VerifyAsync(part, rel, ct))
+            {
+                try { File.Delete(part); } catch { } // damaged: the next try starts over
+                throw new IOException("the installer's checksum does not match the release");
+            }
             File.Move(part, path, overwrite: true);
             Set(s => { s.Downloading = false; s.Progress = 1; s.Ready = true; s.InstallerPath = path; s.InstallerSize = new FileInfo(path).Length; s.Error = ""; });
             Cleanup(path);
             _log.LogInformation("Ocean {Version} is ready to install: {Path}", rel.Version, path);
         }
+        catch (PausedForActivity p)
+        {
+            _log.LogInformation("update download paused ({Why}); it goes on from here later", p.Message);
+            _nextBackgroundTry = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(5);
+            Set(s => s.Downloading = false);
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _log.LogWarning("download of Ocean {Version} failed: {Msg}", rel.Version, ex.Message);
-            try { File.Delete(part); } catch { }
+            _nextBackgroundTry = DateTimeOffset.UtcNow + RetryDownloadAfter; // what arrived is kept: it goes on from there
             Set(s => { s.Downloading = false; if (!quiet) s.Error = "Download failed: " + ex.Message; });
         }
-        catch (OperationCanceledException) { try { File.Delete(part); } catch { } Set(s => s.Downloading = false); }
+        catch (OperationCanceledException) { Set(s => s.Downloading = false); } // stopping: the part stays for next time
         finally { _downloadLock.Release(); }
     }
 

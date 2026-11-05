@@ -592,8 +592,12 @@ public partial class SharesViewModel : ObservableObject
     public string OpenCastPlayerTip => MyCast?.Unattended == true ? "Open the player and take the multicast back (play, pause, seek)" : "Your player drives the multicast";
 
     /// <summary>Live "N watching" counts from the service, by item id.</summary>
+    /// <summary>PCs watching my videos right now.</summary>
+    public int TotalViewers { get; private set; }
+
     public void ApplyViewers(Dictionary<string, int> counts)
     {
+        TotalViewers = counts.Values.Sum();
         foreach (var (id, vm) in _itemVms) vm.Viewers = counts.GetValueOrDefault(id);
         UpdateCastHint();
     }
