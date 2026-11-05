@@ -11,11 +11,17 @@
         <Border Background="{StaticResource Overlay}" Visibility="{Binding Error, Converter={StaticResource NullToVis}}">
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="520">
                 <TextBlock Text="&#xE7BA;" Style="{StaticResource Icon}" FontSize="36" Foreground="{StaticResource Warn}"/>
-                <TextBlock Text="This video can't be played in the built-in player" Style="{StaticResource H2}" HorizontalAlignment="Center" Margin="0,14,0,6" TextWrapping="Wrap" TextAlignment="Center"/>
-                <TextBlock Text="{Binding Error}" Style="{StaticResource Muted}" TextWrapping="Wrap" TextAlignment="Center"/>
-                <TextBlock Text="The built-in player relies on the codecs installed in Windows. VLC (or your default player) can play almost anything, and streaming works the same way." Style="{StaticResource Dim}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,8,0,0"/>
+                <TextBlock Text="{Binding ErrorTitle}" Style="{StaticResource H2}" HorizontalAlignment="Center" Margin="0,14,0,6" TextWrapping="Wrap" TextAlignment="Center"/>
+                <TextBlock Text="{Binding ErrorDetail}" Style="{StaticResource Muted}" TextWrapping="Wrap" TextAlignment="Center"/>
+                <TextBlock Text="The built-in player relies on the codecs installed in Windows. VLC (or your default player) can play almost anything, and streaming works the same way." Style="{StaticResource Dim}" TextWrapping="Wrap" TextAlignment="Center" Margin="0,8,0,0"
+                           Visibility="{Binding StreamLost, Converter={StaticResource InvBoolToVis}}"/>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,18,0,0">
-                    <Button Style="{StaticResource BtnPrimary}" Content="Open in external player" Command="{Binding OpenExternalCommand}"/>
+                    <Button Style="{StaticResource BtnPrimary}" Content="Try again" Margin="0,0,8,0" Command="{Binding RetryCommand}"
+                            Visibility="{Binding StreamLost, Converter={StaticResource BoolToVis}}" ToolTip="Continue where it stopped"/>
+                    <Button Style="{StaticResource BtnPrimary}" Content="Open in external player" Command="{Binding OpenExternalCommand}"
+                            Visibility="{Binding StreamLost, Converter={StaticResource InvBoolToVis}}"/>
+                    <Button Content="Open in external player" Command="{Binding OpenExternalCommand}"
+                            Visibility="{Binding StreamLost, Converter={StaticResource BoolToVis}}"/>
                     <Button Content="Download instead" Margin="8,0,0,0" Command="{Binding DownloadCommand}" Visibility="{Binding CanDownload, Converter={StaticResource BoolToVis}}"/>
                     <Button Style="{StaticResource BtnGhost}" Content="Close" Margin="8,0,0,0" Command="{Binding CloseCommand}"/>
                 </StackPanel>

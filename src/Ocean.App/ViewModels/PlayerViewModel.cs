@@ -68,6 +68,31 @@ public partial class PlayerViewModel : ObservableObject
     [RelayCommand] private void TogglePip() { if (IsOpen) IsPip = !IsPip; }
     [RelayCommand] private void TogglePin() => PipPinned = !PipPinned;
     [ObservableProperty] private string? _error;
+    /// <summary>
+    /// The error came in the middle of a video that was playing (and opening it again where it was didn't help): the
+    /// stream stopped, the video itself is fine. The page says so and offers to try again from <see cref="RetryAt"/>,
+    /// instead of blaming the codecs.
+    /// </summary>
+    [ObservableProperty] private bool _streamLost;
+    public double RetryAt { get; set; }
+    public string ErrorTitle => StreamLost ? "Playback stopped" : "This video can't be played in the built-in player";
+    public string ErrorDetail => !StreamLost ? Error ?? ""
+        : Peer is { } p
+            ? p.Online ? $"The video stopped coming from {p.Label}. Ocean tried to continue a few times. It may be busy or its network may have dropped for a moment."
+                       : $"{p.Label} went offline. Try again when it's back."
+            : "The video stopped playing. Ocean tried to continue a few times.";
+    partial void OnErrorChanged(string? value) { if (value is null) StreamLost = false; OnPropertyChanged(nameof(ErrorDetail)); }
+    partial void OnStreamLostChanged(bool value) { OnPropertyChanged(nameof(ErrorTitle)); OnPropertyChanged(nameof(ErrorDetail)); }
+
+    /// <summary>"Try again" after the stream stopped: open the same video again where it stopped.</summary>
+    [RelayCommand]
+    private void Retry()
+    {
+        if (Url is null) return;
+        StartAt = RetryAt; QuietStart = true;
+        Error = null;
+        Generation++;
+    }
     [ObservableProperty] private int _generation;
     /// <summary>The next (re)open keeps quiet about resuming (switching between the original and the lighter copy).</summary>
     public bool QuietStart { get; set; }

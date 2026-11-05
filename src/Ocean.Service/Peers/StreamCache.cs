@@ -48,6 +48,15 @@ public sealed class StreamCache
     public const int BlockSize = 1 << 20;
     private const int PersistEvery = 32; // blocks
 
+    // A transfer from the owner that breaks (a network hiccup, a reverse link reconnecting, another bridge, the
+    // owner's Ocean restarting) is picked up again from the byte where it stopped, so the player only sees a pause.
+    // Before, the player's connection was cut and it showed "this video can't be played".
+    private static readonly int[] ResumeWaitsMs = { 500, 1500, 3000, 6000 };
+    /// <summary>No byte from the owner for this long: the transfer is taken as broken (a PC that went to sleep never says so).</summary>
+    private static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(20);
+    /// <summary>Going on is given up this long after the first interruption (the owner really left).</summary>
+    private static readonly TimeSpan ResumeBudget = TimeSpan.FromSeconds(25);
+
     private readonly PeerService _peers;
     private readonly ConfigStore _config;
     private readonly ILogger<StreamCache> _log;
@@ -227,39 +236,65 @@ public sealed class StreamCache
                 var fetchStart = keep ? (long)b * BlockSize : pos;
                 var fetchEnd = keep ? Math.Min(size - 1, (long)k * BlockSize - 1) : runEnd;
 
-                using var resp = await _peers.OpenStreamAsync(peerId, item.Id, $"bytes={fetchStart}-{fetchEnd}", ct, download);
-                if (resp.StatusCode != HttpStatusCode.PartialContent
-                    || resp.Content.Headers.ContentRange is not { From: { } start } || start != fetchStart)
-                {
-                    if (resp.IsSuccessStatusCode) throw new IOException("The other PC ignored the requested range");
-                    throw await PeerStatusException.FromAsync(resp);
-                }
-                await using var src = await resp.Content.ReadAsStreamAsync(ct);
                 var p = fetchStart;
                 var nextMark = b;
-                while (p <= fetchEnd)
+                DateTime? firstFailure = null;
+                for (var attempt = 0; ; attempt++)
                 {
-                    var want = (int)Math.Min(buf.Length, fetchEnd - p + 1);
-                    var r = await src.ReadAsync(buf.AsMemory(0, want), ct);
-                    if (r <= 0) throw new IOException("The other PC stopped sending");
-                    if (keep)
+                    try
                     {
-                        await RandomAccess.WriteAsync(file!, buf.AsMemory(0, r), p, ct);
-                        while (nextMark < k && entry!.BlockEnd(nextMark) <= p + r - 1)
+                        using var resp = await _peers.OpenStreamAsync(peerId, item.Id, $"bytes={p}-{fetchEnd}", ct, download);
+                        if (resp.StatusCode != HttpStatusCode.PartialContent
+                            || resp.Content.Headers.ContentRange is not { From: { } start } || start != p)
                         {
-                            if (entry.Mark(nextMark) % PersistEvery == 0) Save(entry);
-                            nextMark++;
+                            if (resp.IsSuccessStatusCode) throw new IOException("The other PC ignored the requested range");
+                            throw await PeerStatusException.FromAsync(resp);
                         }
+                        await using var src = await resp.Content.ReadAsStreamAsync(ct);
+                        if (attempt > 0) _log.LogInformation("stream of {Item}: going on from byte {Pos} (try {Try})", item.Name, p, attempt + 1);
+                        while (p <= fetchEnd)
+                        {
+                            var want = (int)Math.Min(buf.Length, fetchEnd - p + 1);
+                            int r;
+                            using (var stall = CancellationTokenSource.CreateLinkedTokenSource(ct))
+                            {
+                                stall.CancelAfter(StallTimeout);
+                                try { r = await src.ReadAsync(buf.AsMemory(0, want), stall.Token); }
+                                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                                {
+                                    throw new IOException($"Nothing from the other PC for {StallTimeout.TotalSeconds:0} s");
+                                }
+                            }
+                            if (r <= 0) throw new IOException("The other PC stopped sending");
+                            if (keep)
+                            {
+                                await RandomAccess.WriteAsync(file!, buf.AsMemory(0, r), p, ct);
+                                while (nextMark < k && entry!.BlockEnd(nextMark) <= p + r - 1)
+                                {
+                                    if (entry.Mark(nextMark) % PersistEvery == 0) Save(entry);
+                                    nextMark++;
+                                }
+                            }
+                            // the part of this chunk the caller asked for
+                            var s = Math.Max(p, pos);
+                            var e = Math.Min(p + r - 1, runEnd);
+                            if (s <= e)
+                            {
+                                await dest.WriteAsync(buf.AsMemory((int)(s - p), (int)(e - s + 1)), ct);
+                                pos = e + 1;
+                            }
+                            p += r;
+                        }
+                        break; // this run is complete
                     }
-                    // the part of this chunk the caller asked for
-                    var s = Math.Max(p, pos);
-                    var e = Math.Min(p + r - 1, runEnd);
-                    if (s <= e)
+                    catch (Exception ex) when (!ct.IsCancellationRequested && attempt < ResumeWaitsMs.Length && Resumable(ex))
                     {
-                        await dest.WriteAsync(buf.AsMemory((int)(s - p), (int)(e - s + 1)), ct);
-                        pos = e + 1;
+                        firstFailure ??= DateTime.UtcNow;
+                        if (DateTime.UtcNow - firstFailure > ResumeBudget) throw;
+                        _log.LogInformation("stream of {Item} from {Peer} interrupted at byte {Pos} ({Why}): going on in {Wait} s",
+                            item.Name, _peers.NameOf(peerId), p, ex.Message, ResumeWaitsMs[attempt] / 1000.0);
+                        await Task.Delay(ResumeWaitsMs[attempt], ct);
                     }
-                    p += r;
                 }
             }
         }
@@ -270,6 +305,14 @@ public sealed class StreamCache
             if (entry is not null) Close(entry);
         }
     }
+
+    /// <summary>Worth trying again: the connection broke or the owner was briefly unreachable or busy (not "locked", "gone").</summary>
+    private static bool Resumable(Exception ex) => ex switch
+    {
+        PeerStatusException ps => ps.Status is HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout,
+        PeerUnavailableException or HttpRequestException or IOException => true,
+        _ => false,
+    };
 
     // ------------------------------------------------------------------ housekeeping
 

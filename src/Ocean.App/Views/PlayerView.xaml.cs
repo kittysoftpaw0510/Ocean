@@ -442,7 +442,9 @@ public partial class PlayerView : UserControl
     {
         if (_vm is null) return;
         // a video that was playing (or is being reopened after that): open it again where it was
-        if ((_opened || _reopenAt is not null) && TryRecover(e.ErrorException)) return;
+        var midVideo = _opened || _reopenAt is not null;
+        if (midVideo && TryRecover(e.ErrorException)) return;
+        if (midVideo) { _vm.RetryAt = _reopenAt ?? CurrentSecondsSafe(); _vm.StreamLost = true; }
         _reopenAt = null; _pauseWhenOpened = false;
         _seekTarget = null; _queuedSeek = null;
         _vm.IsPlaying = false; _vm.IsBuffering = false;
@@ -468,7 +470,9 @@ public partial class PlayerView : UserControl
         var generation = _vm.Generation;
         _ = Dispatcher.InvokeAsync(async () =>
         {
-            await Task.Delay(700); // let the device or the stream settle
+            // let the device or the stream settle; longer each time, so a restart of this PC's service (a few
+            // seconds) is ridden out too
+            await Task.Delay(_recoveries.Count switch { <= 1 => 700, 2 => 2000, _ => 5000 });
             // the user opened something else or closed the player meanwhile: nothing to recover
             if (_vm is null || !_vm.IsOpen || _vm.Generation != generation || _vm.Url != url || _reopenAt is null) return;
             try

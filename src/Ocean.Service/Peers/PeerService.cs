@@ -237,6 +237,9 @@ public sealed class PeerService : IDisposable
     private bool? ReportsWindows(string peerId)
         => _state.TryGetValue(peerId, out var st) && st.Version is { } v && System.Version.TryParse(v, out var ver) ? ver >= new System.Version(1, 3, 5) : null;
 
+    /// <summary>How a node is called in logs (its user's name, else the PC's).</summary>
+    public string NameOf(string peerId) => _registry.TryGet(peerId, out var p) ? DisplayNames.Of(p.User, p.Name) : NodeIdentity.ShortId(peerId);
+
     public PeerInfoDto? Info(string peerId)
     {
         if (!_registry.TryGet(peerId, out var p)) return null;
