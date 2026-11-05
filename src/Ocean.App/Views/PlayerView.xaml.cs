@@ -32,6 +32,15 @@ public partial class PlayerView : UserControl
     // Forward/back pressed several times in a row (or a held arrow key): the steps add up on the bar and the player
     // jumps once, when the presses pause. Every press used to be a jump of its own, each one a new request over
     // the network, and a burst of them stalled playback.
+    // Recovering from a failure in the middle of a video. Windows' media player gives up on a video that was playing
+    // fine when its graphics device is replaced (the window moved to another monitor, a display or driver change,
+    // the window re-created) or when the stream hiccups after a jump. Such a video is opened again where it was,
+    // playing or paused as before; only when that keeps failing (3 times within a minute) is the error shown.
+    private const int MaxRecoveries = 3;
+    private readonly List<DateTime> _recoveries = new();
+    private double? _reopenAt;        // reopening after a failure: the bar stays here until the video is back
+    private bool _pauseWhenOpened;    // ... and it was paused then
+
     // Picture in picture: the video element moves into a small window of its own and back (PipWindow).
     private PipWindow? _pip;
 
@@ -123,6 +132,7 @@ public partial class PlayerView : UserControl
         {
             _opened = false; _ended = false;
             _seekTarget = null; _queuedSeek = null; _stepTarget = null; _stepTimer.Stop();
+            _reopenAt = null; _pauseWhenOpened = false; _recoveries.Clear();
             Media.Stop();
             Media.Close();
             Media.Volume = _vm.Volume;
@@ -167,6 +177,7 @@ public partial class PlayerView : UserControl
             SeekTo(Seek.Value);
         }
         if (_stepTarget is { } stepping) { _vm.PositionSeconds = stepping; return; } // steps still adding up
+        if (_reopenAt is { } reopening) { _vm.PositionSeconds = reopening; return; } // coming back after a failure
         try
         {
             if (Media.NaturalDuration.HasTimeSpan)
@@ -394,6 +405,12 @@ public partial class PlayerView : UserControl
         }
         _vm.QuietStart = false;
         _opened = true;
+        if (_reopenAt is not null)
+        {
+            _reopenAt = null;
+            if (_pauseWhenOpened) { Media.Pause(); _vm.IsPlaying = false; }
+            _pauseWhenOpened = false;
+        }
     }
 
     /// <summary>At the end: rewind to the start and wait (first frame shown, slider at 0, Play starts over).</summary>
@@ -424,11 +441,54 @@ public partial class PlayerView : UserControl
     private void Media_MediaFailed(object sender, ExceptionRoutedEventArgs e)
     {
         if (_vm is null) return;
+        // a video that was playing (or is being reopened after that): open it again where it was
+        if ((_opened || _reopenAt is not null) && TryRecover(e.ErrorException)) return;
+        _reopenAt = null; _pauseWhenOpened = false;
         _seekTarget = null; _queuedSeek = null;
         _vm.IsPlaying = false; _vm.IsBuffering = false;
         _vm.Error = e.ErrorException?.Message ?? "Unknown playback error";
         Services.AppLog.Warn("Player", $"playback failed: {_vm.Title} ({_vm.Peer?.Label})", e.ErrorException);
         SetChrome(true);
+    }
+
+    /// <summary>Opens the video again where it was (after a short pause); false when it keeps failing.</summary>
+    private bool TryRecover(Exception? why)
+    {
+        if (_vm?.Url is not { } url) return false;
+        var now = DateTime.UtcNow;
+        _recoveries.RemoveAll(t => now - t > TimeSpan.FromMinutes(1));
+        if (_recoveries.Count >= MaxRecoveries) return false;
+        _recoveries.Add(now);
+        var at = _reopenAt ?? _stepTarget ?? _seekTarget ?? CurrentSecondsSafe();
+        var play = _reopenAt is not null ? !_pauseWhenOpened : _vm.IsPlaying;
+        Services.AppLog.Info("Player", $"playback interrupted at {at:0.#} s ({why?.Message ?? "unknown"}): opening it again (try {_recoveries.Count} of {MaxRecoveries}): {_vm.Title}");
+        _opened = false; _seekTarget = null; _queuedSeek = null; _stepTarget = null; _stepTimer.Stop();
+        _reopenAt = at; _pauseWhenOpened = !play;
+        _vm.IsBuffering = true;
+        var generation = _vm.Generation;
+        _ = Dispatcher.InvokeAsync(async () =>
+        {
+            await Task.Delay(700); // let the device or the stream settle
+            // the user opened something else or closed the player meanwhile: nothing to recover
+            if (_vm is null || !_vm.IsOpen || _vm.Generation != generation || _vm.Url != url || _reopenAt is null) return;
+            try
+            {
+                _vm.StartAt = _reopenAt.Value; _vm.QuietStart = true;
+                Media.Close();
+                Media.Source = new Uri(url);
+                Media.Play(); // also when it was paused: it pauses again once open, on the right frame
+                ApplySpeed();
+                _vm.IsPlaying = play;
+            }
+            catch (Exception ex) { _reopenAt = null; _vm.Error = ex.Message; }
+        });
+        return true;
+    }
+
+    private double CurrentSecondsSafe()
+    {
+        try { return Media.Position.TotalSeconds > 0 ? Media.Position.TotalSeconds : _vm?.PositionSeconds ?? 0; }
+        catch { return _vm?.PositionSeconds ?? 0; }
     }
 
     private void Media_BufferingStarted(object sender, RoutedEventArgs e)
