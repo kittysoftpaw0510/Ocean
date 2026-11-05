@@ -24,8 +24,10 @@ namespace Ocean.Service.Update;
 /// <para>
 /// Updating is what nobody comes to Ocean for, so it never gets in the way: a download in the background
 /// (auto-update) waits until nothing is being watched, streamed to others, multicast or downloaded, pauses when that
-/// starts, goes at most 2 MB/s, and picks up where it stopped (also after a failure, 30 min later). "Update now"
-/// downloads at full speed (the user asked) and resumes too. Installing is always the user's click (the app).
+/// starts, goes at most 2 MB/s, and picks up where it stopped: after a failure 1, 5, 15, then every 30 min later, and
+/// soon after the network changes (it is usually back then). "Update now" downloads at full speed (the user asked)
+/// and, when interrupted, goes on by itself after 10 s, 1 min and 5 min before it reports a failure. A connection
+/// that sends nothing for 60 s counts as broken. Installing is always the user's click (the app).
 /// </para> The newest release seen is kept too, so the app hears about it again right after a restart. When GitHub's
 /// API refuses (60 requests an hour for one internet address, shared by every PC behind it), the release page is read
 /// instead. No internet: the check fails, is logged, and is tried again later.
@@ -76,11 +78,30 @@ public sealed class Updater : BackgroundService
     private string? _waitingFor;
     /// <summary>A download in the background goes at most this fast (bytes a second): it must never crowd the network.</summary>
     private const double BackgroundRate = 2 * 1024 * 1024;
-    private static readonly TimeSpan RetryDownloadAfter = TimeSpan.FromMinutes(30);
+    /// <summary>A background download that failed is tried again after these waits (then every 30 min), from where it stopped.</summary>
+    private static readonly TimeSpan[] BackgroundRetryWaits = { TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(15), TimeSpan.FromMinutes(30) };
+    private int _backgroundFailures;
+    /// <summary>"Update now" (the user is waiting for it) tries again by itself after these waits before it reports a failure.</summary>
+    private static readonly TimeSpan[] UserRetryWaits = { TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(5) };
+    /// <summary>Nothing arrives for this long: the download is taken as broken (a connection can hang without an error).</summary>
+    private static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(60);
+    /// <summary>Developers only: OCEAN_TEST_UPDATE_DROP = "20x2": the connection drops after 20 MB, twice.</summary>
+    private int _testDrops;
+    private readonly long _testDropBytes;
 
     public Updater(ConfigStore config, EventHub events, ILogger<Updater> log, IServiceProvider services)
     {
         _config = config; _events = events; _log = log; _services = services;
+        if (Environment.GetEnvironmentVariable("OCEAN_TEST_UPDATE_DROP") is { } drop && drop.Split('x') is [var mb, var times]
+            && long.TryParse(mb, out var dropMb) && int.TryParse(times, out var dropTimes))
+        { _testDropBytes = dropMb * 1048576; _testDrops = dropTimes; }
+        // The network changed (often: it is back): what failed for lack of it is tried again soon, not in half an hour.
+        Net.LocalNetworks.Changed += () =>
+        {
+            if (ModeOf(_config.Current) == UpdateModes.Manual) return;
+            if (!_saved.LastAttemptOk) _ = StartupChecksAsync("the network changed", _stopping);
+            if (_backgroundFailures > 0) { _nextBackgroundTry = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(10); WakeAt(TimeSpan.FromSeconds(10)); }
+        };
         _dir = Path.Combine(OceanDefaults.DataDir, "updates");
         _statePath = Path.Combine(OceanDefaults.DataDir, "update-state.json");
         _http = Client(Handler(redirect: true));
@@ -334,6 +355,9 @@ public sealed class Updater : BackgroundService
         var part = path + ".part";
         try
         {
+        for (var attempt = 0; ; attempt++)
+        try
+        {
             if (InstallerOnDisk(rel) is not null && await VerifyAsync(path, rel, ct))
             {
                 Set(s => { s.Ready = true; s.InstallerPath = path; s.InstallerSize = rel.AssetSize; });
@@ -360,10 +384,11 @@ public sealed class Updater : BackgroundService
                 var buf = new byte[1 << 16]; long done = have; var lastShown = DateTime.UtcNow; var lastBusyCheck = DateTime.UtcNow;
                 var paced = System.Diagnostics.Stopwatch.StartNew(); long pacedBytes = 0;
                 int n;
-                while ((n = await src.ReadAsync(buf, ct)) > 0)
+                while ((n = await ReadOrStallAsync(src, buf, ct)) > 0)
                 {
                     await dst.WriteAsync(buf.AsMemory(0, n), ct);
                     done += n;
+                    if (_testDrops > 0 && done - have >= _testDropBytes) { _testDrops--; throw new IOException("the connection dropped (simulated)"); }
                     if (quiet)
                     {
                         // never faster than BackgroundRate
@@ -394,23 +419,55 @@ public sealed class Updater : BackgroundService
             File.Move(part, path, overwrite: true);
             Set(s => { s.Downloading = false; s.Progress = 1; s.Ready = true; s.InstallerPath = path; s.InstallerSize = new FileInfo(path).Length; s.Error = ""; });
             Cleanup(path);
+            _backgroundFailures = 0;
             _log.LogInformation("Ocean {Version} is ready to install: {Path}", rel.Version, path);
+            break;
         }
         catch (PausedForActivity p)
         {
             _log.LogInformation("update download paused ({Why}); it goes on from here later", p.Message);
             _nextBackgroundTry = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(5);
             Set(s => s.Downloading = false);
+            break;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && !quiet && attempt < UserRetryWaits.Length)
+        {
+            // "Update now": the user is waiting, so keep at it for a while before calling it a failure
+            var wait = UserRetryWaits[attempt];
+            _log.LogInformation("download of Ocean {Version} interrupted ({Msg}): going on from where it stopped in {Wait:0} s", rel.Version, ex.Message, wait.TotalSeconds);
+            try { await Task.Delay(wait, ct); } catch (OperationCanceledException) { Set(s => s.Downloading = false); break; }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _log.LogWarning("download of Ocean {Version} failed: {Msg}", rel.Version, ex.Message);
-            _nextBackgroundTry = DateTimeOffset.UtcNow + RetryDownloadAfter; // what arrived is kept: it goes on from there
+            // what arrived is kept: the next try goes on from there
+            var wait = BackgroundRetryWaits[Math.Min(_backgroundFailures, BackgroundRetryWaits.Length - 1)];
+            _backgroundFailures++;
+            _nextBackgroundTry = DateTimeOffset.UtcNow + wait;
+            if (quiet) WakeAt(wait);
+            _log.LogWarning("download of Ocean {Version} failed: {Msg}{Next}", rel.Version, ex.Message,
+                quiet ? $"; trying again in {wait.TotalMinutes:0} min (or as soon as the network changes)" : "");
             Set(s => { s.Downloading = false; if (!quiet) s.Error = "Download failed: " + ex.Message; });
+            break;
         }
-        catch (OperationCanceledException) { Set(s => s.Downloading = false); } // stopping: the part stays for next time
+        catch (OperationCanceledException) { Set(s => s.Downloading = false); break; } // stopping: the part stays for next time
+        }
         finally { _downloadLock.Release(); }
     }
+
+    /// <summary>One read; a connection that sends nothing for <see cref="StallTimeout"/> counts as broken.</summary>
+    private static async Task<int> ReadOrStallAsync(Stream src, byte[] buf, CancellationToken ct)
+    {
+        using var stall = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        stall.CancelAfter(StallTimeout);
+        try { return await src.ReadAsync(buf, stall.Token); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new IOException($"nothing arrived for {StallTimeout.TotalSeconds:0} s");
+        }
+    }
+
+    /// <summary>Wakes the 5-minute loop after <paramref name="after"/> (a background retry that is due).</summary>
+    private void WakeAt(TimeSpan after) => _ = Task.Delay(after, _stopping).ContinueWith(t => { if (!t.IsCanceled) CheckSoon(); }, TaskScheduler.Default);
 
     /// <summary>SHA-256 against the ".sha256" asset when the release has one; otherwise size alone.</summary>
     private async Task<bool> VerifyAsync(string path, Release rel, CancellationToken ct)
