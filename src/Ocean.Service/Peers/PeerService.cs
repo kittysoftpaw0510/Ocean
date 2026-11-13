@@ -225,15 +225,24 @@ public sealed class PeerService : IDisposable
     /// </summary>
     public async Task<PeerInfoDto?> InfoAsync(string peerId, CancellationToken ct)
     {
-        if (_registry.TryGetOnline(peerId, out _) && _catalogs.TryGetValue(peerId, out var cat) && cat.Os is null
-            && ReportsWindows(peerId) == true && _osRefetched.TryAdd(peerId, 0))
+        // Windows comes with its full list. A node that shares nothing is never asked for its list (its announcements
+        // say there is nothing), so ask it here; also when an earlier try failed, at most every few minutes.
+        if (_registry.TryGetOnline(peerId, out _) && (!_catalogs.TryGetValue(peerId, out var cat) || cat.Os is null)
+            && ReportsWindows(peerId) != false && OsAskDue(peerId))
         {
             try { await FetchCatalogAsync(peerId, ct, fullOnly: true); }
             catch (Exception ex) when (ex is not OperationCanceledException) { _log.LogDebug(ex, "catalog for node info"); }
         }
         return Info(peerId);
     }
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _osRefetched = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> _osAsked = new();
+    private bool OsAskDue(string peerId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        if (_osAsked.TryGetValue(peerId, out var at) && now - at < TimeSpan.FromMinutes(5)) return false;
+        _osAsked[peerId] = now;
+        return true;
+    }
     private bool? ReportsWindows(string peerId)
         => _state.TryGetValue(peerId, out var st) && st.Version is { } v && System.Version.TryParse(v, out var ver) ? ver >= new System.Version(1, 3, 5) : null;
 
@@ -526,15 +535,19 @@ public sealed class PeerService : IDisposable
     private async Task<CatalogDto?> FetchCatalogAsync(string peerId, CancellationToken ct, bool fullOnly = false)
     {
         if (!_registry.TryGetOnline(peerId, out var peer)) return null;
-        // Its announcements say it shares nothing: no need to connect (and nothing can go wrong).
-        if (peer.ShareCount == 0)
+        // Its announcements say it shares nothing: no need to connect (and nothing can go wrong). Except when its
+        // whole list is asked for (node info: Windows and its Ocean version come only with the list).
+        if (peer.ShareCount == 0 && !fullOnly)
         {
+            var known = Cached(peerId);
             var empty = new CatalogDto
             {
                 NodeId = peer.Id, NodeName = peer.Name, UserName = peer.User, Host = peer.Host,
                 Version = peer.CatalogVersion, GeneratedAt = DateTimeOffset.UtcNow,
+                // what it told before stays known
+                AppVersion = known?.AppVersion, Os = known?.Os,
             };
-            var hadItems = Cached(peerId)?.Shares.Count > 0;
+            var hadItems = known?.Shares.Count > 0;
             _catalogs[peerId] = empty;
             _etags.TryRemove(peerId, out _);
             if (hadItems) _events.Publish("peerCatalog", new { peerId, version = empty.Version, newCount = 0, itemCount = 0 });
