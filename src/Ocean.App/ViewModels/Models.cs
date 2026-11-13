@@ -26,6 +26,8 @@ public interface IDialogs
     void ShowError(string title, string message);
     /// <summary>The "Node info" window for one node.</summary>
     void ShowPeerInfo(PeerInfoViewModel info);
+    /// <summary>The notes of one video in a window of their own (one per video).</summary>
+    void ShowNotes(NotesViewModel notes);
 }
 
 public partial class PeerVm : ObservableObject
@@ -161,6 +163,13 @@ public partial class ItemVm : ObservableObject
     public int Down => Dto.Down;
     public bool HasVotes => Dto.Up + Dto.Down > 0;
     public string VotesTip => Votes.Tip(Dto);
+    // ---- notes (kept by the owner; the count travels in its catalog) ----
+    public int NoteCount => Dto.NoteCount;
+    public bool HasNotes => Dto.NoteCount > 0;
+    public string NotesMenu => Dto.NoteCount > 0 ? $"Notes ({Dto.NoteCount})…" : "Notes…";
+    public string NotesTip => Dto.NoteCount == 1 ? "1 note: open them from the video's menu or in the player" : $"{Dto.NoteCount} notes: open them from the video's menu or in the player";
+    /// <summary>The notes panel counted them anew (before the owner's next catalog arrives).</summary>
+    public void SetNoteCount(int count) { if (Dto.NoteCount == count) return; Dto.NoteCount = count; OnPropertyChanged(nameof(NoteCount)); OnPropertyChanged(nameof(HasNotes)); OnPropertyChanged(nameof(NotesTip)); OnPropertyChanged(nameof(NotesMenu)); }
     /// <summary>My thumbs up (1), down (-1) or nothing yet (0).</summary>
     public int MyVote => Dto.MyVote;
     public bool IsUp => Dto.MyVote > 0;

@@ -1,0 +1,20 @@
+<Window x:Class="Ocean.App.Views.NotesWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:v="clr-namespace:Ocean.App.Views"
+        Title="Notes" Width="460" Height="680" MinWidth="360" MinHeight="360" WindowStartupLocation="CenterOwner"
+        Background="{StaticResource Bg1}" Foreground="{StaticResource Text}" FontFamily="{StaticResource UiFont}" ShowInTaskbar="False">
+    <!-- The notes of one video, from its menu (DataContext: NotesViewModel). Not modal: Ocean stays usable. -->
+    <DockPanel>
+        <!-- which video -->
+        <Border DockPanel.Dock="Top" Padding="16,12,16,4">
+            <StackPanel>
+                <TextBlock Text="{Binding ItemName}" FontWeight="SemiBold" FontSize="14" TextTrimming="CharacterEllipsis" ToolTip="{Binding ItemName}"/>
+                <TextBlock Style="{StaticResource Dim}" TextTrimming="CharacterEllipsis">
+                    <Run Text="Shared by "/><Run Text="{Binding OwnerLabel, Mode=OneWay}"/><Run Text="  ·  notes are kept on the owner's PC; anyone who can open the video can read them"/>
+                </TextBlock>
+            </StackPanel>
+        </Border>
+        <v:NotesPanel x:Name="Panel"/>
+    </DockPanel>
+</Window>

@@ -113,6 +113,36 @@ public static class LocalApi
         });
 
         // The player's requests: own copy or finished download from disk, otherwise through the stream cache.
+        // ---- notes on videos: another node's (kept there) or mine ("me" or my node id) ----
+        g.MapGet("/notes/{peerId}/{itemId}", (string peerId, string itemId, HttpContext ctx, PeerService peers, Social.Notes notes, NodeIdentity me) =>
+            NoteCall(peerId, itemId, me, ctx, peers, HttpMethod.Get, "", null,
+                () => notes.List(itemId, me.NodeId, callerIsOwner: true)));
+        g.MapPost("/notes/{peerId}/{itemId}", async (string peerId, string itemId, HttpContext ctx, PeerService peers, Social.Notes notes, NodeIdentity me, ConfigStore config, CatalogService catalog) =>
+        {
+            var write = await ctx.Request.ReadFromJsonAsync<NoteWriteDto>(Json.Options, ctx.RequestAborted);
+            if (write is null) return Results.BadRequest();
+            return await NoteCall(peerId, itemId, me, ctx, peers, HttpMethod.Post, "", write, () => catalog.TryGetItem(itemId, out _, out _)
+                ? notes.Add(itemId, me.NodeId, DisplayNames.Of(config.Current.UserName, config.Current.NodeName), Environment.MachineName, write, callerIsOwner: true, notifyOwner: false)
+                : new NotesDto { Problem = "gone" });
+        });
+        g.MapPost("/notes/{peerId}/{itemId}/{noteId}/edit", async (string peerId, string itemId, string noteId, HttpContext ctx, PeerService peers, Social.Notes notes, NodeIdentity me) =>
+        {
+            var write = await ctx.Request.ReadFromJsonAsync<NoteWriteDto>(Json.Options, ctx.RequestAborted);
+            if (write is null) return Results.BadRequest();
+            return await NoteCall(peerId, itemId, me, ctx, peers, HttpMethod.Post, $"/{Uri.EscapeDataString(noteId)}/edit", write,
+                () => notes.Edit(itemId, noteId, me.NodeId, write, callerIsOwner: true) ?? new NotesDto { Problem = "gone" });
+        });
+        g.MapPost("/notes/{peerId}/{itemId}/{noteId}/delete", (string peerId, string itemId, string noteId, HttpContext ctx, PeerService peers, Social.Notes notes, NodeIdentity me) =>
+            NoteCall(peerId, itemId, me, ctx, peers, HttpMethod.Post, $"/{Uri.EscapeDataString(noteId)}/delete", null,
+                () => notes.Delete(itemId, noteId, me.NodeId, callerIsOwner: true) ?? new NotesDto { Problem = "gone" }));
+        g.MapPost("/notes/{peerId}/{itemId}/{noteId}/vote", async (string peerId, string itemId, string noteId, HttpContext ctx, PeerService peers, Social.Notes notes, NodeIdentity me) =>
+        {
+            var vote = await ctx.Request.ReadFromJsonAsync<NoteVoteDto>(Json.Options, ctx.RequestAborted);
+            if (vote is null || vote.Vote is < -1 or > 1) return Results.BadRequest();
+            return await NoteCall(peerId, itemId, me, ctx, peers, HttpMethod.Post, $"/{Uri.EscapeDataString(noteId)}/vote", vote,
+                () => notes.Vote(itemId, noteId, me.NodeId, vote.Vote, callerIsOwner: true) ?? new NotesDto { Problem = "gone" });
+        });
+
         // ---- votes and tags ----
         g.MapPost("/peers/{peerId}/rate/{itemId}", async (string peerId, string itemId, HttpContext ctx, PeerService peers) =>
         {
@@ -365,5 +395,13 @@ public static class LocalApi
             _ = Task.Run(async () => { await Task.Delay(200); life.StopApplication(); });
             return Results.Ok();
         });
+    }
+
+    /// <summary>A notes request: on my own video it is answered here (<paramref name="mine"/>), else by the video's owner.</summary>
+    private static async Task<IResult> NoteCall(string peerId, string itemId, NodeIdentity me, HttpContext ctx, PeerService peers,
+        HttpMethod method, string path, object? body, Func<NotesDto> mine)
+    {
+        if (peerId == "me" || peerId == me.NodeId) return Results.Json(mine(), Json.Options);
+        return Results.Json(await peers.NotesAsync(peerId, itemId, method, path, body, ctx.RequestAborted), Json.Options);
     }
 }

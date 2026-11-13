@@ -1,0 +1,207 @@
+<UserControl x:Class="Ocean.App.Views.NotesPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="{StaticResource Bg1}">
+    <UserControl.Resources>
+        <!-- one part of the Top / Newest / By moment switch -->
+        <Style x:Key="SortBtn" TargetType="Button">
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="5" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Hover}"/>
+                                <Setter Property="Foreground" Value="{StaticResource Text}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+    <!-- The notes of one video (DataContext: NotesViewModel). In the player's side panel and in the notes window. -->
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- header: count, sort, refresh, close -->
+        <DockPanel Margin="16,12,10,6">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button Style="{StaticResource BtnIcon}" Width="28" Height="28" FontSize="12" Content="&#xE72C;" ToolTip="Read the notes again" Command="{Binding LoadCommand}" AutomationProperties.Name="Refresh"/>
+                <Button x:Name="CloseButton" Style="{StaticResource BtnIcon}" Width="28" Height="28" FontSize="11" Content="&#xE711;" ToolTip="Hide the notes (N)" Click="Close_Click"
+                        AutomationProperties.Name="Hide the notes" Visibility="Collapsed"/>
+            </StackPanel>
+            <TextBlock Text="{Binding Header}" Style="{StaticResource H2}" VerticalAlignment="Center"/>
+        </DockPanel>
+
+        <!-- sort; and why the notes may be old or missing -->
+        <StackPanel Grid.Row="1" Margin="16,0,16,6">
+            <Border Background="{StaticResource Bg2}" CornerRadius="7" Padding="2" BorderBrush="{StaticResource Border}" BorderThickness="1" HorizontalAlignment="Left">
+                <StackPanel Orientation="Horizontal">
+                    <Button Content="Top" Padding="10,3" Command="{Binding SetSortCommand}" CommandParameter="Top" ToolTip="Most useful first (votes), new notes lifted a little">
+                        <Button.Style><Style TargetType="Button" BasedOn="{StaticResource SortBtn}"><Style.Triggers><DataTrigger Binding="{Binding Sort}" Value="Top"><Setter Property="Background" Value="{StaticResource Bg3}"/><Setter Property="Foreground" Value="{StaticResource Accent}"/></DataTrigger></Style.Triggers></Style></Button.Style>
+                    </Button>
+                    <Button Content="Newest" Padding="10,3" Command="{Binding SetSortCommand}" CommandParameter="Newest">
+                        <Button.Style><Style TargetType="Button" BasedOn="{StaticResource SortBtn}"><Style.Triggers><DataTrigger Binding="{Binding Sort}" Value="Newest"><Setter Property="Background" Value="{StaticResource Bg3}"/><Setter Property="Foreground" Value="{StaticResource Accent}"/></DataTrigger></Style.Triggers></Style></Button.Style>
+                    </Button>
+                    <Button Content="By moment" Padding="10,3" Command="{Binding SetSortCommand}" CommandParameter="Moment" ToolTip="In the order of the video">
+                        <Button.Style><Style TargetType="Button" BasedOn="{StaticResource SortBtn}"><Style.Triggers><DataTrigger Binding="{Binding Sort}" Value="Moment"><Setter Property="Background" Value="{StaticResource Bg3}"/><Setter Property="Foreground" Value="{StaticResource Accent}"/></DataTrigger></Style.Triggers></Style></Button.Style>
+                    </Button>
+                </StackPanel>
+            </Border>
+            <TextBlock Text="{Binding ProblemText}" Style="{StaticResource Dim}" Foreground="{StaticResource Warn}" TextWrapping="Wrap" Margin="2,8,0,0"
+                       Visibility="{Binding ProblemText, Converter={StaticResource NullToVis}}"/>
+        </StackPanel>
+
+        <!-- write a note -->
+        <Border Grid.Row="2" Margin="16,4,16,10" Visibility="{Binding CanWrite, Converter={StaticResource BoolToVis}}">
+            <StackPanel>
+                <Grid>
+                    <TextBox x:Name="DraftBox" Text="{Binding Draft, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap"
+                             MinHeight="60" MaxHeight="160" VerticalScrollBarVisibility="Auto" MaxLength="1000" AutomationProperties.Name="New note">
+                        <TextBox.InputBindings>
+                            <KeyBinding Key="Enter" Modifiers="Ctrl" Command="{Binding PostCommand}"/>
+                        </TextBox.InputBindings>
+                    </TextBox>
+                    <TextBlock Text="{Binding Placeholder}" Style="{StaticResource Dim}" Margin="12,9,12,0" IsHitTestVisible="False" TextWrapping="Wrap"
+                               Visibility="{Binding HasDraft, Converter={StaticResource InvBoolToVis}}"/>
+                </Grid>
+                <DockPanel Margin="0,6,0,0">
+                    <Button DockPanel.Dock="Right" Style="{StaticResource BtnPrimary}" Padding="14,4" Command="{Binding PostCommand}" IsEnabled="{Binding CanPost}" ToolTip="Post (Ctrl+Enter)">
+                        <TextBlock Text="Post" Foreground="{StaticResource AccentText}"/>
+                    </Button>
+                    <TextBlock DockPanel.Dock="Right" Text="{Binding CounterText}" Style="{StaticResource Dim}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <!-- the moment the note is about (in the player) -->
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Border CornerRadius="10" Background="{StaticResource AccentSoft}" Padding="8,2,4,2" Visibility="{Binding HasDraftAt, Converter={StaticResource BoolToVis}}"
+                                ToolTip="This note is about this moment of the video">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE916;" Style="{StaticResource Icon}" FontSize="11" Foreground="{StaticResource Accent}" Margin="0,1,6,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding DraftAtText}" FontSize="12" Foreground="{StaticResource Accent}" VerticalAlignment="Center"/>
+                                <Button Style="{StaticResource BtnIcon}" Width="20" Height="20" FontSize="8" Content="&#xE711;" Margin="4,0,0,0" Command="{Binding RemoveDraftAtCommand}"
+                                        ToolTip="About the whole video, not this moment" AutomationProperties.Name="Not tied to a moment"/>
+                            </StackPanel>
+                        </Border>
+                        <Button Style="{StaticResource BtnGhost}" Padding="8,2" FontSize="12" Command="{Binding UseCurrentMomentCommand}" Content="At this moment"
+                                ToolTip="Tie the note to where the video is now" Visibility="{Binding ShowUseMoment, Converter={StaticResource BoolToVis}}"/>
+                    </StackPanel>
+                </DockPanel>
+                <TextBlock Text="{Binding WriteError}" Style="{StaticResource Dim}" Foreground="{StaticResource Warn}" TextWrapping="Wrap" Margin="0,6,0,0"
+                           Visibility="{Binding WriteError, Converter={StaticResource NullToVis}}"/>
+            </StackPanel>
+        </Border>
+
+        <!-- the notes -->
+        <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Margin="8,0,8,12">
+                <ProgressBar IsIndeterminate="True" Height="2" Margin="8,0,8,6" Visibility="{Binding Loading, Converter={StaticResource BoolToVis}}"/>
+                <TextBlock Text="{Binding EmptyText}" Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="8,12,8,0" Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVis}}"/>
+                <ItemsControl ItemsSource="{Binding Notes}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border x:Name="Card" Padding="8,10" Margin="0,0,0,2" CornerRadius="8" Background="Transparent">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="28" Height="28" CornerRadius="14" VerticalAlignment="Top" Margin="0,1,10,0" ToolTip="{Binding AuthorTip}"
+                                            Background="{Binding AuthorId, Converter={StaticResource InitialsBrush}}">
+                                        <TextBlock Text="{Binding Initials}" FontWeight="SemiBold" FontSize="11" Foreground="#0A1120" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                    </Border>
+                                    <StackPanel Grid.Column="1">
+                                        <!-- who, when, the moment, menu -->
+                                        <DockPanel>
+                                            <Button DockPanel.Dock="Right" Style="{StaticResource BtnIcon}" Width="24" Height="22" FontSize="12" Content="&#xE712;" Margin="4,-3,0,0" VerticalAlignment="Top"
+                                                    Click="NoteMenu_Click" Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    Visibility="{Binding HasMenu, Converter={StaticResource BoolToVis}}" ToolTip="Edit or remove" AutomationProperties.Name="Note menu">
+                                                <Button.ContextMenu>
+                                                    <ContextMenu>
+                                                        <MenuItem Header="Edit" Command="{Binding PlacementTarget.Tag.BeginEditCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"
+                                                                  Visibility="{Binding CanEdit, Converter={StaticResource BoolToVis}}"/>
+                                                        <MenuItem Header="Remove" Command="{Binding PlacementTarget.Tag.DeleteCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"
+                                                                  Visibility="{Binding CanDelete, Converter={StaticResource BoolToVis}}"/>
+                                                    </ContextMenu>
+                                                </Button.ContextMenu>
+                                            </Button>
+                                            <Button DockPanel.Dock="Right" Style="{StaticResource BtnGhost}" Padding="6,0" Height="22" Margin="6,-2,0,0" VerticalAlignment="Top"
+                                                    Visibility="{Binding HasAt, Converter={StaticResource BoolToVis}}" ToolTip="Play from this moment"
+                                                    Command="{Binding DataContext.SeekCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="&#xE768;" Style="{StaticResource Icon}" FontSize="9" Foreground="{StaticResource Accent}" Margin="0,1,5,0" VerticalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding AtText}" FontSize="12" FontFamily="Consolas" Foreground="{StaticResource Accent}" VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                            </Button>
+                                            <TextBlock TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
+                                                <Run Text="{Binding Author, Mode=OneWay}" FontWeight="SemiBold" ToolTip="{Binding AuthorTip, Mode=OneWay}"/><Run Text="  "/><Run Text="{Binding When, Mode=OneWay}" Foreground="{StaticResource TextDim}" FontSize="12" ToolTip="{Binding WhenTip, Mode=OneWay}"/>
+                                            </TextBlock>
+                                        </DockPanel>
+
+                                        <!-- the text (folded when long), or the editor -->
+                                        <TextBlock x:Name="Body" Text="{Binding Text}" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="{StaticResource Text}" LineHeight="19"
+                                                   Visibility="{Binding IsEditing, Converter={StaticResource InvBoolToVis}}"/>
+                                        <Button Style="{StaticResource BtnGhost}" Padding="0,2" HorizontalAlignment="Left" Content="{Binding FoldText}" FontSize="12" Command="{Binding ToggleFoldCommand}"
+                                                Visibility="{Binding ShowFold, Converter={StaticResource BoolToVis}}"/>
+                                        <StackPanel Margin="0,6,0,0" Visibility="{Binding IsEditing, Converter={StaticResource BoolToVis}}">
+                                            <TextBox Text="{Binding EditText, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="50" MaxHeight="160"
+                                                     VerticalScrollBarVisibility="Auto" MaxLength="1000">
+                                                <TextBox.InputBindings>
+                                                    <KeyBinding Key="Enter" Modifiers="Ctrl" Command="{Binding DataContext.SaveEditCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
+                                                </TextBox.InputBindings>
+                                            </TextBox>
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,0">
+                                                <Button Style="{StaticResource BtnGhost}" Content="Cancel" Padding="10,3"
+                                                        Command="{Binding DataContext.CancelEditCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
+                                                <Button Style="{StaticResource BtnPrimary}" Padding="12,3" Margin="6,0,0,0" ToolTip="Save (Ctrl+Enter)"
+                                                        Command="{Binding DataContext.SaveEditCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">
+                                                    <TextBlock Text="Save" Foreground="{StaticResource AccentText}"/>
+                                                </Button>
+                                            </StackPanel>
+                                        </StackPanel>
+
+                                        <!-- votes -->
+                                        <StackPanel Orientation="Horizontal" Margin="-6,4,0,0">
+                                            <Button Style="{StaticResource LikeBtn}" Height="26" Width="Auto" Padding="6,0" Click="Up_Click" ToolTip="{Binding UpTip}" IsEnabled="{Binding CanVote}" AutomationProperties.Name="Useful">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="&#xE8E1;" Style="{StaticResource Icon}" FontSize="12" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" VerticalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding Up}" FontSize="12" Margin="5,0,0,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                            </Button>
+                                            <Button Style="{StaticResource DislikeBtn}" Height="26" Width="Auto" Padding="6,0" Margin="4,0,0,0" Click="Down_Click" ToolTip="{Binding DownTip}" IsEnabled="{Binding CanVote}" AutomationProperties.Name="Not useful">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="&#xE8E0;" Style="{StaticResource Icon}" FontSize="12" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" VerticalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding Down}" FontSize="12" Margin="5,0,0,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                            </Button>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                            <DataTemplate.Triggers>
+                                <Trigger SourceName="Card" Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="Card" Property="Background" Value="{StaticResource Bg2}"/>
+                                </Trigger>
+                                <DataTrigger Binding="{Binding IsFolded}" Value="True">
+                                    <Setter TargetName="Body" Property="MaxHeight" Value="96"/>
+                                </DataTrigger>
+                            </DataTemplate.Triggers>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Button Style="{StaticResource BtnGhost}" HorizontalAlignment="Center" Margin="0,8,0,0" Content="{Binding MoreText}" Command="{Binding ShowMoreCommand}"
+                        Visibility="{Binding HasMore, Converter={StaticResource BoolToVis}}"/>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

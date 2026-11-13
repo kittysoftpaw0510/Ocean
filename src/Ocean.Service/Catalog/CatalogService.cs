@@ -351,6 +351,7 @@ public sealed class CatalogService : IDisposable
                 h = Fnv.Add(h, dto.Light); h = Fnv.Add(h, dto.LightSize);
                 h = Fnv.Add(h, dto.Tags is null ? "" : string.Join('\u001f', dto.Tags));
                 h = Fnv.Add(h, dto.Up); h = Fnv.Add(h, dto.Down); h = Fnv.Add(h, dto.Finished); h = Fnv.Add(h, (long)Math.Round(dto.Score * 100));
+                h = Fnv.Add(h, dto.NoteCount);
                 map[i.Id] = h;
             }
         return map;
@@ -587,6 +588,7 @@ public sealed class CatalogService : IDisposable
         if (LightLookup is { } light) { (dto.Light, dto.LightSize) = light(i.Id, i); } else { dto.Light = null; dto.LightSize = 0; }
         dto.Tags = share.ItemTags.TryGetValue(i.Id, out var tags) && tags.Count > 0 ? tags : null;
         if (RatingLookup is { } rating) (dto.Up, dto.Down, dto.Finished, dto.Score) = rating(i.Id); else { dto.Up = dto.Down = dto.Finished = 0; dto.Score = 0; }
+        dto.NoteCount = NoteCountLookup?.Invoke(i.Id) ?? 0;
         if (share.Overrides.TryGetValue(i.Id, out var ov) && ov.Mode is ItemAccessMode.Password or ItemAccessMode.Ask)
         {
             dto.Lock = new LockInfo { Id = ItemLock(i.Id), Mode = ov.Mode == ItemAccessMode.Password ? AccessMode.Password : AccessMode.Ask };
@@ -883,6 +885,8 @@ public sealed class CatalogService : IDisposable
 
     /// <summary>Set by the ratings store: a video's votes, "watched to the end" count and score.</summary>
     public Func<string, (int Up, int Down, int Finished, double Score)>? RatingLookup { get; set; }
+    /// <summary>Set by the notes store: how many notes a video has.</summary>
+    public Func<string, int>? NoteCountLookup { get; set; }
     /// <summary>A vote arrived: other nodes learn the new totals with the next (coalesced) version.</summary>
     public void NotifyRatingsChanged() => BumpSoon("ratings");
 

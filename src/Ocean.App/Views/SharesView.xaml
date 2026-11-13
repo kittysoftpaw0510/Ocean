@@ -16,6 +16,9 @@
                                   ToolTip="Send this video once to everyone who joins; you control playback">
                             <MenuItem.Icon><TextBlock Text="&#xE93E;" Style="{StaticResource Icon}"/></MenuItem.Icon>
                         </MenuItem>
+                        <MenuItem Header="{Binding NotesMenu}" Click="Notes_Click" ToolTip="What others noted about this video; reply or leave your own">
+                            <MenuItem.Icon><TextBlock Text="&#xE8BD;" Style="{StaticResource Icon}"/></MenuItem.Icon>
+                        </MenuItem>
                         <MenuItem Header="Schedule multicast" Visibility="{Binding IsCasting, Converter={StaticResource InvBoolToVis}}"
                                   ToolTip="Start the multicast later by itself; every PC is told when it starts">
                             <MenuItem.Icon><TextBlock Text="&#xE823;" Style="{StaticResource Icon}"/></MenuItem.Icon>

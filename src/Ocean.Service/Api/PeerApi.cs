@@ -155,6 +155,37 @@ public static class PeerApi
             return Results.Json(ratings.Rate(itemId, pc.ClientId, rate), Json.Options);
         });
 
+        // ---- notes (see Social.Notes): read, write, vote, under the video's own access rule ----
+        // The writer is the calling PC (its node id and name come from its certificate and announcements). Writes are
+        // POSTs only: requests through a bridge (/p/via) or a reverse link pass GET, HEAD and POST.
+        g.MapGet("/notes/{itemId}", (HttpContext ctx, string itemId, CatalogService catalog, AccessService access, Social.Notes notes) =>
+            NoteAccess(ctx, itemId, catalog, access, out var pc) ?? Results.Json(notes.List(itemId, pc.ClientId, callerIsOwner: false), Json.Options));
+        g.MapPost("/notes/{itemId}", async (HttpContext ctx, string itemId, CatalogService catalog, AccessService access, Social.Notes notes) =>
+        {
+            if (NoteAccess(ctx, itemId, catalog, access, out var pc) is { } refused) return refused;
+            var write = await ctx.Request.ReadFromJsonAsync<NoteWriteDto>(Json.Options, ctx.RequestAborted);
+            if (write is null) return Results.BadRequest();
+            var name = DisplayNames.Of(pc.User, pc.Name);
+            return Results.Json(notes.Add(itemId, pc.ClientId, name, pc.Host, write, callerIsOwner: false, notifyOwner: true), Json.Options);
+        });
+        g.MapPost("/notes/{itemId}/{noteId}/edit", async (HttpContext ctx, string itemId, string noteId, CatalogService catalog, AccessService access, Social.Notes notes) =>
+        {
+            if (NoteAccess(ctx, itemId, catalog, access, out var pc) is { } refused) return refused;
+            var write = await ctx.Request.ReadFromJsonAsync<NoteWriteDto>(Json.Options, ctx.RequestAborted);
+            if (write is null) return Results.BadRequest();
+            return notes.Edit(itemId, noteId, pc.ClientId, write, callerIsOwner: false) is { } r ? Results.Json(r, Json.Options) : NoteGone();
+        });
+        g.MapPost("/notes/{itemId}/{noteId}/delete", (HttpContext ctx, string itemId, string noteId, CatalogService catalog, AccessService access, Social.Notes notes) =>
+            NoteAccess(ctx, itemId, catalog, access, out var pc)
+            ?? (notes.Delete(itemId, noteId, pc.ClientId, callerIsOwner: false) is { } r ? Results.Json(r, Json.Options) : NoteGone()));
+        g.MapPost("/notes/{itemId}/{noteId}/vote", async (HttpContext ctx, string itemId, string noteId, CatalogService catalog, AccessService access, Social.Notes notes) =>
+        {
+            if (NoteAccess(ctx, itemId, catalog, access, out var pc) is { } refused) return refused;
+            var vote = await ctx.Request.ReadFromJsonAsync<NoteVoteDto>(Json.Options, ctx.RequestAborted);
+            if (vote is null || vote.Vote is < -1 or > 1) return Results.BadRequest();
+            return notes.Vote(itemId, noteId, pc.ClientId, vote.Vote, callerIsOwner: false) is { } r ? Results.Json(r, Json.Options) : NoteGone();
+        });
+
         // ---- multicast (see CastHost): join under the video's own access rule, report in, leave ----
         g.MapPost("/cast/{sessionId}/join", (HttpContext ctx, string sessionId, CastHost cast, CatalogService catalog, AccessService access) =>
         {
@@ -236,6 +267,19 @@ public static class PeerApi
                 entityTag: new EntityTagHeaderValue($"\"{item.Id}-{item.ModifiedAt.UtcTicks}\""), enableRangeProcessing: true);
         });
     }
+
+    /// <summary>
+    /// Null when the calling PC may see the notes of this video (the video's own access rule); otherwise the answer:
+    /// "gone" (not shared here any more; 404 with a body, which an Ocean without notes doesn't send) or locked.
+    /// </summary>
+    private static IResult? NoteAccess(HttpContext ctx, string itemId, CatalogService catalog, AccessService access, out PeerContext pc)
+    {
+        pc = PeerContext.Get(ctx);
+        if (!catalog.TryGetItem(itemId, out var share, out var item)) return NoteGone();
+        return catalog.IsItemAccessible(share, item, access.Checker(pc.ClientId, pc.Grants)) ? null : Locked(share, item);
+    }
+
+    private static IResult NoteGone() => Results.Json(new ErrorDto { Error = "gone", Message = "This video or note is no longer here" }, Json.Options, statusCode: 404);
 
     private static IResult Locked(ShareDefinition share, ItemRecord item)
     {

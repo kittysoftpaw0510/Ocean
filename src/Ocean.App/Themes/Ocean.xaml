@@ -745,6 +745,10 @@
                 <TextBlock Text="&#xE8E0;" Style="{StaticResource Icon}" FontSize="11" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center" Margin="8,0,0,0" Visibility="{Binding Down, Converter={StaticResource CountToVis}}"/>
                 <TextBlock Text="{Binding Down}" Style="{StaticResource Dim}" Margin="4,0,0,0" VerticalAlignment="Center" Visibility="{Binding Down, Converter={StaticResource CountToVis}}"/>
             </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,0,10,0" ToolTip="{Binding NotesTip}" Visibility="{Binding HasNotes, Converter={StaticResource BoolToVis}}">
+                <TextBlock Text="&#xE8BD;" Style="{StaticResource Icon}" FontSize="11" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding NoteCount}" Style="{StaticResource Dim}" Margin="4,0,0,0" VerticalAlignment="Center"/>
+            </StackPanel>
             <TextBlock Text="{Binding TagsText}" Style="{StaticResource Dim}" Foreground="{StaticResource AccentDim}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"
                        Visibility="{Binding HasTags, Converter={StaticResource BoolToVis}}"/>
         </StackPanel>

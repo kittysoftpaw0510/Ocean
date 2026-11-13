@@ -85,6 +85,8 @@ public class ItemDto
     public double Score { get; set; }
     /// <summary>Set by the browsing side: my own vote on it (+1, −1, 0).</summary>
     public int MyVote { get; set; }
+    /// <summary>How many notes it has (kept by the owner, see NoteDto); older Ocean sends 0.</summary>
+    public int NoteCount { get; set; }
     /// <summary>"preparing" or "ready" when the owner has a lighter copy for watching (see LightVariant); else null.</summary>
     public string? Light { get; set; }
     public long LightSize { get; set; }

@@ -67,6 +67,11 @@ public partial class LocalItemVm : ObservableObject
     public int Down => Dto.Down;
     public bool HasVotes => Dto.Up + Dto.Down > 0;
     public string VotesTip => Votes.Tip(Dto);
+    public int NoteCount => Dto.NoteCount;
+    public bool HasNotes => Dto.NoteCount > 0;
+    public string NotesMenu => Dto.NoteCount > 0 ? $"Notes ({Dto.NoteCount})…" : "Notes…";
+    public string NotesTip => Dto.NoteCount == 1 ? "1 note: open them from the video's menu or in the player" : $"{Dto.NoteCount} notes: open them from the video's menu or in the player";
+    public void SetNoteCount(int count) { if (Dto.NoteCount == count) return; Dto.NoteCount = count; OnPropertyChanged(nameof(NoteCount)); OnPropertyChanged(nameof(HasNotes)); OnPropertyChanged(nameof(NotesTip)); OnPropertyChanged(nameof(NotesMenu)); }
     public ItemAccessMode OverrideMode => Dto.OverrideMode;
     public string PolicyText => Dto.OverrideMode switch { ItemAccessMode.Public => "Public", ItemAccessMode.Password => "Password", ItemAccessMode.Ask => "Ask me", _ => "Same as share" };
     public string PolicyGlyph => Dto.OverrideMode switch { ItemAccessMode.Password => "", ItemAccessMode.Ask => "", ItemAccessMode.Public => "", _ => "" };
@@ -592,6 +597,18 @@ public partial class SharesViewModel : ObservableObject
     public string OpenCastPlayerTip => MyCast?.Unattended == true ? "Open the player and take the multicast back (play, pause, seek)" : "Your player drives the multicast";
 
     /// <summary>Live "N watching" counts from the service, by item id.</summary>
+    // ---- notes on my videos ----
+    [RelayCommand]
+    private void OpenNotes(LocalItemVm? item)
+    {
+        if (item is null) return;
+        _main.OpenNotes("me", item.Id, item.Name, "You", item.NoteCount, item.SetNoteCount);
+    }
+    public int NoteCountOf(string itemId) => _itemVms.TryGetValue(itemId, out var vm) ? vm.NoteCount : 0;
+    public void SetNoteCount(string itemId, int count) { if (_itemVms.TryGetValue(itemId, out var vm)) vm.SetNoteCount(count); }
+    /// <summary>Someone left a note on one of my videos: its row counts it at once.</summary>
+    public void NoteAdded(string itemId) { if (_itemVms.TryGetValue(itemId, out var vm)) vm.SetNoteCount(vm.NoteCount + 1); }
+
     /// <summary>PCs watching my videos right now.</summary>
     public int TotalViewers { get; private set; }
 

@@ -500,6 +500,20 @@ public partial class MainViewModel : ObservableObject
                     if (MyCast is not null) Player.HostUpdate(MyCast); else Player.EndCastIf(PlayerViewModel.CastRoles.Host);
                     break;
                 }
+                case "noteAdded":
+                {
+                    // someone left a note on one of my videos
+                    if (Json.Deserialize<NoteAddedDto>(data) is not { } n) break;
+                    SharesVm.NoteAdded(n.ItemId);
+                    var text = n.Text.Replace('\n', ' ');
+                    if (text.Length > 90) text = text[..90].TrimEnd() + "…";
+                    var at = n.AtSeconds is { } s ? $" (at {Format.Duration(TimeSpan.FromSeconds(s))})" : "";
+                    void open() => OpenNotes("me", n.ItemId, n.ItemName, "You", SharesVm.NoteCountOf(n.ItemId), c => SharesVm.SetNoteCount(n.ItemId, c));
+                    AppLog.Info("Notes", $"{n.AuthorName} left a note on {n.ItemName}");
+                    Toast($"New note on “{n.ItemName}”", $"{n.AuthorName}{at}: {text}", "info", open);
+                    TrayNotify?.Invoke($"New note on “{n.ItemName}”", $"{n.AuthorName}: {text}", open); // shown only while the window is closed to the tray
+                    break;
+                }
                 case "castSchedule":
                     SharesVm.ApplySchedule(Json.Deserialize<CastScheduleDto>(data));
                     break;
@@ -558,6 +572,10 @@ public partial class MainViewModel : ObservableObject
     }
 
     [ObservableProperty] private bool _isRefreshingNetwork;
+
+    /// <summary>The notes of a video in their own window ("me" for one of mine).</summary>
+    public void OpenNotes(string peerId, string itemId, string itemName, string ownerLabel, int count, Action<int>? countChanged)
+        => Dialogs.ShowNotes(new NotesViewModel(this, peerId, itemId, itemName, ownerLabel, count) { CountChanged = countChanged });
 
     /// <summary>"Node info": who it is, its Ocean and Windows versions, how this PC reaches it, what it shares.</summary>
     [RelayCommand]

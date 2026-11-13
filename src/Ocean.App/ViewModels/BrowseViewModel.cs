@@ -124,6 +124,14 @@ public partial class BrowseViewModel : ObservableObject
     }
 
     [RelayCommand] private Task VoteUp(ItemVm? item) => VoteAsync(item, 1);
+
+    /// <summary>The video's notes in their own window.</summary>
+    [RelayCommand]
+    private void OpenNotes(ItemVm? item)
+    {
+        if (item is null) return;
+        _main.OpenNotes(Peer.Id, item.Id, item.Name, Peer.Label, item.NoteCount, item.SetNoteCount);
+    }
     [RelayCommand] private Task VoteDown(ItemVm? item) => VoteAsync(item, -1);
 
     /// <summary>Thumbs up/down; the same button again takes the vote back.</summary>

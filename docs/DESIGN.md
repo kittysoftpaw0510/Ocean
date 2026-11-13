@@ -348,6 +348,29 @@ dislike -1, watching to the end a quarter, all fading with a 30-day half-life so
 watch now. `TopList` ranks every known catalog plus my own (copies of my videos shared back by others are skipped)
 and offers tag counts: `GET /api/top?tag=&limit=`.
 
+## Notes (`Ocean.Service.Social.Notes`)
+
+Anyone who can open a video can leave notes on it and vote each note 👍/👎. A video's notes live on its owner's PC
+(`notes.json`): no broadcast, nothing kept elsewhere, so a big network costs nothing until someone opens them. Only
+the number travels, as `ItemDto.NoteCount` in the catalog (a change bumps the catalog like a vote, coalesced).
+
+- Peer API, all under the video's own access rule (a locked video's notes are locked too): `GET /p/notes/{item}`,
+  `POST /p/notes/{item}` `{text, atSeconds?}`, `POST /p/notes/{item}/{note}/edit|delete|vote`. Writes are POSTs only,
+  so they pass bridges and reverse links. The writer is the calling PC: node id and name from its certificate and
+  announcements, never from the request. A writer edits and deletes their notes; the owner deletes any.
+- Limits (`NoteLimits`): 1000 characters, one note per writer and video every 5 s, 500 notes per video (beyond, the
+  oldest of the least voted go). No voting on one's own note. Line breaks kept, control characters dropped.
+- `atSeconds`: the moment the note is about; a note started in the player takes the moment writing began (the
+  writer can drop it or take the current one). Clicking it plays from there.
+- This PC's service (`PeerService.NotesAsync`) forwards the app's requests (`/api/notes/{peer|me}/{item}...`) and
+  keeps the last notes read per video: while the owner is offline (or unreachable) they are shown, marked so.
+  Problems for the app: `offline`, `unreachable`, `old` (a 404 without a body: an Ocean without notes), `locked`,
+  `gone` (a 404 with `{error: "gone"}`).
+- The owner's app gets `noteAdded` for a note on one of its videos (a toast; the tray when hidden).
+- App: a panel beside the player (N, the 💬 button), or a window from a video's menu (one per video). Sorted Top
+  (votes, a fresh note lifted a little), Newest or By moment; 30 at a time; long notes folded; read again every 20 s
+  while shown.
+
 ## Search (`Ocean.Service.Social.NetSearch`)
 
 `GET /api/search?q=` matches every cached catalog (online or not) and my own shares inside the service, so the

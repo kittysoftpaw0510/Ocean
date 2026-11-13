@@ -151,6 +151,11 @@ public partial class SharesView : UserControl
 
     private void StopCast_Click(object sender, RoutedEventArgs e) => Vm?.StopCastCommand.Execute(null);
 
+    private void Notes_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { DataContext: LocalItemVm item }) Vm?.OpenNotesCommand.Execute(item);
+    }
+
     private void ScheduleCast_Click(object sender, RoutedEventArgs e)
     {
         if (sender is MenuItem { DataContext: LocalItemVm item, Tag: string minutes } && Vm is not null) _ = Vm.ScheduleCastAsync(item, minutes);

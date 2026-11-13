@@ -95,6 +95,7 @@ builder.Services.AddSingleton<Ocean.Service.Media.LightCopies>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Ocean.Service.Media.LightCopies>());
 builder.Services.AddSingleton<Ocean.Service.Cast.ViewerTracker>();
 builder.Services.AddSingleton<Ocean.Service.Social.Ratings>();
+builder.Services.AddSingleton<Ocean.Service.Social.Notes>();
 builder.Services.AddSingleton<Ocean.Service.Social.MyVotes>();
 builder.Services.AddSingleton<Ocean.Service.Social.TopList>();
 builder.Services.AddSingleton<Ocean.Service.Social.NetSearch>();
@@ -267,6 +268,7 @@ app.Services.GetRequiredService<PeerService>();
 app.Services.GetRequiredService<Ocean.Service.Cast.ViewerTracker>(); // counts viewers for my listing
 app.Services.GetRequiredService<Ocean.Service.Cast.CastHost>();      // puts my multicast in my catalog
 app.Services.GetRequiredService<Ocean.Service.Social.Ratings>();     // puts the votes on my videos in my catalog
+app.Services.GetRequiredService<Ocean.Service.Social.Notes>();       // puts the number of notes on my videos in my catalog
 
 log.LogInformation("Ocean {Version} starting as {Mode}; node {Node} ({Name}); data {Dir}; local {Local}, peers {Peer}, discovery {Disc}",
     OceanDefaults.AppVersion, isService ? "Windows service" : "background process", NodeIdentity.ShortId(identity.NodeId), cfg.NodeName,

@@ -432,6 +432,56 @@ public sealed class PeerService : IDisposable
             await SendRatingAsync(peerId, itemId, rate, CancellationToken.None);
     }
 
+    // ------------------------------------------------------------------ notes on another node's video
+
+    /// <summary>The last notes read per video, so they stay readable while the owner is offline.</summary>
+    private readonly ConcurrentDictionary<string, NotesDto> _notesSeen = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Reads (method GET, <paramref name="path"/> "") or changes the notes of another node's video; the owner keeps
+    /// them. On failure the answer says why (<see cref="NotesDto.Problem"/>) and holds the last notes read, if any.
+    /// </summary>
+    public async Task<NotesDto> NotesAsync(string peerId, string itemId, HttpMethod method, string path, object? body, CancellationToken ct)
+    {
+        var key = peerId + "|" + itemId;
+        NotesDto Fail(string problem, string? error = null)
+        {
+            var last = _notesSeen.TryGetValue(key, out var seen) ? seen : null;
+            return new NotesDto { Notes = last?.Notes ?? new(), IsOwner = false, FetchedAt = last?.FetchedAt, Problem = problem, Error = error };
+        }
+        if (!_registry.TryGetOnline(peerId, out var peer)) return Fail("offline");
+        try
+        {
+            var req = _client.Build(peer, method, "/p/notes/" + Uri.EscapeDataString(itemId) + path, GrantsFor(peerId));
+            if (body is not null) req.Content = JsonContent.Create(body, body.GetType(), options: Json.Options);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(15));
+            using var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseContentRead, cts.Token);
+            if (resp.StatusCode == HttpStatusCode.NotFound)
+            {
+                // a body says "gone" (the video or the note); an Ocean without notes answers 404 without one
+                ErrorDto? err = null;
+                try { err = await resp.Content.ReadFromJsonAsync<ErrorDto>(Json.Options, cts.Token); } catch { }
+                return Fail(err?.Error == "gone" ? "gone" : "old");
+            }
+            if (resp.StatusCode == HttpStatusCode.Forbidden) { await HandleLockedAsync(peerId, resp); return Fail("locked"); }
+            if (resp.StatusCode == HttpStatusCode.BadRequest) return Fail("refused", "The note was refused.");
+            if (!resp.IsSuccessStatusCode) return Fail("unreachable");
+            var notes = await resp.Content.ReadFromJsonAsync<NotesDto>(Json.Options, cts.Token) ?? new NotesDto();
+            notes.FetchedAt ??= DateTimeOffset.UtcNow;
+            _notesSeen[key] = notes;
+            // keep my copy of its catalog in step (the note count) until its next version arrives
+            if (Cached(peerId)?.Shares.SelectMany(s => s.Items).FirstOrDefault(i => i.Id == itemId) is { } item) item.NoteCount = notes.Notes.Count;
+            return notes;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException or System.Text.Json.JsonException or PeerUnavailableException)
+        {
+            if (ct.IsCancellationRequested) throw;
+            _log.LogDebug("notes of {Item} on {Peer}: {Msg}", itemId, peer.Name, ex.Message);
+            return Fail("unreachable");
+        }
+    }
+
     /// <summary>How the lighter copy of another node's video is doing; with <paramref name="request"/>, asks for one.</summary>
     public async Task<LightStatusDto> LightAsync(string peerId, string itemId, bool request, CancellationToken ct)
     {

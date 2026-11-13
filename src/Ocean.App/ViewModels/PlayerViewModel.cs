@@ -56,6 +56,25 @@ public partial class PlayerViewModel : ObservableObject
     [ObservableProperty] private bool _isMuted;
     [ObservableProperty] private bool _isFullscreen;
 
+    // ---- notes of the video playing, in a panel beside it (N)
+    [ObservableProperty] private NotesViewModel? _notes;
+    [ObservableProperty] private bool _notesOpen;
+    public int NoteCount => Notes?.Count ?? 0;
+    public string NotesButtonText => NoteCount > 0 ? NoteCount.ToString() : "";
+    public string NotesTip => NoteCount == 0 ? "Notes: leave one, at this moment of the video (N)" : $"{NoteCount} note{(NoteCount == 1 ? "" : "s")} (N)";
+    [RelayCommand] private void ToggleNotes() { if (Notes is not null) NotesOpen = !NotesOpen; }
+    partial void OnNotesChanged(NotesViewModel? oldValue, NotesViewModel? newValue)
+    {
+        if (oldValue is not null) oldValue.PropertyChanged -= OnNotesCount;
+        if (newValue is not null) newValue.PropertyChanged += OnNotesCount;
+        OnNotesCount(null, new System.ComponentModel.PropertyChangedEventArgs(nameof(NotesViewModel.Count)));
+    }
+    private void OnNotesCount(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(NotesViewModel.Count)) return;
+        OnPropertyChanged(nameof(NoteCount)); OnPropertyChanged(nameof(NotesButtonText)); OnPropertyChanged(nameof(NotesTip));
+    }
+
     // ---- picture in picture: the video in a small window of its own, Ocean stays usable behind it
     /// <summary>The video plays in the small window (PipWindow) instead of over the main window.</summary>
     [ObservableProperty] private bool _isPip;
@@ -531,6 +550,7 @@ public partial class PlayerViewModel : ObservableObject
         if (exactUrl) { EndLight(); Url = url; } // a multicast: the host decides which copy is sent
         else { BeginLight(item, peer, url); Url = UsingLight ? _lightUrl : url; }
         _playing = item; _playingPeer = peer; StartAt = Math.Max(0, startAt); _finishedReported = false;
+        Notes = new NotesViewModel(_main, peer.Id, item.Id, item.Name, peer.Label, item.NoteCount) { CountChanged = item.SetNoteCount };
         Services.AppLog.Info("Player", $"play {item.Name} from {peer.Label}" + (StartAt > 0 ? $" at {StartAt:0} s" : ""));
         Title = item.Name;
         Subtitle = $"{peer.Label}  ·  {item.ShareName}{(item.Folder.Length > 0 ? "  ›  " + item.Folder : "")}{(item.ResolutionText.Length > 0 ? "  ·  " + item.ResolutionText : "")}";
@@ -556,6 +576,7 @@ public partial class PlayerViewModel : ObservableObject
         LeaveCastForNewVideo(keepHost: host);
         EndLight();
         Item = null; Peer = null; Url = item.Dto.FullPath; Error = null;
+        Notes = new NotesViewModel(_main, "me", item.Id, item.Name, "You", item.NoteCount) { CountChanged = item.SetNoteCount };
         _playing = null; _playingPeer = null; StartAt = Math.Max(0, startAt); // no resume point: it is not another node's video
         Services.AppLog.Info("Player", $"play my own {item.Name}");
         Title = item.Name;

@@ -57,6 +57,8 @@ public partial class PlayerView : UserControl
         DataContextChanged += OnDataContextChanged;
         IsVisibleChanged += OnVisibleChanged;
         _tick.Tick += (_, _) => UpdatePosition();
+        NotesView.ShowClose = true;
+        NotesView.CloseRequested += () => { if (_vm is not null) _vm.NotesOpen = false; Focus(); };
         _seekTipDelay.Tick += (_, _) => { _seekTipDelay.Stop(); if (Seek.IsMouseOver) SeekTip.IsOpen = true; };
         Seek.MouseMove += Seek_MouseMove;
         Seek.MouseLeave += (_, _) => { _seekTipDelay.Stop(); SeekTip.IsOpen = false; };
@@ -74,6 +76,7 @@ public partial class PlayerView : UserControl
         if (_vm is not null) _vm.PropertyChanged -= Vm_PropertyChanged;
         _vm = e.NewValue as PlayerViewModel;
         if (_vm is not null) _vm.PropertyChanged += Vm_PropertyChanged;
+        HookNotes();
     }
 
     private void OnVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
@@ -112,6 +115,9 @@ public partial class PlayerView : UserControl
                 break;
             case nameof(PlayerViewModel.IsOpen):
                 if (!_vm.IsOpen) Stop();
+                break;
+            case nameof(PlayerViewModel.Notes):
+                HookNotes();
                 break;
             case nameof(PlayerViewModel.IsPip):
                 if (_vm.IsPip) EnterPip(); else LeavePip();
@@ -503,6 +509,14 @@ public partial class PlayerView : UserControl
     }
     private void Media_BufferingEnded(object sender, RoutedEventArgs e) { if (_vm is not null) _vm.IsBuffering = false; }
 
+    /// <summary>The notes of the video playing know where playback is (a new note's moment) and can jump to a note's moment.</summary>
+    private void HookNotes()
+    {
+        if (_vm?.Notes is not { } notes) return;
+        notes.CurrentPosition = () => CurrentSeconds();
+        notes.SeekTo = seconds => { SeekTo(seconds); if (_vm is { IsPlaying: false }) TogglePlay(); };
+    }
+
     /// <summary>The video goes into the small window, playing on as it is (the element moves, nothing reloads).</summary>
     private void EnterPip()
     {
@@ -615,6 +629,7 @@ public partial class PlayerView : UserControl
     private void OnKey(object sender, KeyEventArgs e)
     {
         if (_vm is null || !_vm.IsOpen) return;
+        if (Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase) return; // typing a note: letters are letters
         // Shift+> / Shift+< change speed (same keys as most web players)
         if (Keyboard.Modifiers == ModifierKeys.Shift && e.Key is Key.OemPeriod or Key.OemComma)
         {
@@ -639,6 +654,7 @@ public partial class PlayerView : UserControl
             case Key.Down: _vm.Volume = Math.Max(0, _vm.Volume - 0.05); break;
             case Key.F: _vm.ToggleFullscreenCommand.Execute(null); break;
             case Key.P: _vm.TogglePipCommand.Execute(null); break;
+            case Key.N: _vm.ToggleNotesCommand.Execute(null); break;
             case Key.M: _vm.ToggleMuteCommand.Execute(null); break;
             default: return;
         }

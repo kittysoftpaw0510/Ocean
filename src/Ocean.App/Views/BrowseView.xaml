@@ -66,6 +66,10 @@
                 <MenuItem.Icon><TextBlock Text="&#xE71B;" Style="{StaticResource Icon}"/></MenuItem.Icon>
             </MenuItem>
             <Separator Visibility="{Binding CanVote, Converter={StaticResource BoolToVis}}"/>
+            <MenuItem Header="{Binding NotesMenu}" Command="{Binding PlacementTarget.Tag.OpenNotesCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"
+                      ToolTip="What others noted about this video; vote on notes or leave your own">
+                <MenuItem.Icon><TextBlock Text="&#xE8BD;" Style="{StaticResource Icon}"/></MenuItem.Icon>
+            </MenuItem>
             <MenuItem Header="{Binding LikeMenu}" Visibility="{Binding CanVote, Converter={StaticResource BoolToVis}}"
                       Command="{Binding PlacementTarget.Tag.VoteUpCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}">
                 <MenuItem.Icon><TextBlock Text="&#xE8E1;" Style="{StaticResource Icon}"/></MenuItem.Icon>
