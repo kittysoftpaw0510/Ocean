@@ -8,7 +8,8 @@ namespace Ocean.App.Views;
 
 /// <summary>
 /// Picture in picture: a small borderless window the player's video element moves into (playback goes on as it
-/// is, nothing reloads), so Ocean and other programs stay usable. Kept on top while pinned. Drag it by the video,
+/// is, nothing reloads), so Ocean and other programs stay usable. While pinned it is kept on top and on every
+/// virtual desktop. Drag it by the video,
 /// resize it at the edges; double-click or Esc returns to the full player. The player (PlayerView) does the
 /// playing; this window only hosts the picture and passes the controls on.
 /// </summary>
@@ -17,6 +18,8 @@ public partial class PipWindow : Window
     private readonly PlayerViewModel _vm;
     private readonly DispatcherTimer _idle = new() { Interval = TimeSpan.FromSeconds(2.5) };
     private bool _closingFromCode;
+    /// <summary>While pinned it is also on every virtual desktop, so switching desktops keeps it in view.</summary>
+    private readonly Services.AllDesktops _allDesktops;
     /// <summary>Where the window was last time (this session), so it comes back there.</summary>
     private static Rect? _lastBounds;
 
@@ -32,6 +35,8 @@ public partial class PipWindow : Window
         DataContext = vm;
         // on top while pinned (set here, not bound: it must hold from the first moment the window shows)
         Topmost = vm.PipPinned;
+        _allDesktops = new Services.AllDesktops(this);
+        _allDesktops.Set(vm.PipPinned);
         vm.PropertyChanged += OnVmChanged;
         try { Icon = Services.IconFactory.WindowIcon(); } catch { } // an icon is not worth failing the window over
         if (_lastBounds is { } b) { Left = b.Left; Top = b.Top; Width = b.Width; Height = b.Height; }
@@ -50,7 +55,9 @@ public partial class PipWindow : Window
 
     private void OnVmChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(PlayerViewModel.PipPinned)) Topmost = _vm.PipPinned;
+        if (e.PropertyName != nameof(PlayerViewModel.PipPinned)) return;
+        Topmost = _vm.PipPinned;
+        _allDesktops.Set(_vm.PipPinned);
     }
 
     /// <summary>Puts the video element in (behind the controls).</summary>
@@ -109,6 +116,7 @@ public partial class PipWindow : Window
         }
         _idle.Stop();
         _vm.PropertyChanged -= OnVmChanged;
+        _allDesktops.Dispose();
         base.OnClosing(e);
     }
 }

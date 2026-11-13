@@ -78,7 +78,7 @@ public partial class PlayerViewModel : ObservableObject
     // ---- picture in picture: the video in a small window of its own, Ocean stays usable behind it
     /// <summary>The video plays in the small window (PipWindow) instead of over the main window.</summary>
     [ObservableProperty] private bool _isPip;
-    /// <summary>The small window stays on top of all others.</summary>
+    /// <summary>The small window stays on top of all others, and on every virtual desktop.</summary>
     [ObservableProperty] private bool _pipPinned = true;
     /// <summary>The player covers the main window (open and not in its small window).</summary>
     public bool ShowInWindow => IsOpen && !IsPip;

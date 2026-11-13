@@ -27,12 +27,12 @@
                             <Button.Style>
                                 <Style TargetType="Button" BasedOn="{StaticResource BtnIcon}">
                                     <Setter Property="Content" Value="&#xE77A;"/>
-                                    <Setter Property="ToolTip" Value="Not on top: click to keep this window above all others"/>
+                                    <Setter Property="ToolTip" Value="Not pinned: click to keep this window above all others and on every desktop"/>
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding PipPinned}" Value="True">
                                             <Setter Property="Content" Value="&#xE718;"/>
                                             <Setter Property="Foreground" Value="{StaticResource Accent}"/>
-                                            <Setter Property="ToolTip" Value="Kept on top of all windows: click to let others cover it"/>
+                                            <Setter Property="ToolTip" Value="Pinned: above all windows and on every desktop. Click to unpin"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
