@@ -295,6 +295,7 @@ public partial class ScreenViewWindow : Window
 {
     private readonly ScreenViewModel _vm;
     private readonly ScreenDecoder _decoder;
+    private ScreenSoundPlayer? _player;
     private readonly DispatcherTimer _watch = new() { Interval = TimeSpan.FromSeconds(1) };
     private WindowState _stateBefore;
     private bool _full;
@@ -320,6 +321,7 @@ public partial class ScreenViewWindow : Window
         Picture.Source = _decoder.Bitmap;
         _decoder.FrameShown += () => { if (!view.HasPicture) view.HasPicture = true; };
         _decoder.Start();
+        Sound();
         view.PropertyChanged += OnViewChanged;
         _watch.Tick += (_, _) =>
         {
@@ -334,11 +336,24 @@ public partial class ScreenViewWindow : Window
     private void OnViewChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(ScreenViewVm.Ended) && View.Ended) { _decoder.Dispose(); if (_full) ToggleFull(); }
+        if (e.PropertyName is nameof(ScreenViewVm.Sound) or nameof(ScreenViewVm.Ended) or nameof(ScreenViewVm.Muted)) Sound();
+    }
+
+    /// <summary>The host's sound plays while they share it and the window is open (muted: it runs on, silent, to come back in step).</summary>
+    private void Sound()
+    {
+        if (View.Sound && !View.Ended)
+        {
+            if (_player is null) { _player = new ScreenSoundPlayer(_vm.Api, View.Fps); _player.Start(); }
+            _player.Muted = View.Muted;
+        }
+        else if (_player is not null) { _player.Dispose(); _player = null; }
     }
 
     private void OnKey(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.F11 || e.Key == Key.F) { ToggleFull(); e.Handled = true; }
+        else if (e.Key == Key.M && View.Sound) { View.Muted = !View.Muted; e.Handled = true; }
         else if (e.Key == Key.Escape && _full) { ToggleFull(); e.Handled = true; }
     }
 
@@ -371,6 +386,7 @@ public partial class ScreenViewWindow : Window
         _watch.Stop();
         View.PropertyChanged -= OnViewChanged;
         _decoder.Dispose();
+        _player?.Dispose(); _player = null;
         _ = _vm.LeaveAsync(View);
         base.OnClosed(e);
     }

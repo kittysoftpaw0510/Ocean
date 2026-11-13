@@ -61,6 +61,7 @@ public partial class ScreenPickerWindow : Window
         }
         try { Icon = IconFactory.WindowIcon(); } catch { }
         SourceInitialized += (_, _) => DarkTitleBar.Apply(this);
+        if (record is null) Sound.IsChecked = ScreenShareSettings.Load().Sound;
         Screens.ItemsSource = _screens; Windows.ItemsSource = _windows;
         // the lists sit in one scrolling page: the wheel scrolls the page, not a list
         foreach (var list in new[] { Screens, Windows })
@@ -188,6 +189,12 @@ public partial class ScreenPickerWindow : Window
             return;
         }
         Result = ToPick(_chosen);
+        if (_record is null)
+        {
+            Result.Sound = Sound.IsChecked == true;
+            var prefs = ScreenShareSettings.Load();
+            if (prefs.Sound != Result.Sound) { prefs.Sound = Result.Sound; prefs.Save(); }
+        }
         DialogResult = true;
     }
 
@@ -199,6 +206,7 @@ public partial class ScreenPickerWindow : Window
         if (e.PropertyName == nameof(ViewModels.RecordViewModel.Quality) && _chosen is not null) Choose(_chosen);
     }
     private void SmoothLabel_Click(object sender, MouseButtonEventArgs e) => Smooth.IsChecked = Smooth.IsChecked != true;
+    private void SoundLabel_Click(object sender, MouseButtonEventArgs e) => Sound.IsChecked = Sound.IsChecked != true;
 }
 
 /// <summary>

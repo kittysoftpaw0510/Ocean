@@ -236,6 +236,20 @@ public static class LocalApi
             catch (InvalidOperationException) { return Results.NotFound(); }
             catch (IOException) { return Results.Ok(); } // the encoder stopped
         });
+        // the computer's sound: on or off, and the app's Opus frames while it is on and somebody watches
+        g.MapPost("/screen/sound", async (HttpContext ctx, Ocean.Service.Screen.ScreenHost screen) =>
+        {
+            var req = await ctx.Request.ReadFromJsonAsync<ScreenSoundDto>(Json.Options, ctx.RequestAborted);
+            return req is null ? Results.BadRequest() : Results.Json(screen.SetSound(req.On), Json.Options);
+        });
+        g.MapPost("/screen/feed/{sessionId}/sound", async (HttpContext ctx, string sessionId, Ocean.Service.Screen.ScreenHost screen) =>
+        {
+            if (ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } size) size.MaxRequestBodySize = null;
+            if (ctx.Features.Get<Microsoft.AspNetCore.Server.Kestrel.Core.Features.IHttpMinRequestBodyDataRateFeature>() is { } rate) rate.MinDataRate = null;
+            try { await screen.SoundFeedAsync(sessionId, ctx.Request.Body, ctx.RequestAborted); return Results.Ok(); }
+            catch (InvalidOperationException) { return Results.NotFound(); }
+            catch (IOException) { return Results.Ok(); } // the app stopped sending
+        });
         // ---- screen sharing: questions (see ScreenAsks) ----
         g.MapPost("/screen/ask/{peerId}", async (string peerId, string? kind, HttpContext ctx, Ocean.Service.Screen.ScreenAsks asks) =>
             Results.Json(await asks.RequestAsync(peerId, kind ?? ScreenAskDto.Show, ctx.RequestAborted), Json.Options));
@@ -272,6 +286,25 @@ public static class LocalApi
             try
             {
                 await viewer.StreamAsync(async bytes => { await ctx.Response.Body.WriteAsync(bytes, ctx.RequestAborted); await ctx.Response.Body.FlushAsync(ctx.RequestAborted); }, ctx.RequestAborted);
+            }
+            catch (Exception ex) when (ex is IOException or OperationCanceledException) { }
+        });
+        // the sound for the app's player: Opus frames as they arrive (see ScreenSoundFrames)
+        g.MapGet("/screen/view/sound", async (HttpContext ctx, Ocean.Service.Screen.ScreenViewer viewer) =>
+        {
+            if (!viewer.Active) { ctx.Response.StatusCode = 404; return; }
+            ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>()?.DisableBuffering();
+            if (ctx.Features.Get<Microsoft.AspNetCore.Server.Kestrel.Core.Features.IHttpMinResponseDataRateFeature>() is { } rate) rate.MinDataRate = null;
+            ctx.Response.ContentType = "application/octet-stream";
+            ctx.Response.Headers.CacheControl = "no-store";
+            try
+            {
+                await ctx.Response.StartAsync(ctx.RequestAborted);
+                await viewer.StreamSoundAsync(async frames =>
+                {
+                    foreach (var f in frames) await ctx.Response.Body.WriteAsync(ScreenSoundFrames.Pack(f), ctx.RequestAborted);
+                    await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+                }, ctx.RequestAborted);
             }
             catch (Exception ex) when (ex is IOException or OperationCanceledException) { }
         });

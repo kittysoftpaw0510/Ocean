@@ -329,10 +329,10 @@ See `Api/LocalApi.cs`.
   2.5 s off and pausing with the host; controls are locked ("The host controls playback"); Leave or the host's end
   unlocks them and the cached bytes stay, so the video can go on as a normal stream.
 
-## Screen sharing (`Ocean.Service.Screen`, app: `ScreenViewModel`, `ScreenEncoder`, `ScreenDecoder`)
+## Screen sharing (`Ocean.Service.Screen`, app: `ScreenViewModel`, `ScreenEncoder`, `ScreenDecoder`, `ScreenSound`)
 
-A node shares one thing at a time: a monitor, one window or a part of a monitor; with everyone or with invited PCs.
-View only (nothing typed or clicked at the viewer reaches the host), picture only (no sound).
+A node shares one thing at a time: a monitor, one window or a part of a monitor; with everyone or with invited PCs;
+with the PC's sound or without. View only (nothing typed or clicked at the viewer reaches the host).
 
 - **Who does what.** The service cannot see the desktop (session 0), so the app captures and encodes and the
   service carries. The app runs ffmpeg (shipped for the lighter copies): `gfxcapture` (Windows.Graphics.Capture:
@@ -355,7 +355,7 @@ View only (nothing typed or clicked at the viewer reaches the host), picture onl
   session key, one parity packet per 8 and at the end of every picture) on port 38474: to the multicast group
   (239.255.77.1) when everyone may watch, straight to each viewer's own UDP port otherwise (only when the join came
   straight from that PC, not through a bridge or a reverse link). A control packet twice a second: head offset,
-  viewers, ended.
+  viewers, ended, sound on, the newest sound frame.
 - **Nothing is ever missing** (`ScreenViewer`): UDP only gives the low delay. The viewer puts the stream together
   in order from two sources: the packets, and `GET /p/screen/{id}/stream?from=` over the peer connection. The
   direct stream always brings the start (`from=-1`: the latest key picture, waiting for one while the encoder
@@ -385,10 +385,39 @@ View only (nothing typed or clicked at the viewer reaches the host), picture onl
   second key picture): the first picture is there about a second after opening.
 - **Seen by the user:** a red bar "Sharing ... with ..., N watching, Stop sharing" on top of everything and on every
   virtual desktop while a session runs; it is excluded from capture (`WDA_EXCLUDEFROMCAPTURE`) and can't be closed.
-- Local API: `/api/screen` (GET, `/start`, `/invite`, `/stop`, `/feed/{id}`), `/api/screen/ask/{peer}`,
-  `/api/screen/prompts[/{id}]`, `/api/screen/muted`, `/api/screen/view` (GET, `/leave`, `/stream`),
-  `/api/peers/{peer}/screen/{id}/join`. Events: `myScreen`, `screenPrompt`, `screenRequest`, `screenInvite`,
-  `screenView`, `peerScreen`.
+- **The sound** (`ScreenSoundSender`, `ScreenSoundPlayer`). What the PC plays: a WASAPI loopback of the default
+  output (followed when it changes), cut into 20 ms frames on the capture's own time line and encoded with Opus
+  (Concentus, in the app: 96 kbps constrained VBR, about 3 % of one core), each frame stamped with the moment its
+  first sample was played (the performance counter Windows stamps every block with) and how long after that it was
+  sent. Only while the sound is on and somebody watches (`Wanted && Sound`). `POST /api/screen/sound {on}` switches
+  it for everyone at once (the control packet carries it, and the newest frame's number); `ScreenStartDto.Sound`
+  starts with it (the picker's *Sound* switch, remembered in `%LocalAppData%\Ocean\screen.json`).
+  - On the way: `POST /api/screen/feed/{id}/sound` (frames, `ScreenSoundFrames`) → packets of their own type (4,
+    sealed like the rest; older viewers pass over them), each with the frame before it, so one lost packet costs
+    nothing (no parity, no retransmission: a frame that is late is no use). Without packets (none for 2 s, or the
+    sound more than 25 frames behind what the control packet says was sent) the viewer gets it over
+    `GET /p/screen/{id}/sound?after=` until packets arrive again; the host keeps the last 3 s for that.
+  - Played by time, not by arrival: every frame is heard a fixed time after it was played on the sharing PC, about
+    as long as the picture takes (`PictureDelayMs`: 41 ms + 2.7 picture times; 221 ms at 15 pictures a second,
+    131 ms at 30: capture half a picture time and 8 ms, encoder to decoded picture 2.2 picture times and 5 ms
+    (measured: 153 / 72 ms), drawing 28 ms). The two clocks are linked by the quickest arrival (counted from
+    sending) of the last 10 s: no clock setting, and a drift is followed. The two sound cards' speeds are evened
+    out by playing up to 0.5 % faster or slower (unheard); a time stamp that moves within an unbroken run moves the
+    time line, not the samples (no click); after a break a frame goes exactly where it belongs; settling (4 s)
+    jumps, later only a difference over 80 ms is jumped. A frame missing when it is due is concealed by Opus
+    (up to 60 ms), then silence. Measured between two services on one PC (one clock): heard 220.4 ms after it was
+    played at 15 pictures a second (target 221), 130.3 ms at 30 (target 131), spread 0.1 ms, no gaps; with 15 % of
+    the packets lost every tick still on time, 2 % of the frames concealed; with all packets lost the same over the
+    direct connection.
+  - No echo: while Ocean plays a shared screen's sound, the capture leaves Ocean's own sound out (process
+    loopback, `PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE`, Windows 10 21H1 and later), so two PCs sharing
+    their sound with each other don't send it back and forth. Otherwise Ocean's own sound (a video in its player)
+    is shared like any other.
+  - Viewer: the speaker button (or M) turns it off here; it keeps running silent, so it comes back in step.
+- Local API: `/api/screen` (GET, `/start`, `/invite`, `/stop`, `/sound`, `/feed/{id}`, `/feed/{id}/sound`),
+  `/api/screen/ask/{peer}`, `/api/screen/prompts[/{id}]`, `/api/screen/muted`, `/api/screen/view` (GET, `/leave`,
+  `/stream`, `/sound`), `/api/peers/{peer}/screen/{id}/join`. Events: `myScreen`, `screenPrompt`, `screenRequest`,
+  `screenInvite`, `screenView`, `peerScreen`.
 
 ## Screen recording (app: `ScreenRecorder`, `RecordingAudio`, `RecordViewModel`)
 

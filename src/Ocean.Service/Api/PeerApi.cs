@@ -282,6 +282,28 @@ public static class PeerApi
                 ctx.RequestAborted);
             if (!ok && !began) ctx.Response.StatusCode = 410; // those bytes are gone (too far behind), or no picture came: start again
         });
+        // the sound, for a viewer that gets no packets: Opus frames after the one it has (see ScreenSoundFrames)
+        g.MapGet("/screen/{sessionId}/sound", async (HttpContext ctx, string sessionId, long? after, ScreenHost screen) =>
+        {
+            var pc = PeerContext.Get(ctx);
+            var allowed = screen.Allowed(sessionId, pc.ClientId);
+            if (allowed is null) { ctx.Response.StatusCode = 404; return; }
+            if (allowed == false) { ctx.Response.StatusCode = 403; return; }
+            ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>()?.DisableBuffering();
+            if (ctx.Features.Get<Microsoft.AspNetCore.Server.Kestrel.Core.Features.IHttpMinResponseDataRateFeature>() is { } rate) rate.MinDataRate = null;
+            ctx.Response.ContentType = "application/octet-stream";
+            ctx.Response.Headers.CacheControl = "no-store";
+            try
+            {
+                await ctx.Response.StartAsync(ctx.RequestAborted);
+                await screen.StreamSoundAsync(sessionId, pc.ClientId, after ?? -1, async frames =>
+                {
+                    foreach (var f in frames) await ctx.Response.Body.WriteAsync(ScreenSoundFrames.Pack(f), ctx.RequestAborted);
+                    await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+                }, ctx.RequestAborted);
+            }
+            catch (Exception ex) when (ex is IOException or OperationCanceledException) { }
+        });
 
         g.MapGet("/thumb/{itemId}", async (HttpContext ctx, string itemId, CatalogService catalog, AccessService access, ThumbnailService thumbs, ConfigStore config) =>
         {

@@ -79,12 +79,25 @@ public sealed partial class ScreenViewVm : ObservableObject
         ? "The picture comes over the direct connection to that PC (UDP packets don't arrive well here). It is just as complete, at most a little later."
         : "The picture comes by UDP packets, with the lowest delay.";
     public string ViewersText => Viewers <= 1 ? "" : $"{Viewers} watching";
+    /// <summary>The host shares its sound right now.</summary>
+    [ObservableProperty] private bool _sound;
+    /// <summary>Its sound is not played here (this PC's choice; the host's sound goes on).</summary>
+    [ObservableProperty] private bool _muted;
+    /// <summary>Its sound plays here.</summary>
+    public bool Hearing => Sound && !Muted && !Ended;
+    public string SoundTip => !Sound ? $"{HostName} doesn't share their sound" : Muted ? "Sound off here: click to hear it" : "Click to turn the sound off here";
+    partial void OnSoundChanged(bool value) => SoundRefresh();
+    partial void OnMutedChanged(bool value) => SoundRefresh();
+    private void SoundRefresh() { OnPropertyChanged(nameof(Hearing)); OnPropertyChanged(nameof(SoundTip)); }
     partial void OnEndedChanged(bool value) => Refresh();
     partial void OnModeChanged(string value) => Refresh();
     partial void OnHasPictureChanged(bool value) => Refresh();
     partial void OnViewersChanged(int value) => OnPropertyChanged(nameof(ViewersText));
-    private void Refresh() { OnPropertyChanged(nameof(StatusText)); OnPropertyChanged(nameof(StatusTip)); }
-    public void Apply(ScreenViewDto dto) { Mode = dto.Mode; Viewers = dto.Viewers; }
+    private void Refresh() { OnPropertyChanged(nameof(StatusText)); OnPropertyChanged(nameof(StatusTip)); OnPropertyChanged(nameof(Hearing)); }
+    public void Apply(ScreenViewDto dto) { Mode = dto.Mode; Viewers = dto.Viewers; Sound = dto.Sound; }
+
+    [RelayCommand]
+    private void ToggleMute() { if (Sound) Muted = !Muted; }
 }
 
 /// <summary>
@@ -100,6 +113,7 @@ public sealed partial class ScreenViewModel : ObservableObject
     private readonly Dictionary<string, ScreenPromptVm> _prompts = new(StringComparer.Ordinal);
     private readonly DispatcherTimer _promptClock = new() { Interval = TimeSpan.FromSeconds(1) };
     private ScreenEncoder? _encoder;
+    private ScreenSoundSender? _sound;
     private bool _stopping;
     /// <summary>Between asking the service to start and having the capture ready: the service's own word about the new session arrives in between.</summary>
     private bool _starting;
@@ -136,9 +150,37 @@ public sealed partial class ScreenViewModel : ObservableObject
         "asked" => "asked, no answer yet", "accepted" => "is coming", "watching" => "watching", "declined" => "declined", "left" => "left",
         "timeout" => "didn't answer", "away" => "Ocean isn't open there", "old" => "older Ocean (no screen sharing)", "muted" => "doesn't take requests from you", "busy" => "busy", _ => "can't be reached",
     };
+    /// <summary>What the PC plays goes with the picture.</summary>
+    public bool SoundOn => Mine?.Sound == true;
+    public string SoundTip => SoundOn
+        ? "Your PC's sound is shared: videos, calls and everything it plays go with the picture. Click to keep it to yourself."
+        : "Your PC's sound isn't shared. Click to share it with the picture.";
     partial void OnMineChanged(MyScreenDto? value)
     {
         OnPropertyChanged(nameof(IsSharing)); OnPropertyChanged(nameof(SharingTitle)); OnPropertyChanged(nameof(SharingDetail)); OnPropertyChanged(nameof(SharingPeopleTip));
+        OnPropertyChanged(nameof(SoundOn)); OnPropertyChanged(nameof(SoundTip));
+    }
+
+    [RelayCommand]
+    private async Task ToggleSound()
+    {
+        if (Mine is null) return;
+        var on = !SoundOn;
+        try
+        {
+            var st = await _api.PostAsync<MyScreenDto>("/api/screen/sound", new ScreenSoundDto { On = on });
+            if (st is { Error: null }) { ApplyMine(st); var prefs = ScreenShareSettings.Load(); prefs.Sound = on; prefs.Save(); }
+        }
+        catch (Exception ex) { _main.Toast("Couldn't change the sound", ex.Message, "error"); }
+    }
+
+    /// <summary>
+    /// While Ocean plays a shared screen's sound, my own sharing leaves Ocean's sound out: otherwise two PCs that
+    /// share their sound with each other would send it back and forth (an echo that never ends).
+    /// </summary>
+    private void SoundLoopCheck()
+    {
+        if (_sound is { } s) s.ExcludeOcean = View is { Hearing: true };
     }
 
     private bool CanCapture()
@@ -220,7 +262,7 @@ public sealed partial class ScreenViewModel : ObservableObject
             var (w, h) = pick.SendSize();
             var st = await _api.PostAsync<MyScreenDto>("/api/screen/start", new ScreenStartDto
             {
-                Title = pick.Title, Width = w, Height = h, Fps = pick.Fps, Everyone = everyone, Invite = invite.ToList(), AskId = askId, OfferAskId = offerAskId,
+                Title = pick.Title, Width = w, Height = h, Fps = pick.Fps, Everyone = everyone, Invite = invite.ToList(), AskId = askId, OfferAskId = offerAskId, Sound = pick.Sound,
             });
             if (st is null || st.Error is not null || !st.Active) { _main.Toast("Screen sharing didn't start", st?.Error ?? "The service didn't start it.", "warn"); return false; }
             _encoder?.Dispose();
@@ -233,7 +275,15 @@ public sealed partial class ScreenViewModel : ObservableObject
                 _ = StopAsync();
             });
             _encoder = enc;
-            AppLog.Info("Screen", $"sharing {pick.Kind} “{pick.Title}” {w}x{h} at {pick.Fps} fps with {(everyone ? "everyone" : "invited PCs")}");
+            _sound?.Dispose();
+            var snd = new ScreenSoundSender(_api, st.SessionId!);
+            snd.Problem += why => _ui.BeginInvoke(() =>
+            {
+                if (ReferenceEquals(_sound, snd)) _main.Toast("Your sound isn't shared", char.ToUpper(why[0]) + why[1..] + ". The picture goes on.", "warn");
+            });
+            _sound = snd;
+            SoundLoopCheck();
+            AppLog.Info("Screen", $"sharing {pick.Kind} “{pick.Title}” {w}x{h} at {pick.Fps} fps{(pick.Sound ? " with sound" : "")} with {(everyone ? "everyone" : "invited PCs")}");
             _starting = false;
             // the newest word from the service (somebody may be watching already)
             ApplyMine(await _api.GetAsync<MyScreenDto>("/api/screen") ?? st);
@@ -267,11 +317,13 @@ public sealed partial class ScreenViewModel : ObservableObject
             }
             Mine = st;
             _encoder.Wanted = st.Wanted;
+            if (_sound is not null) _sound.Wanted = st.Wanted && st.Sound;
             Ui.ShowBar();
             return;
         }
         var was = Mine;
         _encoder?.Dispose(); _encoder = null;
+        _sound?.Dispose(); _sound = null;
         Mine = null;
         Ui.HideBar();
         if (was is not null && !_stopping && st.Ended is { } why && why != "stopped")
@@ -289,6 +341,7 @@ public sealed partial class ScreenViewModel : ObservableObject
     public void Shutdown()
     {
         _encoder?.Dispose(); _encoder = null;
+        _sound?.Dispose(); _sound = null;
         // (on other threads: this one is busy closing the app and must not be waited for)
         if (Mine is not null) { try { Task.Run(() => _api.PostAsync("/api/screen/stop")).Wait(1500); } catch { } }
         if (View is not null) { try { Task.Run(() => _api.PostAsync("/api/screen/view/leave")).Wait(1500); } catch { } }
@@ -402,6 +455,13 @@ public sealed partial class ScreenViewModel : ObservableObject
 
     /// <summary>The screen I'm watching (null: none).</summary>
     [ObservableProperty] private ScreenViewVm? _view;
+    partial void OnViewChanged(ScreenViewVm? oldValue, ScreenViewVm? newValue)
+    {
+        if (oldValue is not null) oldValue.PropertyChanged -= OnViewPropertyChanged;
+        if (newValue is not null) newValue.PropertyChanged += OnViewPropertyChanged;
+        SoundLoopCheck();
+    }
+    private void OnViewPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e) { if (e.PropertyName == nameof(ScreenViewVm.Hearing)) SoundLoopCheck(); }
     public ApiClient Api => _api;
 
     [RelayCommand]

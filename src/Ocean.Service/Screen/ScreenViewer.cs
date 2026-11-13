@@ -21,6 +21,9 @@ namespace Ocean.Service.Screen;
 ///   all. It is dropped again as soon as the packets keep up, so the delay stays at its lowest and nothing is ever
 ///   missing in the picture.
 /// One screen at a time.
+/// The sound, when the host shares it, comes as its own packets (each with the frame before it) and goes to the
+/// app as it arrives (<c>/api/screen/view/sound</c>), where it is put in order and played on time; frames still
+/// missing then are concealed, not waited for. Without packets it comes over the direct connection.
 /// </summary>
 public sealed class ScreenViewer : IDisposable
 {
@@ -58,6 +61,18 @@ public sealed class ScreenViewer : IDisposable
         public volatile bool Ended;
         public volatile bool DirectNow;
         public DateTime LastBeatOk = DateTime.UtcNow;
+        // sound (all under SoundGate)
+        public volatile bool Sound;
+        public readonly object SoundGate = new();
+        public readonly HashSet<uint> SoundSeen = new();
+        public long SoundNewest = -1;
+        /// <summary>The host's newest frame (its control packets), and since when this PC is more than half a second behind it.</summary>
+        public long HostSoundNewest = -1;
+        public DateTime SoundBehindSince = DateTime.MaxValue;
+        public DateTime LastUdpSound;
+        public Channel<ScreenSoundFrames.Frame>? SoundOut;
+        public int SoundPump;
+        public long SoundBytes;
     }
 
     private readonly PeerService _peers;
@@ -106,6 +121,7 @@ public sealed class ScreenViewer : IDisposable
             if (!resp.IsSuccessStatusCode) throw await PeerStatusException.FromAsync(resp);
             v.Join = await resp.Content.ReadFromJsonAsync<ScreenJoinDto>(Json.Options, ct) ?? throw new InvalidOperationException("Empty answer from the host.");
             v.Key = Convert.FromBase64String(v.Join.Key);
+            v.Sound = v.Join.Sound;
         }
         catch { v.Uni?.Dispose(); throw; }
 
@@ -176,8 +192,8 @@ public sealed class ScreenViewer : IDisposable
             }
             catch (Exception ex) { _log.LogDebug("screen: leave: {Msg}", ex.Message); }
         }
-        _log.LogInformation("screen: stopped watching {Host} ({Udp} by UDP, {Direct} directly, {Lost} lost, {Recovered} recovered)", v.HostName,
-            Format.Bytes(v.BytesUdp), Format.Bytes(v.BytesDirect), v.Lost, v.Recovered);
+        _log.LogInformation("screen: stopped watching {Host} ({Udp} by UDP, {Direct} directly, {Lost} lost, {Recovered} recovered{Sound})", v.HostName,
+            Format.Bytes(v.BytesUdp), Format.Bytes(v.BytesDirect), v.Lost, v.Recovered, v.SoundBytes > 0 ? $"; {Format.Bytes(v.SoundBytes)} of sound" : "");
         _events.Publish("screenView", new ScreenViewDto());
     }
 
@@ -193,14 +209,14 @@ public sealed class ScreenViewer : IDisposable
         Active = !v.Ended, PeerId = v.PeerId, SessionId = v.Sid, Title = v.Join.Title, HostName = v.HostName,
         Width = v.Join.Width, Height = v.Join.Height, Fps = v.Join.Fps, Viewers = v.Viewers, Ended = v.Ended,
         Mode = v.Next < 0 ? "connecting" : v.DirectNow ? "direct" : "udp",
-        BytesUdp = v.BytesUdp, BytesDirect = v.BytesDirect, Lost = v.Lost, Recovered = v.Recovered,
+        BytesUdp = v.BytesUdp, BytesDirect = v.BytesDirect, Lost = v.Lost, Recovered = v.Recovered, Sound = v.Sound,
     };
 
     /// <summary>Only when something the app shows changed (not the byte counters).</summary>
     private void Publish(View v, bool force = false)
     {
         var dto = ToDto(v);
-        var key = $"{dto.Mode}|{dto.Viewers}|{dto.Ended}";
+        var key = $"{dto.Mode}|{dto.Viewers}|{dto.Ended}|{dto.Sound}";
         if (!force && key == _lastPublished) return;
         _lastPublished = key;
         _events.Publish("screenView", dto);
@@ -382,6 +398,104 @@ public sealed class ScreenViewer : IDisposable
         catch (Exception ex) { _log.LogDebug("screen: direct stream: {Msg}", ex.Message); return "error"; }
     }
 
+    // ------------------------------------------------------------------ sound
+
+    /// <summary>A sound frame from either source: on to the app unless it came already (packets carry each frame twice).</summary>
+    private static void DeliverSound(View v, in ScreenSoundFrames.Frame f, bool udp)
+    {
+        lock (v.SoundGate)
+        {
+            if (udp) v.LastUdpSound = DateTime.UtcNow;
+            if (f.Seq + 300 < v.SoundNewest || !v.SoundSeen.Add(f.Seq)) return;
+            if (f.Seq > v.SoundNewest) v.SoundNewest = f.Seq;
+            if (v.SoundSeen.Count > 600) v.SoundSeen.RemoveWhere(x => x + 300 < v.SoundNewest);
+            v.SoundBytes += f.Data.Length;
+            v.SoundOut?.Writer.TryWrite(f);
+        }
+    }
+
+    /// <summary>
+    /// The sound for the app's player, as it arrives (the player puts it in order), until the app closes it or the
+    /// session ends. Silent while the host has the sound off. Without packets (none for 2 s, or the sound's packets
+    /// stay behind what the host says it sent) it comes over the direct connection, and goes back to packets as
+    /// soon as they arrive again.
+    /// </summary>
+    public async Task<bool> StreamSoundAsync(Func<IReadOnlyList<ScreenSoundFrames.Frame>, Task> write, CancellationToken ct)
+    {
+        View? v;
+        lock (_lock) v = _v;
+        if (v is null || v.Ended) return false;
+        // a player that falls behind loses the oldest frames, not the newest
+        var output = Channel.CreateBounded<ScreenSoundFrames.Frame>(new BoundedChannelOptions(256) { SingleReader = true, FullMode = BoundedChannelFullMode.DropOldest });
+        int pump;
+        lock (v.SoundGate) { v.SoundOut = output; pump = ++v.SoundPump; }
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, v.Cts.Token);
+        Task? direct = null;
+        CancellationTokenSource? directCts = null;
+        var directEnded = DateTime.MinValue;
+        var batch = new List<ScreenSoundFrames.Frame>();
+        try
+        {
+            while (!linked.IsCancellationRequested && v.SoundPump == pump && !v.Ended)
+            {
+                batch.Clear();
+                while (output.Reader.TryRead(out var f)) batch.Add(f);
+                if (batch.Count > 0) await write(batch);
+                var now = DateTime.UtcNow;
+                DateTime lastControl, lastUdp, behindSince;
+                lock (v.Gate) lastControl = v.LastControl;
+                lock (v.SoundGate) { lastUdp = v.LastUdpSound; behindSince = v.SoundBehindSince; }
+                var noPackets = now - lastControl > TimeSpan.FromSeconds(2);
+                var soundMissing = behindSince != DateTime.MaxValue && now - behindSince > TimeSpan.FromMilliseconds(500);
+                if (direct is { IsCompleted: true }) { direct = null; directCts?.Dispose(); directCts = null; directEnded = now; }
+                if (direct is null && v.Sound && (noPackets || soundMissing) && now - directEnded > TimeSpan.FromSeconds(1))
+                {
+                    long from;
+                    lock (v.SoundGate) from = v.SoundNewest;
+                    directCts = CancellationTokenSource.CreateLinkedTokenSource(linked.Token);
+                    direct = DirectSoundAsync(v, from, directCts.Token);
+                }
+                else if (direct is not null && (!v.Sound || (!noPackets && now - lastUdp < TimeSpan.FromMilliseconds(500))))
+                {
+                    directCts!.Cancel();
+                    try { await direct; } catch { }
+                    direct = null; directCts.Dispose(); directCts = null; directEnded = now;
+                }
+                if (batch.Count == 0)
+                {
+                    using var nap = CancellationTokenSource.CreateLinkedTokenSource(linked.Token);
+                    nap.CancelAfter(100);
+                    try { await output.Reader.WaitToReadAsync(nap.Token); } catch (OperationCanceledException) { }
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            directCts?.Cancel();
+            if (direct is not null) { try { await direct; } catch { } }
+            directCts?.Dispose();
+            lock (v.SoundGate) { if (v.SoundPump == pump) v.SoundOut = null; }
+        }
+        return true;
+    }
+
+    private async Task DirectSoundAsync(View v, long after, CancellationToken ct)
+    {
+        try
+        {
+            if (!_registry.TryGetOnline(v.PeerId, out var peer)) return;
+            var req = _client.Build(peer, HttpMethod.Get, $"/p/screen/{v.Sid}/sound?after={after}");
+            using var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+            if (!resp.IsSuccessStatusCode) return; // (an older host has no sound)
+            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+            var header = new byte[ScreenSoundFrames.HeaderSize];
+            while (await ScreenSoundFrames.ReadAsync(stream, header, ct) is { } f) DeliverSound(v, f, udp: false);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { _log.LogDebug("screen: direct sound: {Msg}", ex.Message); }
+    }
+
     // ------------------------------------------------------------------ packets
 
     private void ReceiveLoop(View v, Socket sock)
@@ -402,6 +516,12 @@ public sealed class ScreenViewer : IDisposable
                 if (from is IPEndPoint src && !Net.LocalNetworks.IsLan(src.Address)) continue; // local network only
                 if (!CastWire.TryParse(packet.AsSpan(0, n), out var session, out var type, out var seq, out var payload) || session != v.Id) continue;
                 if (TestDrop > 0 && type != CastWire.TypeControl && Random.Shared.Next(100) < TestDrop) continue;
+                if (type == ScreenWire.TypeSound)
+                {
+                    if (!CastWire.Open(aes, type, seq, payload, plain, out var slen)) continue;
+                    foreach (var f in ScreenWire.ReadSound(plain.AsSpan(0, slen))) DeliverSound(v, f, udp: true);
+                    continue;
+                }
                 lock (v.Recent) // two sockets may bring the same packet
                 {
                     if (v.Recent.ContainsKey(seq)) continue;
@@ -422,11 +542,19 @@ public sealed class ScreenViewer : IDisposable
                         if (v.PendingParity.Count > 0) TryParity(v, aes, plain, seq);
                         if (v.Recent.Count > 1024) foreach (var old in v.Recent.Keys.Where(k => k + 512 < seq).ToList()) v.Recent.Remove(old);
                     }
-                    else if (type == CastWire.TypeControl && ScreenWire.ReadControl(plain.AsSpan(0, len), out var head, out var viewers, out var ended))
+                    else if (type == CastWire.TypeControl && ScreenWire.ReadControl(plain.AsSpan(0, len), out var head, out var viewers, out var ended, out var sound, out var soundNewest))
                     {
                         v.Recent[seq] = Array.Empty<byte>();
                         lock (v.Gate) { v.Head = Math.Max(v.Head, head); v.LastControl = DateTime.UtcNow; }
                         v.Viewers = viewers;
+                        v.Sound = sound;
+                        lock (v.SoundGate)
+                        {
+                            v.HostSoundNewest = soundNewest;
+                            var behind = sound && soundNewest > v.SoundNewest + 25;
+                            if (!behind) v.SoundBehindSince = DateTime.MaxValue;
+                            else if (v.SoundBehindSince == DateTime.MaxValue) v.SoundBehindSince = DateTime.UtcNow;
+                        }
                         if (ended) { EndedByHost(v); return; }
                         Publish(v);
                     }
@@ -487,7 +615,7 @@ public sealed class ScreenViewer : IDisposable
                     {
                         var st = await resp.Content.ReadFromJsonAsync<ScreenStateDto>(Json.Options, cts.Token);
                         if (st is { Ended: true }) { EndedByHost(v); return; }
-                        if (st is not null) { v.Viewers = st.Viewers; v.LastBeatOk = DateTime.UtcNow; Publish(v); }
+                        if (st is not null) { v.Viewers = st.Viewers; v.Sound = st.Sound; v.LastBeatOk = DateTime.UtcNow; Publish(v); }
                         // the host answers but no packet has come for a while: join the group again (at most once a minute)
                         if (v.Multi is not null && DateTime.UtcNow - v.LastControl > TimeSpan.FromSeconds(20) && DateTime.UtcNow - v.LastListen > TimeSpan.FromMinutes(1))
                             Listen(v, "no packets for a while");

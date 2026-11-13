@@ -12,7 +12,22 @@
                 <TextBlock Text="{Binding SharingTitle}" FontWeight="SemiBold" Foreground="White" TextTrimming="CharacterEllipsis"/>
                 <TextBlock Text="{Binding SharingDetail}" FontSize="12" Foreground="#FBCFD6" TextTrimming="CharacterEllipsis"/>
             </StackPanel>
-            <Button Content="Stop sharing" Click="Stop_Click" Margin="14,0,0,0" Background="#E11D48" BorderBrush="#E11D48" Foreground="White" FontWeight="SemiBold" Cursor="Hand"/>
+            <!-- the PC's sound: shared or not (a click switches it at once, for everyone watching) -->
+            <Button Width="34" Height="30" Margin="14,0,0,0" FontSize="14" Command="{Binding ToggleSoundCommand}" ToolTip="{Binding SoundTip}" Cursor="Hand" AutomationProperties.Name="Share the sound">
+                <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource BtnIcon}">
+                        <Setter Property="Content" Value="&#xE767;"/>
+                        <Setter Property="Foreground" Value="White"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding SoundOn}" Value="False">
+                                <Setter Property="Content" Value="&#xE74F;"/>
+                                <Setter Property="Foreground" Value="#FB7185"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+            </Button>
+            <Button Content="Stop sharing" Click="Stop_Click" Margin="6,0,0,0" Background="#E11D48" BorderBrush="#E11D48" Foreground="White" FontWeight="SemiBold" Cursor="Hand"/>
         </StackPanel>
     </Border>
 </Window>

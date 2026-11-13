@@ -8,6 +8,32 @@ using System.Windows.Media.Imaging;
 namespace Ocean.App.Services;
 
 /// <summary>What the user picked to share. All sizes are in real screen pixels.</summary>
+/// <summary>Sharing choices remembered for next time (per Windows user): %LocalAppData%\Ocean\screen.json.</summary>
+public sealed class ScreenShareSettings
+{
+    /// <summary>Share the PC's sound with the picture.</summary>
+    public bool Sound { get; set; } = true;
+
+    private static string FilePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Ocean", "screen.json");
+
+    public static ScreenShareSettings Load()
+    {
+        try { if (File.Exists(FilePath) && System.Text.Json.JsonSerializer.Deserialize<ScreenShareSettings>(File.ReadAllText(FilePath)) is { } s) return s; }
+        catch (Exception ex) { AppLog.Warn("Screen", "screen.json can't be read", ex); }
+        return new ScreenShareSettings();
+    }
+
+    public void Save()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
+            File.WriteAllText(FilePath, System.Text.Json.JsonSerializer.Serialize(this, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (Exception ex) { AppLog.Warn("Screen", "screen.json can't be written", ex); }
+    }
+}
+
 public sealed class ScreenPick
 {
     public enum Kinds { Monitor, Window, Region }
@@ -26,6 +52,8 @@ public sealed class ScreenPick
     public string Title { get; init; } = "";
     /// <summary>Smooth: 30 pictures a second for video and motion; otherwise 15, which is plenty for work on a desktop.</summary>
     public bool Smooth { get; set; }
+    /// <summary>Sharing: what the PC plays goes with the picture (can be switched while sharing).</summary>
+    public bool Sound { get; set; }
 
     public int Fps => Smooth ? 30 : 15;
 

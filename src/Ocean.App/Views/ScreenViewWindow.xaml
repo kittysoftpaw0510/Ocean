@@ -8,6 +8,25 @@
         <Border x:Name="StatusBar" DockPanel.Dock="Bottom" Background="{StaticResource Bg1}" BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="12,6,8,6">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <!-- the host's sound here: on, off (M), or not shared at all -->
+                    <Button Width="30" Height="28" FontSize="13" Command="{Binding ToggleMuteCommand}" ToolTip="{Binding SoundTip}" AutomationProperties.Name="Sound on or off">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource BtnIcon}">
+                                <Setter Property="Content" Value="&#xE767;"/>
+                                <Setter Property="Foreground" Value="{StaticResource Text}"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Muted}" Value="True">
+                                        <Setter Property="Content" Value="&#xE74F;"/>
+                                        <Setter Property="Foreground" Value="#FB7185"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding Sound}" Value="False">
+                                        <Setter Property="Content" Value="&#xE74F;"/>
+                                        <Setter Property="Foreground" Value="{StaticResource TextDim}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
                     <Button Style="{StaticResource BtnIcon}" Width="30" Height="28" FontSize="13" Content="&#xE740;" Click="Full_Click" ToolTip="Full screen (F11, double-click; Esc to leave)" AutomationProperties.Name="Full screen"/>
                 </StackPanel>
                 <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,9,0" VerticalAlignment="Center">

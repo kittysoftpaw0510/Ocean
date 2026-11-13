@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using Ocean.Core.Protocol;
 
 namespace Ocean.Service.Screen;
 
@@ -98,28 +99,110 @@ public sealed class ScreenRing
     }
 }
 
-/// <summary>What screen packets add to the multicast's packet format (<see cref="Cast.CastWire"/>): their own port and control payload.</summary>
+/// <summary>
+/// What screen packets add to the multicast's packet format (<see cref="Cast.CastWire"/>): their own port, their
+/// control payload, and sound packets (a type older viewers don't know and pass over).
+/// </summary>
 public static class ScreenWire
 {
     public const int Port = 38474;
+    public const byte TypeSound = 4;
+    /// <summary>A sound packet carries the frame before it too, as long as both fit in this (no packet over one Ethernet frame).</summary>
+    private const int SoundRoom = 1300;
 
-    /// <summary>Control payload (plain): head offset (8) + viewers (4) + ended (1).</summary>
-    public static byte[] ControlPlain(long head, int viewers, bool ended)
+    /// <summary>
+    /// Control payload (plain): head offset (8) + viewers (4) + ended (1), then (older hosts leave these out) sound on
+    /// (1) + the newest sound frame's number (8, -1: none yet; a viewer far behind it gets the sound directly).
+    /// </summary>
+    public static byte[] ControlPlain(long head, int viewers, bool ended, bool sound, long soundNewest)
     {
-        var plain = new byte[13];
+        var plain = new byte[22];
         BinaryPrimitives.WriteInt64LittleEndian(plain, head);
         BinaryPrimitives.WriteInt32LittleEndian(plain.AsSpan(8), viewers);
         plain[12] = ended ? (byte)1 : (byte)0;
+        plain[13] = sound ? (byte)1 : (byte)0;
+        BinaryPrimitives.WriteInt64LittleEndian(plain.AsSpan(14), soundNewest);
         return plain;
     }
 
-    public static bool ReadControl(ReadOnlySpan<byte> plain, out long head, out int viewers, out bool ended)
+    public static bool ReadControl(ReadOnlySpan<byte> plain, out long head, out int viewers, out bool ended, out bool sound, out long soundNewest)
     {
-        head = 0; viewers = 0; ended = false;
+        head = 0; viewers = 0; ended = false; sound = false; soundNewest = -1;
         if (plain.Length < 13) return false;
         head = BinaryPrimitives.ReadInt64LittleEndian(plain);
         viewers = BinaryPrimitives.ReadInt32LittleEndian(plain[8..]);
         ended = plain[12] == 1;
+        if (plain.Length >= 22) { sound = plain[13] == 1; soundNewest = BinaryPrimitives.ReadInt64LittleEndian(plain[14..]); }
         return true;
     }
+
+    /// <summary>
+    /// Sound payload (plain): count (1), then per frame its number (4), host time µs (8), age (2), length (2) and Opus packet.
+    /// The newest frame first, then the one before it when it fits: a single lost packet costs nothing.
+    /// </summary>
+    public static byte[] SoundPlain(in ScreenSoundFrames.Frame now, ScreenSoundFrames.Frame? before)
+    {
+        var two = before is { } b && 1 + 2 * 16 + now.Data.Length + b.Data.Length <= SoundRoom;
+        var plain = new byte[1 + 16 + now.Data.Length + (two ? 16 + before!.Value.Data.Length : 0)];
+        plain[0] = (byte)(two ? 2 : 1);
+        var at = Put(plain, 1, now);
+        if (two) Put(plain, at, before!.Value);
+        return plain;
+    }
+
+    private static int Put(byte[] into, int at, in ScreenSoundFrames.Frame f)
+    {
+        BinaryPrimitives.WriteUInt32LittleEndian(into.AsSpan(at), f.Seq);
+        BinaryPrimitives.WriteInt64LittleEndian(into.AsSpan(at + 4), f.HostUs);
+        BinaryPrimitives.WriteUInt16LittleEndian(into.AsSpan(at + 12), f.Age);
+        BinaryPrimitives.WriteUInt16LittleEndian(into.AsSpan(at + 14), (ushort)f.Data.Length);
+        f.Data.CopyTo(into.AsSpan(at + 16));
+        return at + 16 + f.Data.Length;
+    }
+
+    public static List<ScreenSoundFrames.Frame> ReadSound(ReadOnlySpan<byte> plain)
+    {
+        var frames = new List<ScreenSoundFrames.Frame>(2);
+        if (plain.Length < 1) return frames;
+        var at = 1;
+        for (var i = 0; i < plain[0] && at + 16 <= plain.Length; i++)
+        {
+            var len = BinaryPrimitives.ReadUInt16LittleEndian(plain[(at + 14)..]);
+            if (at + 16 + len > plain.Length) break;
+            frames.Add(new ScreenSoundFrames.Frame(BinaryPrimitives.ReadUInt32LittleEndian(plain[at..]), BinaryPrimitives.ReadInt64LittleEndian(plain[(at + 4)..]),
+                BinaryPrimitives.ReadUInt16LittleEndian(plain[(at + 12)..]), plain.Slice(at + 16, len).ToArray()));
+            at += 16 + len;
+        }
+        return frames;
+    }
+}
+
+/// <summary>The last few seconds of a shared screen's sound, for viewers that get it over the direct connection.</summary>
+public sealed class ScreenSoundRing
+{
+    private const int Keep = 150; // 3 s
+    private readonly Queue<ScreenSoundFrames.Frame> _frames = new();
+    private readonly object _lock = new();
+    private TaskCompletionSource _more = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private bool _closed;
+
+    public bool Closed { get { lock (_lock) return _closed; } }
+    /// <summary>The newest frame's number (-1: none yet).</summary>
+    public long Newest { get { lock (_lock) return _frames.Count > 0 ? _frames.Last().Seq : -1; } }
+
+    public void Add(in ScreenSoundFrames.Frame f)
+    {
+        TaskCompletionSource wake;
+        lock (_lock)
+        {
+            _frames.Enqueue(f);
+            while (_frames.Count > Keep) _frames.Dequeue();
+            wake = _more; _more = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+        wake.TrySetResult();
+    }
+
+    public List<ScreenSoundFrames.Frame> After(long seq) { lock (_lock) return _frames.Where(f => f.Seq > seq).ToList(); }
+    public Task More() { lock (_lock) return _more.Task; }
+    public void Close() { TaskCompletionSource wake; lock (_lock) { _closed = true; wake = _more; } wake.TrySetResult(); }
 }

@@ -24,6 +24,8 @@ namespace Ocean.Service.Screen;
 /// One session per PC. A session for everyone is in my catalog; a session for invited PCs ends by itself once
 /// nobody is left who watches or may still answer. While nobody watches, the app is told not to capture at all.
 /// A session never outlives the app: without it (closed, crashed) the sharing ends within seconds.
+/// The computer's sound (Opus frames from the app, while the user has it on) goes the same ways: its own packets,
+/// each with the frame before it, and the direct connection (<c>/p/screen/{id}/sound</c>) for viewers without UDP.
 /// </summary>
 public sealed class ScreenHost : IDisposable
 {
@@ -56,8 +58,12 @@ public sealed class ScreenHost : IDisposable
         public string Title = "";
         public int Width, Height, Fps;
         public bool Everyone;
+        public volatile bool Sound;
         public DateTimeOffset StartedAt;
         public readonly ScreenRing Ring = new();
+        public readonly ScreenSoundRing SoundRing = new();
+        public ScreenSoundFrames.Frame? LastSound; // (under SendLock)
+        public long SoundSent;
         public readonly ConcurrentDictionary<string, Viewer> Viewers = new(StringComparer.Ordinal);
         public readonly ConcurrentDictionary<string, Invited> People = new(StringComparer.Ordinal);
         public readonly CancellationTokenSource Cts = new();
@@ -123,12 +129,12 @@ public sealed class ScreenHost : IDisposable
             {
                 Id = id, Sid = id.ToString("N"), Key = RandomNumberGenerator.GetBytes(32),
                 Title = Clean(req.Title), Width = req.Width, Height = req.Height, Fps = Math.Clamp(req.Fps, 1, 60),
-                Everyone = req.Everyone, StartedAt = DateTimeOffset.UtcNow,
+                Everyone = req.Everyone, Sound = req.Sound, StartedAt = DateTimeOffset.UtcNow,
             };
             s.Aes = new AesGcm(s.Key, 16);
             _s = s;
         }
-        _log.LogInformation("screen sharing started: {Title} ({W}x{H}, {Fps} fps) for {Who}", s.Title, s.Width, s.Height, s.Fps, s.Everyone ? "everyone" : "invited PCs");
+        _log.LogInformation("screen sharing started: {Title} ({W}x{H}, {Fps} fps{Sound}) for {Who}", s.Title, s.Width, s.Height, s.Fps, s.Sound ? ", with sound" : "", s.Everyone ? "everyone" : "invited PCs");
         if (s.Everyone) _catalog.NotifyCastChanged();
         foreach (var peerId in req.Invite.Distinct()) Invite(s, peerId);
         var st = Status();
@@ -214,14 +220,34 @@ public sealed class ScreenHost : IDisposable
 
     public void Stop() { Session? s; lock (_lock) s = _s; if (s is not null) End(s, "stopped"); }
 
+    /// <summary>The computer's sound on or off: viewers hear of it at once (a control packet) and on their next report.</summary>
+    public MyScreenDto SetSound(bool on)
+    {
+        Session? s;
+        lock (_lock) s = _s;
+        if (s is null) return new MyScreenDto { Error = "You are not sharing your screen." };
+        if (s.Sound != on)
+        {
+            s.Sound = on;
+            lock (s.SendLock) s.LastSound = null;
+            _log.LogInformation("screen sharing: sound {OnOff}", on ? "on" : "off");
+            SendControl(s);
+        }
+        var st = Status();
+        _events.Publish("myScreen", st);
+        return st;
+    }
+
     private void End(Session s, string why)
     {
         lock (_lock) { if (!ReferenceEquals(_s, s)) return; _s = null; }
         s.Ended = true;
-        _log.LogInformation("screen sharing ended ({Why}): {Title} after {Min:0.0} min, {Sent} sent", why, s.Title, (DateTimeOffset.UtcNow - s.StartedAt).TotalMinutes, Format.Bytes(s.Sent));
+        _log.LogInformation("screen sharing ended ({Why}): {Title} after {Min:0.0} min, {Sent} sent{Sound}", why, s.Title, (DateTimeOffset.UtcNow - s.StartedAt).TotalMinutes, Format.Bytes(s.Sent),
+            s.SoundSent > 0 ? $" (and {Format.Bytes(s.SoundSent)} of sound)" : "");
         // viewers: told by packets (a few times), by their next report and by the stream ending
         for (var i = 0; i < 3; i++) SendControl(s);
         s.Ring.Close();
+        s.SoundRing.Close();
         s.Cts.Cancel();
         // PCs still being asked: the question goes away
         foreach (var (peerId, person) in s.People)
@@ -266,7 +292,7 @@ public sealed class ScreenHost : IDisposable
         return new MyScreenDto
         {
             Active = true, SessionId = s.Sid, Title = s.Title, Everyone = s.Everyone, Width = s.Width, Height = s.Height, Fps = s.Fps,
-            Viewers = live.Count, People = people.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList(), StartedAt = s.StartedAt, Wanted = Wanted(s),
+            Viewers = live.Count, People = people.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList(), StartedAt = s.StartedAt, Wanted = Wanted(s), Sound = s.Sound,
         };
     }
 
@@ -364,6 +390,27 @@ public sealed class ScreenHost : IDisposable
         finally { s.FeedOn = false; s.MinStart = s.Ring.Head; }
     }
 
+    /// <summary>The sound (Opus frames, see <see cref="ScreenSoundFrames"/>), as it comes. Returns when the app stops sending or the session ends.</summary>
+    public async Task SoundFeedAsync(string sessionId, Stream body, CancellationToken ct)
+    {
+        Session? s;
+        lock (_lock) s = _s;
+        if (s is null || s.Sid != sessionId) throw new InvalidOperationException("No such screen session.");
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, s.Cts.Token);
+        var header = new byte[ScreenSoundFrames.HeaderSize];
+        try
+        {
+            while (await ScreenSoundFrames.ReadAsync(body, header, linked.Token) is { } f)
+            {
+                if (!s.Sound) continue; // switched off: whatever was still on its way stays here
+                s.SoundRing.Add(f);
+                SendSound(s, f);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (InvalidDataException) { }
+    }
+
     // ------------------------------------------------------------------ packets out
 
     private void OpenSockets(Session s)
@@ -442,13 +489,29 @@ public sealed class ScreenHost : IDisposable
 
     private void FlushGroup(Session s) => FlushGroupPackets(s, p => Emit(s, p));
 
+    /// <summary>A sound frame as one packet, with the frame before it (no parity: a lost packet is in the next one).</summary>
+    private void SendSound(Session s, ScreenSoundFrames.Frame f)
+    {
+        lock (s.SendLock)
+        {
+            if (s.Aes is not { } aes) return;
+            if (s.NetworkChanged) { s.NetworkChanged = false; OpenSockets(s); }
+            var before = s.LastSound is { } b && b.Seq + 1 == f.Seq ? b : (ScreenSoundFrames.Frame?)null;
+            var plain = ScreenWire.SoundPlain(f, before);
+            Emit(s, CastWire.Build(s.Id, ScreenWire.TypeSound, s.Seq, CastWire.Seal(aes, ScreenWire.TypeSound, s.Seq, plain)));
+            s.Seq++;
+            s.LastSound = f;
+            s.SoundSent += f.Data.Length;
+        }
+    }
+
     private void SendControl(Session s)
     {
         lock (s.SendLock)
         {
             if (s.Aes is not { } aes) return;
             if (s.NetworkChanged) { s.NetworkChanged = false; OpenSockets(s); }
-            var plain = ScreenWire.ControlPlain(s.Ring.Head, Live(s).Count, s.Ended);
+            var plain = ScreenWire.ControlPlain(s.Ring.Head, Live(s).Count, s.Ended, s.Sound, s.SoundRing.Newest);
             Emit(s, CastWire.Build(s.Id, CastWire.TypeControl, s.Seq, CastWire.Seal(aes, CastWire.TypeControl, s.Seq, plain)));
             s.Seq++;
         }
@@ -486,7 +549,7 @@ public sealed class ScreenHost : IDisposable
         return new ScreenJoinDto
         {
             SessionId = s.Sid, Title = s.Title, Width = s.Width, Height = s.Height, Fps = s.Fps, Key = Convert.ToBase64String(s.Key),
-            Group = s.Everyone ? CastWire.GroupAddress.ToString() : null, Port = ScreenWire.Port, Unicast = v.Udp is not null,
+            Group = s.Everyone ? CastWire.GroupAddress.ToString() : null, Port = ScreenWire.Port, Unicast = v.Udp is not null, Sound = s.Sound,
         };
     }
 
@@ -497,7 +560,7 @@ public sealed class ScreenHost : IDisposable
         var was = v.Direct;
         v.LastBeat = DateTimeOffset.UtcNow; v.Direct = beat.Direct; v.Last = beat;
         if (was != beat.Direct) _log.LogInformation("screen sharing: {Viewer} now gets it {How}", v.Name, beat.Direct ? "directly (no usable UDP)" : "by UDP");
-        return new ScreenStateDto { SessionId = sessionId, Viewers = Live(s).Count };
+        return new ScreenStateDto { SessionId = sessionId, Viewers = Live(s).Count, Sound = s.Sound };
     }
 
     public void Leave(string sessionId, string clientId)
@@ -554,6 +617,37 @@ public sealed class ScreenHost : IDisposable
                 await write(buffer.AsMemory(0, n));
                 from += n;
                 if (s.Viewers.TryGetValue(clientId, out var v)) v.LastBeat = DateTimeOffset.UtcNow;
+            }
+        }
+        catch (OperationCanceledException) { }
+        return true;
+    }
+
+    /// <summary>
+    /// The sound over the peer connection, from the frame after <paramref name="after"/> (-1: from about now), live,
+    /// until the caller goes or the session ends. For viewers that get no packets.
+    /// </summary>
+    public async Task<bool> StreamSoundAsync(string sessionId, string clientId, long after, Func<IReadOnlyList<ScreenSoundFrames.Frame>, Task> write, CancellationToken ct)
+    {
+        var s = Find(sessionId);
+        if (s is null) return false;
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, s.Cts.Token);
+        // from about now: the last 100 ms (the viewer drops what is too late to play)
+        var last = after >= 0 ? after : Math.Max(-1, s.SoundRing.Newest - 5);
+        try
+        {
+            while (!linked.IsCancellationRequested && !s.SoundRing.Closed)
+            {
+                var wait = s.SoundRing.More();
+                var frames = s.SoundRing.After(last);
+                if (frames.Count > 0)
+                {
+                    await write(frames);
+                    last = frames[^1].Seq;
+                    if (s.Viewers.TryGetValue(clientId, out var v)) v.LastBeat = DateTimeOffset.UtcNow;
+                    continue;
+                }
+                await Task.WhenAny(wait, Task.Delay(2000, linked.Token));
             }
         }
         catch (OperationCanceledException) { }

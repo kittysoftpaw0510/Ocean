@@ -80,11 +80,17 @@
                             <Run Text="Saved in "/><Run Text="{Binding Folder, Mode=OneWay}"/><Run Text="  (Settings › Screen recordings)"/>
                         </TextBlock>
                     </StackPanel>
-                    <StackPanel x:Name="ShareOptions" Orientation="Horizontal" ToolTip="30 pictures a second instead of 15: for video and animation. Uses about twice the network and processor; for documents, code and slides it makes no visible difference.">
-                        <!-- (the Switch style shows On/Off, not its content: the label is beside it) -->
-                        <CheckBox x:Name="Smooth" Style="{StaticResource Switch}" AutomationProperties.Name="Smooth motion"/>
-                        <TextBlock Text="Smooth motion (30 fps)" Margin="10,0,0,0" VerticalAlignment="Center" Cursor="Hand"
-                                   MouseLeftButtonUp="SmoothLabel_Click"/>
+                    <StackPanel x:Name="ShareOptions" Orientation="Horizontal">
+                        <!-- (the Switch style shows On/Off, not its content: the labels are beside them) -->
+                        <StackPanel Orientation="Horizontal" Background="Transparent" ToolTip="What your PC plays (videos, calls, games) goes with the picture. You can switch it off and on while sharing.">
+                            <CheckBox x:Name="Sound" Style="{StaticResource Switch}" AutomationProperties.Name="Share the sound"/>
+                            <TextBlock Text="Sound" Margin="10,0,24,0" VerticalAlignment="Center" Cursor="Hand" MouseLeftButtonUp="SoundLabel_Click"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Background="Transparent" ToolTip="30 pictures a second instead of 15: for video and animation. Uses about twice the network and processor; for documents, code and slides it makes no visible difference.">
+                            <CheckBox x:Name="Smooth" Style="{StaticResource Switch}" AutomationProperties.Name="Smooth motion"/>
+                            <TextBlock Text="Smooth motion (30 fps)" Margin="10,0,0,0" VerticalAlignment="Center" Cursor="Hand"
+                                       MouseLeftButtonUp="SmoothLabel_Click"/>
+                        </StackPanel>
                     </StackPanel>
                     <TextBlock x:Name="Chosen" Style="{StaticResource Dim}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
                 </StackPanel>

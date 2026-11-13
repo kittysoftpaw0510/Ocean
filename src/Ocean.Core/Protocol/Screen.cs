@@ -2,7 +2,8 @@ namespace Ocean.Core.Protocol;
 
 // Screen sharing (see Ocean.Service.Screen). A node shares one thing at a time (a monitor, a window or a part of a
 // monitor): with everyone (in its catalog, like a multicast) or only with the PCs it invited. The app captures and
-// encodes (the service cannot see the desktop); the service passes the H.264 stream on.
+// encodes (the service cannot see the desktop); the service passes the H.264 stream on. The computer's sound can
+// go with it (Opus, see ScreenSoundFrames); the sharer switches it on and off while sharing.
 
 /// <summary>A screen a node shares with everyone, in its catalog (<see cref="CatalogDto.Screen"/>). Older nodes ignore it.</summary>
 public sealed class ScreenInfoDto
@@ -32,6 +33,14 @@ public sealed class ScreenStartDto
     public string? AskId { get; set; }
     /// <summary>My offer ("may I show you my screen?") that was accepted: that PC is let in and told where to watch.</summary>
     public string? OfferAskId { get; set; }
+    /// <summary>What the computer plays goes with the picture (switched on and off while sharing: <see cref="ScreenSoundDto"/>).</summary>
+    public bool Sound { get; set; }
+}
+
+/// <summary>App → service: the computer's sound on or off while sharing.</summary>
+public sealed class ScreenSoundDto
+{
+    public bool On { get; set; }
 }
 
 public sealed class ScreenInviteDto
@@ -64,6 +73,8 @@ public sealed class MyScreenDto
     public DateTimeOffset StartedAt { get; set; }
     /// <summary>Somebody watches (or is about to): the app captures and encodes only then.</summary>
     public bool Wanted { get; set; }
+    /// <summary>The computer's sound is shared too.</summary>
+    public bool Sound { get; set; }
     /// <summary>Set on the event when the session has just ended: why.</summary>
     public string? Ended { get; set; }
     public string? Error { get; set; }
@@ -164,6 +175,8 @@ public sealed class ScreenJoinDto
     public int Port { get; set; }
     /// <summary>The host sends packets straight to the port this PC named.</summary>
     public bool Unicast { get; set; }
+    /// <summary>The host shares its sound right now (older hosts: never).</summary>
+    public bool Sound { get; set; }
 }
 
 public sealed class ScreenBeatDto
@@ -181,6 +194,7 @@ public sealed class ScreenStateDto
     public string SessionId { get; set; } = "";
     public bool Ended { get; set; }
     public int Viewers { get; set; }
+    public bool Sound { get; set; }
 }
 
 /// <summary>The screen I'm watching (viewer side), for my app.</summary>
@@ -202,4 +216,65 @@ public sealed class ScreenViewDto
     public long BytesDirect { get; set; }
     public int Lost { get; set; }
     public int Recovered { get; set; }
+    /// <summary>The host shares its sound right now: the app plays <c>/api/screen/view/sound</c>.</summary>
+    public bool Sound { get; set; }
+}
+
+/// <summary>
+/// The sound of a shared screen as it goes between app and service (the local API, both ways) and between services
+/// (the direct fallback): frames one after another, each a header of 16 bytes (Opus packet length u16, frame number
+/// u32, host time µs i64, age u16, little-endian) and the Opus packet. A frame is 20 ms of 48 kHz stereo; its host
+/// time is when its first sample was played on the sharing PC (that PC's performance counter), so the viewer can
+/// place it; its age (10 µs units) is how much later the sharing PC sent it, so the viewer can tell the time on the
+/// way (which it learns) from the time it took to make the frame (which only the sharing PC knows).
+/// </summary>
+public static class ScreenSoundFrames
+{
+    public const int Rate = 48000, Channels = 2, Samples = 960, Ms = 20;
+    public const int HeaderSize = 16;
+    /// <summary>The largest Opus packet passed on (a 20 ms frame is about 240 bytes at 96 kbps).</summary>
+    public const int MaxData = 1275;
+
+    public readonly record struct Frame(uint Seq, long HostUs, ushort Age, byte[] Data)
+    {
+        /// <summary>When the sharing PC sent it (its clock, µs).</summary>
+        public long SentUs => HostUs + Age * 10L;
+    }
+
+    public static byte[] Pack(in Frame f)
+    {
+        var b = new byte[HeaderSize + f.Data.Length];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(b, (ushort)f.Data.Length);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(b.AsSpan(2), f.Seq);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(b.AsSpan(6), f.HostUs);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(b.AsSpan(14), f.Age);
+        f.Data.CopyTo(b.AsSpan(HeaderSize));
+        return b;
+    }
+
+    /// <summary>The next frame; null at the end of the stream. Throws on a stream that is not frames.</summary>
+    public static async Task<Frame?> ReadAsync(Stream s, byte[] header, CancellationToken ct)
+    {
+        if (!await Fill(s, header.AsMemory(0, HeaderSize), ct)) return null;
+        var len = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(header);
+        if (len > MaxData) throw new InvalidDataException("not a sound frame");
+        var seq = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(2));
+        var us = System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(header.AsSpan(6));
+        var age = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(header.AsSpan(14));
+        var data = new byte[len];
+        if (len > 0 && !await Fill(s, data, ct)) return null;
+        return new Frame(seq, us, age, data);
+    }
+
+    private static async Task<bool> Fill(Stream s, Memory<byte> into, CancellationToken ct)
+    {
+        var got = 0;
+        while (got < into.Length)
+        {
+            var n = await s.ReadAsync(into[got..], ct);
+            if (n <= 0) return false;
+            got += n;
+        }
+        return true;
+    }
 }
