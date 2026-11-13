@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using Ocean.App.Services;
 using Ocean.App.ViewModels;
@@ -182,9 +183,42 @@ public partial class RecordBarWindow : Window
         };
         SizeChanged += (_, e) => { if (e.WidthChanged && IsLoaded && e.PreviousSize.Width > 0) Left -= (e.NewSize.Width - e.PreviousSize.Width) / 2; };
         MouseLeftButtonDown += (_, e) => { if (e.ButtonState == MouseButtonState.Pressed) { try { DragMove(); } catch (InvalidOperationException) { } } };
+
+        // small until the mouse comes: then it opens (a little, smoothly) to the size, the sound and the controls,
+        // and folds back a moment after the mouse leaves
+        _fold.Tick += (_, _) => { _fold.Stop(); if (!IsMouseOver) Open(false); };
+        Pill.MouseEnter += (_, _) => { _fold.Stop(); Open(true); };
+        Pill.MouseLeave += (_, _) => { _fold.Stop(); _fold.Start(); };
+
+        // the dot breathes while recording, and stands still while paused
+        _breath = new DoubleAnimation(1, 0.3, TimeSpan.FromSeconds(0.9)) { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut } };
+        Timeline.SetDesiredFrameRate(_breath, 20);
+        Loaded += (_, _) => Breathe();
+        vm.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(RecordViewModel.Paused) or nameof(RecordViewModel.Saving)) Breathe(); };
     }
 
-    public void CloseForGood() { _closing = true; _allDesktops.Dispose(); Close(); }
+    private readonly System.Windows.Threading.DispatcherTimer _fold = new() { Interval = TimeSpan.FromMilliseconds(700) };
+    private readonly DoubleAnimation _breath;
+    private bool _open;
+
+    private void Breathe()
+    {
+        var vm = (RecordViewModel)DataContext;
+        if (vm.Paused || vm.Saving) { Dot.BeginAnimation(OpacityProperty, null); Dot.Opacity = 1; }
+        else Dot.BeginAnimation(OpacityProperty, _breath);
+    }
+
+    private void Open(bool open)
+    {
+        if (_open == open) return;
+        _open = open;
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var time = TimeSpan.FromMilliseconds(open ? 200 : 160);
+        More.BeginAnimation(MaxWidthProperty, new DoubleAnimation(open ? 420 : 0, time) { EasingFunction = ease });
+        More.BeginAnimation(OpacityProperty, new DoubleAnimation(open ? 1 : 0, time));
+    }
+
+    public void CloseForGood() { _closing = true; _fold.Stop(); _allDesktops.Dispose(); Close(); }
 
     protected override void OnClosing(CancelEventArgs e)
     {

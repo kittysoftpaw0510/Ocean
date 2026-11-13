@@ -3,11 +3,19 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Ocean: recording your screen" SizeToContent="WidthAndHeight" WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" ShowActivated="False" WindowStartupLocation="Manual" FontFamily="{StaticResource UiFont}" Foreground="White">
-    <!-- "Recording" (DataContext: RecordViewModel). Kept out of every capture, so it is never in the recording itself. -->
-    <Border Background="#F21A0F14" BorderBrush="#E11D48" BorderThickness="1.5" CornerRadius="9" Padding="12,6,6,6" Margin="6" Cursor="SizeAll">
-        <Border.Effect><DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.5"/></Border.Effect>
-        <StackPanel Orientation="Horizontal">
-            <Ellipse x:Name="Dot" Width="10" Height="10" VerticalAlignment="Center" Margin="0,0,9,0">
+    <!-- "Recording" (DataContext: RecordViewModel): a small pill (a breathing dot and the time) that opens a little under the
+         mouse to show the size, the sound and the controls. Kept out of every capture: it is never in the recording. -->
+    <Border x:Name="Pill" Background="#EB17121A" BorderThickness="1" CornerRadius="13" Padding="10,0,6,0" Height="28" Margin="6" Cursor="SizeAll">
+        <Border.Style>
+            <Style TargetType="Border">
+                <Setter Property="BorderBrush" Value="#99F43F5E"/>
+                <Style.Triggers><DataTrigger Binding="{Binding Paused}" Value="True"><Setter Property="BorderBrush" Value="#99FBBF24"/></DataTrigger></Style.Triggers>
+            </Style>
+        </Border.Style>
+        <Border.Effect><DropShadowEffect BlurRadius="10" ShadowDepth="1" Opacity="0.45"/></Border.Effect>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+            <!-- always: the dot and the time (PAUSED / SAVING… when so) -->
+            <Ellipse x:Name="Dot" Width="8" Height="8" VerticalAlignment="Center" Margin="0,0,7,0">
                 <Ellipse.Style>
                     <Style TargetType="Ellipse">
                         <Setter Property="Fill" Value="#FB7185"/>
@@ -15,58 +23,66 @@
                     </Style>
                 </Ellipse.Style>
             </Ellipse>
-            <TextBlock Text="{Binding StatusText}" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,10,0">
+            <TextBlock Text="{Binding ElapsedText}" FontFamily="Consolas" FontSize="12.5" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center"/>
+            <TextBlock FontSize="10" FontWeight="Bold" VerticalAlignment="Center" Margin="7,1,0,0">
                 <TextBlock.Style>
                     <Style TargetType="TextBlock">
-                        <Setter Property="Foreground" Value="#FB7185"/>
-                        <Style.Triggers><DataTrigger Binding="{Binding Paused}" Value="True"><Setter Property="Foreground" Value="#FBBF24"/></DataTrigger></Style.Triggers>
+                        <Setter Property="Visibility" Value="Collapsed"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Paused}" Value="True"><Setter Property="Visibility" Value="Visible"/><Setter Property="Text" Value="PAUSED"/><Setter Property="Foreground" Value="#FBBF24"/></DataTrigger>
+                            <DataTrigger Binding="{Binding Saving}" Value="True"><Setter Property="Visibility" Value="Visible"/><Setter Property="Text" Value="SAVING…"/><Setter Property="Foreground" Value="#FDA4AF"/></DataTrigger>
+                        </Style.Triggers>
                     </Style>
                 </TextBlock.Style>
             </TextBlock>
-            <TextBlock Text="{Binding ElapsedText}" FontFamily="Consolas" FontSize="14" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center" MinWidth="44"/>
-            <TextBlock VerticalAlignment="Center" Margin="10,0,0,0" FontSize="12" Foreground="#FBCFD6">
-                <Run Text="{Binding SizeText, Mode=OneWay}"/><Run Text="  ·  "/><Run Text="{Binding SoundText, Mode=OneWay}"/>
-            </TextBlock>
-            <!-- the microphone: mute and unmute while recording -->
-            <Button Width="32" Height="28" Margin="12,0,0,0" Command="{Binding ToggleMicCommand}" ToolTip="{Binding MicTip}" Cursor="Hand"
-                    Visibility="{Binding HasMic, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Mute the microphone">
-                <Button.Style>
-                    <Style TargetType="Button" BasedOn="{StaticResource BtnIcon}">
-                        <Setter Property="Content" Value="&#xE720;"/>
-                        <Setter Property="Foreground" Value="White"/>
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding MicMuted}" Value="True">
-                                <Setter Property="Content" Value="&#xF781;"/>
-                                <Setter Property="Foreground" Value="#FB7185"/>
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </Button.Style>
-            </Button>
-            <!-- pause / go on -->
-            <Button Width="32" Height="28" Margin="4,0,0,0" Command="{Binding TogglePauseCommand}" ToolTip="{Binding PauseTip}" Cursor="Hand" AutomationProperties.Name="Pause or go on recording">
-                <Button.Style>
-                    <Style TargetType="Button" BasedOn="{StaticResource BtnIcon}">
-                        <Setter Property="Content" Value="&#xE769;"/>
-                        <Setter Property="Foreground" Value="White"/>
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding Paused}" Value="True">
-                                <Setter Property="Content" Value="&#xE768;"/>
-                                <Setter Property="Foreground" Value="#FBBF24"/>
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </Button.Style>
-            </Button>
-            <Button Style="{StaticResource BtnIcon}" Width="32" Height="28" Margin="2,0,0,0" Command="{Binding DiscardCommand}" Content="&#xE74D;" Foreground="#FBCFD6"
-                    ToolTip="Discard: stop and throw this recording away (asks first)" Cursor="Hand" AutomationProperties.Name="Discard the recording"/>
-            <Button Margin="8,0,0,0" Command="{Binding StopCommand}" Background="#E11D48" BorderBrush="#E11D48" Foreground="White" FontWeight="SemiBold" Cursor="Hand"
-                    AutomationProperties.Name="Stop recording">
-                <StackPanel Orientation="Horizontal">
-                    <Border Width="10" Height="10" Background="White" CornerRadius="2" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                    <TextBlock Text="Stop" VerticalAlignment="Center"/>
-                </StackPanel>
-            </Button>
+
+            <!-- under the mouse: the size, the sound, and the controls -->
+            <StackPanel x:Name="More" Orientation="Horizontal" VerticalAlignment="Center" MaxWidth="0" Opacity="0" ClipToBounds="True">
+                <Border Width="1" Height="14" Background="#40FFFFFF" Margin="10,0,8,0" VerticalAlignment="Center"/>
+                <TextBlock VerticalAlignment="Center" FontSize="11" Foreground="#FBCFD6" Margin="0,0,6,0">
+                    <Run Text="{Binding SizeText, Mode=OneWay}"/><Run Text="  ·  "/><Run Text="{Binding SoundText, Mode=OneWay}"/>
+                </TextBlock>
+                <!-- the microphone: mute and unmute while recording -->
+                <Button Width="26" Height="22" FontSize="11" Command="{Binding ToggleMicCommand}" ToolTip="{Binding MicTip}" Cursor="Hand"
+                        Visibility="{Binding HasMic, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Mute the microphone">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource BtnIcon}">
+                            <Setter Property="Content" Value="&#xE720;"/>
+                            <Setter Property="Foreground" Value="White"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding MicMuted}" Value="True">
+                                    <Setter Property="Content" Value="&#xF781;"/>
+                                    <Setter Property="Foreground" Value="#FB7185"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <!-- pause / go on -->
+                <Button Width="26" Height="22" FontSize="11" Command="{Binding TogglePauseCommand}" ToolTip="{Binding PauseTip}" Cursor="Hand" AutomationProperties.Name="Pause or go on recording">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource BtnIcon}">
+                            <Setter Property="Content" Value="&#xE769;"/>
+                            <Setter Property="Foreground" Value="White"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Paused}" Value="True">
+                                    <Setter Property="Content" Value="&#xE768;"/>
+                                    <Setter Property="Foreground" Value="#FBBF24"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button Style="{StaticResource BtnIcon}" Width="26" Height="22" FontSize="11" Command="{Binding DiscardCommand}" Content="&#xE74D;" Foreground="#FBCFD6"
+                        ToolTip="Discard: stop and throw this recording away (asks first)" Cursor="Hand" AutomationProperties.Name="Discard the recording"/>
+                <Button Margin="4,0,0,0" Height="20" Padding="8,0" Command="{Binding StopCommand}" Background="#E11D48" BorderBrush="#E11D48" Foreground="White"
+                        FontSize="11" FontWeight="SemiBold" Cursor="Hand" ToolTip="Stop and save" AutomationProperties.Name="Stop recording">
+                    <StackPanel Orientation="Horizontal">
+                        <Border Width="7" Height="7" Background="White" CornerRadius="1.5" Margin="0,0,5,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="Stop" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
         </StackPanel>
     </Border>
 </Window>
