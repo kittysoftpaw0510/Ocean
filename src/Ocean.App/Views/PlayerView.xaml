@@ -95,7 +95,7 @@
                         </Button.Style>
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="&#xE8BD;" Style="{StaticResource Icon}" FontSize="15" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" VerticalAlignment="Center"/>
-                            <TextBlock Text="{Binding NotesButtonText}" FontSize="13" Margin="6,0,0,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding NotesButtonText}" FontFamily="{StaticResource UiFont}" FontSize="13" Margin="6,0,0,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
                     <Button Style="{StaticResource LikeBtn}" Content="&#xE8E1;" ToolTip="{Binding LikeTip}" Command="{Binding VoteUpCommand}" Visibility="{Binding CanVote, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Like"/>

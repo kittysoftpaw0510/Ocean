@@ -175,13 +175,13 @@
                                             <Button Style="{StaticResource LikeBtn}" Height="26" Width="Auto" Padding="6,0" Click="Up_Click" ToolTip="{Binding UpTip}" IsEnabled="{Binding CanVote}" AutomationProperties.Name="Useful">
                                                 <StackPanel Orientation="Horizontal">
                                                     <TextBlock Text="&#xE8E1;" Style="{StaticResource Icon}" FontSize="12" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" VerticalAlignment="Center"/>
-                                                    <TextBlock Text="{Binding Up}" FontSize="12" Margin="5,0,0,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" VerticalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding Up}" FontFamily="{StaticResource UiFont}" FontSize="12" Margin="5,0,0,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" VerticalAlignment="Center"/>
                                                 </StackPanel>
                                             </Button>
                                             <Button Style="{StaticResource DislikeBtn}" Height="26" Width="Auto" Padding="6,0" Margin="4,0,0,0" Click="Down_Click" ToolTip="{Binding DownTip}" IsEnabled="{Binding CanVote}" AutomationProperties.Name="Not useful">
                                                 <StackPanel Orientation="Horizontal">
                                                     <TextBlock Text="&#xE8E0;" Style="{StaticResource Icon}" FontSize="12" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" VerticalAlignment="Center"/>
-                                                    <TextBlock Text="{Binding Down}" FontSize="12" Margin="5,0,0,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" VerticalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding Down}" FontFamily="{StaticResource UiFont}" FontSize="12" Margin="5,0,0,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" VerticalAlignment="Center"/>
                                                 </StackPanel>
                                             </Button>
                                         </StackPanel>
