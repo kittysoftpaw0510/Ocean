@@ -206,6 +206,69 @@ public static class LocalApi
         });
         g.MapPost("/cast/leave", async (CastReceiver rx) => { await rx.LeaveAsync(); return Results.Ok(); });
 
+        // ---- screen sharing: mine (host) ----
+        g.MapGet("/screen", (Ocean.Service.Screen.ScreenHost screen) => Results.Json(screen.Status(), Json.Options));
+        g.MapPost("/screen/start", async (HttpContext ctx, Ocean.Service.Screen.ScreenHost screen, Ocean.Service.Screen.ScreenAsks asks) =>
+        {
+            var req = await ctx.Request.ReadFromJsonAsync<ScreenStartDto>(Json.Options, ctx.RequestAborted);
+            if (req is null) return Results.BadRequest();
+            if (req.AskId is not null && asks.Prompt(req.AskId) is null)
+                return Results.Json(new MyScreenDto { Error = "That request is over (it waited too long or was taken back)." }, Json.Options);
+            var st = screen.Start(req);
+            if (st.Error is null && req.AskId is not null) { asks.Granted(req.AskId); st = screen.Status(); }
+            return Results.Json(st, Json.Options);
+        });
+        g.MapPost("/screen/invite", async (HttpContext ctx, Ocean.Service.Screen.ScreenHost screen) =>
+        {
+            var req = await ctx.Request.ReadFromJsonAsync<ScreenInviteDto>(Json.Options, ctx.RequestAborted);
+            return req is null ? Results.BadRequest() : Results.Json(screen.InviteMore(req.PeerIds), Json.Options);
+        });
+        g.MapPost("/screen/stop", (Ocean.Service.Screen.ScreenHost screen) => { screen.Stop(); return Results.Ok(); });
+        // the encoder's output (H.264), as long as the app captures
+        g.MapPost("/screen/feed/{sessionId}", async (HttpContext ctx, string sessionId, Ocean.Service.Screen.ScreenHost screen) =>
+        {
+            if (ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } size) size.MaxRequestBodySize = null;
+            if (ctx.Features.Get<Microsoft.AspNetCore.Server.Kestrel.Core.Features.IHttpMinRequestBodyDataRateFeature>() is { } rate) rate.MinDataRate = null;
+            try { await screen.FeedAsync(sessionId, ctx.Request.Body, ctx.RequestAborted); return Results.Ok(); }
+            catch (InvalidOperationException) { return Results.NotFound(); }
+            catch (IOException) { return Results.Ok(); } // the encoder stopped
+        });
+        // ---- screen sharing: questions (see ScreenAsks) ----
+        g.MapPost("/screen/ask/{peerId}", async (string peerId, HttpContext ctx, Ocean.Service.Screen.ScreenAsks asks) =>
+            Results.Json(await asks.RequestAsync(peerId, ctx.RequestAborted), Json.Options));
+        g.MapDelete("/screen/ask/{askId}", (string askId, Ocean.Service.Screen.ScreenAsks asks) => { asks.CancelRequest(askId); return Results.Ok(); });
+        g.MapGet("/screen/prompts", (Ocean.Service.Screen.ScreenAsks asks) => Results.Json(asks.Prompts(), Json.Options));
+        g.MapPost("/screen/prompts/{askId}", async (string askId, HttpContext ctx, Ocean.Service.Screen.ScreenAsks asks) =>
+        {
+            var answer = await ctx.Request.ReadFromJsonAsync<ScreenPromptAnswerDto>(Json.Options, ctx.RequestAborted);
+            return answer is null ? Results.BadRequest() : Results.Json(new { result = asks.Answer(askId, answer) }, Json.Options);
+        });
+        g.MapGet("/screen/muted", (Ocean.Service.Screen.ScreenAsks asks) => Results.Json(asks.Muted(), Json.Options));
+        g.MapDelete("/screen/muted/{peerId}", (string peerId, Ocean.Service.Screen.ScreenAsks asks) => { asks.Mute(peerId, false); return Results.Ok(); });
+        // ---- screen sharing: the one I'm watching (viewer) ----
+        g.MapGet("/screen/view", (Ocean.Service.Screen.ScreenViewer viewer) => Results.Json(viewer.Status(), Json.Options));
+        g.MapPost("/peers/{peerId}/screen/{sessionId}/join", async (string peerId, string sessionId, HttpContext ctx, Ocean.Service.Screen.ScreenViewer viewer) =>
+        {
+            try { return Results.Json(await viewer.JoinAsync(peerId, sessionId, ctx.RequestAborted), Json.Options); }
+            catch (Exception ex) when (ex is PeerUnavailableException or HttpRequestException or InvalidOperationException or PeerStatusException or FormatException)
+            { return Results.Json(new ErrorDto { Error = "screen", Message = ex.Message }, Json.Options, statusCode: 409); }
+        });
+        g.MapPost("/screen/view/leave", async (Ocean.Service.Screen.ScreenViewer viewer) => { await viewer.LeaveAsync(); return Results.Ok(); });
+        // the stream for the app's decoder: H.264 from the latest key picture on
+        g.MapGet("/screen/view/stream", async (HttpContext ctx, Ocean.Service.Screen.ScreenViewer viewer) =>
+        {
+            if (!viewer.Active) { ctx.Response.StatusCode = 404; return; }
+            ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>()?.DisableBuffering();
+            if (ctx.Features.Get<Microsoft.AspNetCore.Server.Kestrel.Core.Features.IHttpMinResponseDataRateFeature>() is { } rate) rate.MinDataRate = null;
+            ctx.Response.ContentType = "video/h264";
+            ctx.Response.Headers.CacheControl = "no-store";
+            try
+            {
+                await viewer.StreamAsync(async bytes => { await ctx.Response.Body.WriteAsync(bytes, ctx.RequestAborted); await ctx.Response.Body.FlushAsync(ctx.RequestAborted); }, ctx.RequestAborted);
+            }
+            catch (Exception ex) when (ex is IOException or OperationCanceledException) { }
+        });
+
         // lighter copy of another node's video: how it is doing, or (POST) ask the owner to make one
         g.MapMethods("/peers/{peerId}/light/{itemId}", new[] { "GET", "POST" }, async (string peerId, string itemId, HttpContext ctx, PeerService peers) =>
             Results.Json(await peers.LightAsync(peerId, itemId, HttpMethods.IsPost(ctx.Request.Method), ctx.RequestAborted), Json.Options));

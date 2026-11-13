@@ -325,6 +325,8 @@ public sealed class Updater : BackgroundService
         {
             if (_services.GetService<Cast.CastHost>()?.Status().Active == true) return "a multicast you are hosting";
             if (_services.GetService<Cast.CastReceiver>()?.Status() is { Active: true }) return "a multicast being watched";
+            if (_services.GetService<Screen.ScreenHost>()?.Active == true) return "your screen being shared";
+            if (_services.GetService<Screen.ScreenViewer>()?.Active == true) return "a shared screen being watched";
             if (_services.GetService<Peers.StreamCache>()?.InUse == true) return "a video being watched";
             if (_services.GetService<Cast.ViewerTracker>()?.Counts().Values.Sum() > 0) return "others watching your videos";
             if (_services.GetService<Downloads.DownloadManager>()?.List().Any(j => j.Status == DownloadStatus.Running) == true) return "downloads";

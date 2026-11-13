@@ -44,6 +44,23 @@
             <MenuItem Header="Node info…" Command="{Binding PlacementTarget.Tag.ShowPeerInfoCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}">
                 <MenuItem.Icon><TextBlock Text="&#xE946;" Style="{StaticResource Icon}" FontSize="12"/></MenuItem.Icon>
             </MenuItem>
+            <Separator Visibility="{Binding Online, Converter={StaticResource BoolToVis}}"/>
+            <!-- screens: watch what it shares with everyone, ask to see its screen, show it mine -->
+            <MenuItem Header="Watch their screen" Command="{Binding PlacementTarget.Tag.Screen.WatchCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"
+                      Visibility="{Binding IsSharingScreen, Converter={StaticResource BoolToVis}}" ToolTip="{Binding ScreenText}">
+                <MenuItem.Icon><TextBlock Text="&#xE7F4;" Style="{StaticResource Icon}" FontSize="12" Foreground="#FB7185"/></MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="Ask to see their screen" Command="{Binding PlacementTarget.Tag.Screen.AskCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"
+                      Visibility="{Binding CanAskScreen, Converter={StaticResource BoolToVis}}" ToolTip="They are asked; if they allow it, they choose what you see">
+                <MenuItem.Icon><TextBlock Text="&#xE7F4;" Style="{StaticResource Icon}" FontSize="12"/></MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="Show them my screen…" Command="{Binding PlacementTarget.Tag.Screen.ShowToCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"
+                      Visibility="{Binding Online, Converter={StaticResource BoolToVis}}" ToolTip="You pick what they see; they are asked whether they want to watch">
+                <MenuItem.Icon><TextBlock Text="&#xE8AF;" Style="{StaticResource Icon}" FontSize="12"/></MenuItem.Icon>
+            </MenuItem>
+            <MenuItem Header="Allow their screen requests again" Command="{Binding PlacementTarget.Tag.Screen.UnmuteCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"
+                      Visibility="{Binding ScreenMuted, Converter={StaticResource BoolToVis}}"/>
+            <Separator Visibility="{Binding Online, Converter={StaticResource BoolToVis}}"/>
             <MenuItem Header="Refresh" Command="{Binding PlacementTarget.Tag.RefreshNetworkCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                       Visibility="{Binding Online, Converter={StaticResource BoolToVis}}"/>
             <MenuItem Header="Remove from the list" Command="{Binding PlacementTarget.Tag.RemovePeerCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"
@@ -162,6 +179,14 @@
                                             Visibility="{Binding IsLive, Converter={StaticResource BoolToVis}}" ToolTip="{Binding LiveText}">
                                         <TextBlock Text="LIVE" FontSize="10" FontWeight="Bold" Foreground="White"/>
                                     </Border>
+                                    <!-- sharing its screen with everyone right now -->
+                                    <Border Grid.Column="2" Background="#E11D48" CornerRadius="4" Padding="4,1,5,1" Margin="0,0,4,0" VerticalAlignment="Center"
+                                            Visibility="{Binding ShowScreenBadge, Converter={StaticResource BoolToVis}}" ToolTip="{Binding ScreenText}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="&#xE7F4;" Style="{StaticResource Icon}" FontSize="10" Foreground="White" Margin="0,1,4,0" VerticalAlignment="Center"/>
+                                            <TextBlock Text="LIVE" FontSize="10" FontWeight="Bold" Foreground="White"/>
+                                        </StackPanel>
+                                    </Border>
                                     <!-- a multicast scheduled to start later -->
                                     <Border Grid.Column="2" BorderBrush="#E11D48" BorderThickness="1.5" Background="#26E11D48" CornerRadius="4" Padding="4,0,5,1" Margin="0,0,4,0" VerticalAlignment="Center"
                                             Visibility="{Binding IsScheduled, Converter={StaticResource BoolToVis}}" ToolTip="{Binding PlanText}">
@@ -200,6 +225,21 @@
 
                 <!-- library -->
                 <StackPanel Grid.Row="4" Margin="0,6,0,6">
+                    <!-- my screen: share it with everyone, or stop -->
+                    <Button Style="{StaticResource NavBtn}" Command="{Binding Screen.ShareWithEveryoneCommand}" Visibility="{Binding Screen.IsSharing, Converter={StaticResource InvBoolToVis}}"
+                            ToolTip="Everyone on your network can watch your screen (a whole screen, one window or a part of it) until you stop. To show it to one person only, right-click them in the list.">
+                        <DockPanel>
+                            <TextBlock Text="&#xE8AF;" Style="{StaticResource Icon}" Width="24" HorizontalAlignment="Left"/>
+                            <TextBlock Text="Share my screen" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                        </DockPanel>
+                    </Button>
+                    <Button Style="{StaticResource NavBtn}" Command="{Binding Screen.StopCommand}" Visibility="{Binding Screen.IsSharing, Converter={StaticResource BoolToVis}}"
+                            ToolTip="{Binding Screen.SharingDetail}">
+                        <DockPanel>
+                            <Ellipse DockPanel.Dock="Left" Width="10" Height="10" Fill="#FB7185" Margin="5,0,9,0" VerticalAlignment="Center"/>
+                            <TextBlock Text="Stop sharing my screen" Foreground="#FB7185" FontWeight="SemiBold"/>
+                        </DockPanel>
+                    </Button>
                     <TextBlock Text="LIBRARY" Style="{StaticResource Dim}" FontWeight="SemiBold" Margin="18,6,14,4"/>
                     <Button Command="{Binding ShowSharesCommand}">
                         <Button.Style>

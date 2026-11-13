@@ -1,0 +1,50 @@
+<Window x:Class="Ocean.App.Views.ScreenViewWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Screen" Width="960" Height="620" MinWidth="360" MinHeight="260" WindowStartupLocation="CenterScreen"
+        Background="Black" Foreground="{StaticResource Text}" FontFamily="{StaticResource UiFont}">
+    <!-- A shared screen (DataContext: ScreenViewVm). View only: nothing typed or clicked here reaches the other PC. -->
+    <DockPanel>
+        <Border x:Name="StatusBar" DockPanel.Dock="Bottom" Background="{StaticResource Bg1}" BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="12,6,8,6">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Style="{StaticResource BtnIcon}" Width="30" Height="28" FontSize="13" Content="&#xE740;" Click="Full_Click" ToolTip="Full screen (F11, double-click; Esc to leave)" AutomationProperties.Name="Full screen"/>
+                </StackPanel>
+                <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,9,0" VerticalAlignment="Center">
+                    <Ellipse.Style>
+                        <Style TargetType="Ellipse">
+                            <Setter Property="Fill" Value="#FB7185"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasPicture}" Value="False"><Setter Property="Fill" Value="{StaticResource Warn}"/></DataTrigger>
+                                <DataTrigger Binding="{Binding Ended}" Value="True"><Setter Property="Fill" Value="{StaticResource TextDim}"/></DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Ellipse.Style>
+                </Ellipse>
+                <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding StatusTip}">
+                    <Run Text="{Binding StatusText, Mode=OneWay}" FontWeight="SemiBold"/><Run Text="   "/><Run Text="{Binding WindowTitle, Mode=OneWay}" Foreground="{StaticResource TextMuted}"/><Run Text="   "/><Run Text="{Binding ViewersText, Mode=OneWay}" Foreground="{StaticResource TextDim}"/>
+                </TextBlock>
+            </DockPanel>
+        </Border>
+        <Grid>
+            <Image x:Name="Picture" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True"/>
+            <!-- before the first picture -->
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding HasPicture, Converter={StaticResource InvBoolToVis}}">
+                <TextBlock Text="&#xE7F4;" Style="{StaticResource Icon}" FontSize="40" Foreground="{StaticResource TextDim}" HorizontalAlignment="Center"/>
+                <TextBlock Text="Connecting to the shared screen…" Style="{StaticResource Muted}" Margin="0,12,0,0" HorizontalAlignment="Center"/>
+            </StackPanel>
+            <!-- pictures stopped coming -->
+            <Border x:Name="Stalled" Visibility="Collapsed" Background="#CC0A1120" CornerRadius="8" Padding="14,8" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,16,0,0">
+                <TextBlock Text="No new picture for a moment: reconnecting…" Foreground="White"/>
+            </Border>
+            <!-- the host stopped -->
+            <Border Background="#D90A1120" Visibility="{Binding Ended, Converter={StaticResource BoolToVis}}">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding StatusText}" Style="{StaticResource H2}" HorizontalAlignment="Center"/>
+                    <TextBlock Text="The sharing is over. This was the last picture." Style="{StaticResource Muted}" Margin="0,6,0,14" HorizontalAlignment="Center"/>
+                    <Button Style="{StaticResource BtnPrimary}" Content="Close" Click="Close_Click" HorizontalAlignment="Center" MinWidth="90"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </DockPanel>
+</Window>

@@ -21,6 +21,9 @@ public partial class HomeViewModel : ObservableObject
     /// <summary>Multicasts running on the network right now.</summary>
     public ObservableCollection<LiveCastVm> Live { get; } = new();
     [ObservableProperty] private bool _anyLive;
+    /// <summary>Screens shared with everyone right now.</summary>
+    public ObservableCollection<LiveScreenVm> Screens { get; } = new();
+    [ObservableProperty] private bool _anyScreens;
     /// <summary>Multicasts scheduled on the network ("Coming up").</summary>
     public ObservableCollection<UpcomingCastVm> Upcoming { get; } = new();
     [ObservableProperty] private bool _anyUpcoming;
@@ -89,6 +92,8 @@ public partial class MainViewModel : ObservableObject
     private CancellationTokenSource? _queryCts;
     private (object Page, string Nav, PeerVm? Peer)? _beforeSearch;
     public PlayerViewModel Player { get; }
+    /// <summary>Screen sharing: mine, the one I watch, and the questions about it.</summary>
+    public ScreenViewModel Screen { get; }
     public HomeViewModel Home { get; } = new();
     /// <summary>My multicast (null when none) and the one I'm watching (null when none).</summary>
     [ObservableProperty] private MyCastDto? _myCast;
@@ -121,6 +126,7 @@ public partial class MainViewModel : ObservableObject
         SettingsVm = new SettingsViewModel(this);
         SearchVm = new SearchViewModel(this);
         Player = new PlayerViewModel(this);
+        Screen = new ScreenViewModel(api, this);
         // updates wait while a video plays: what was held back (a notice, an install) happens once it is closed
         Player.PropertyChanged += (_, e) =>
         {
@@ -143,6 +149,7 @@ public partial class MainViewModel : ObservableObject
         await ClaimUserNameAsync(status);
         await RefreshPeersAsync();
         await ResetCastAsync();
+        await Screen.SyncAsync();
         _initialPeersLoaded = true;
         RefreshResumeCard();
         await SharesVm.LoadAsync();
@@ -344,13 +351,14 @@ public partial class MainViewModel : ObservableObject
         await ClaimUserNameAsync(status); // may have been missed if the service was away when the app started
         await RefreshPeersAsync();
         await ResetCastAsync();
+        await Screen.SyncAsync();
         RefreshResumeCard();
         await SharesVm.LoadAsync();
         await DownloadsVm.LoadAsync();
         await LoadPendingAsync();
     }
 
-    public void Shutdown() => _eventsCts?.Cancel();
+    public void Shutdown() { Screen.Shutdown(); _eventsCts?.Cancel(); }
 
     // ------------------------------------------------------------------ events
 
@@ -512,6 +520,41 @@ public partial class MainViewModel : ObservableObject
                     AppLog.Info("Notes", $"{n.AuthorName} left a note on {n.ItemName}");
                     Toast($"New note on “{n.ItemName}”", $"{n.AuthorName}{at}: {text}", "info", open);
                     TrayNotify?.Invoke($"New note on “{n.ItemName}”", $"{n.AuthorName}: {text}", open); // shown only while the window is closed to the tray
+                    break;
+                }
+                case "myScreen":
+                    if (Json.Deserialize<MyScreenDto>(data) is { } mine) Screen.ApplyMine(mine);
+                    break;
+                case "screenPrompt":
+                    if (Json.Deserialize<ScreenPromptDto>(data) is { } prompt) Screen.ApplyPrompt(prompt);
+                    break;
+                case "screenRequest":
+                    if (Json.Deserialize<ScreenRequestDto>(data) is { } answer) Screen.ApplyRequest(answer);
+                    break;
+                case "screenView":
+                    if (Json.Deserialize<ScreenViewDto>(data) is { } watching) Screen.ApplyView(watching);
+                    break;
+                case "screenInvite":
+                {
+                    using var doc = JsonDocument.Parse(data);
+                    Screen.ApplyInvite(doc.RootElement.GetProperty("peerName").GetString() ?? "", doc.RootElement.GetProperty("state").GetString() ?? "");
+                    break;
+                }
+                case "peerScreen":
+                {
+                    using var doc = JsonDocument.Parse(data);
+                    var id = doc.RootElement.GetProperty("peerId").GetString() ?? "";
+                    var screen = doc.RootElement.TryGetProperty("screen", out var se) && se.ValueKind == JsonValueKind.Object ? Json.Deserialize<ScreenInfoDto>(se.GetRawText()) : null;
+                    var p = Peers.FirstOrDefault(x => x.Id == id);
+                    var started = screen is not null && p?.Screen?.SessionId != screen.SessionId;
+                    if (p is not null) p.Screen = screen;
+                    RefreshLive();
+                    if (started && p is not null && _initialPeersLoaded)
+                    {
+                        AppLog.Info("Screen", $"{p.Label} started sharing their screen with everyone ({screen!.Title})");
+                        Toast("Screen shared", $"{p.Label} is sharing their screen with everyone. Click to watch.", "info", () => _ = Screen.WatchAsync(p.Id, screen.SessionId));
+                        TrayNotify?.Invoke("Screen shared", $"{p.Label} is sharing their screen", () => _ = Screen.WatchAsync(p.Id, screen.SessionId));
+                    }
                     break;
                 }
                 case "castSchedule":
@@ -936,6 +979,10 @@ public partial class MainViewModel : ObservableObject
         Home.Live.Clear();
         foreach (var l in live) Home.Live.Add(l);
         Home.AnyLive = live.Count > 0;
+        var screens = Peers.Where(p => p.IsSharingScreen).Select(p => new LiveScreenVm(p, p.Screen!)).ToList();
+        Home.Screens.Clear();
+        foreach (var s in screens) Home.Screens.Add(s);
+        Home.AnyScreens = screens.Count > 0;
         var upcoming = Peers.Where(p => p.IsScheduled).OrderBy(p => p.CastPlan!.At).Select(p => new UpcomingCastVm(p, p.CastPlan!)).ToList();
         Home.Upcoming.Clear();
         foreach (var u in upcoming) Home.Upcoming.Add(u);
@@ -958,6 +1005,7 @@ public partial class MainViewModel : ObservableObject
     }
 
     [RelayCommand] private Task JoinLive(LiveCastVm? live) => live is null ? Task.CompletedTask : JoinCastAsync(live.Peer, live.Cast);
+    [RelayCommand] private Task WatchLiveScreen(LiveScreenVm? live) => live is null ? Task.CompletedTask : Screen.WatchAsync(live.Peer.Id, live.Screen.SessionId);
     [RelayCommand] private Task JoinPeerCast(PeerVm? peer) => peer?.Cast is null ? Task.CompletedTask : JoinCastAsync(peer, peer.Cast);
 
     /// <summary>Join a node's multicast: same access rule as the video (password / approval), then follow the host.</summary>

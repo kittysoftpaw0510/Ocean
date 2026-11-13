@@ -236,6 +236,8 @@ public sealed class PeerService : IDisposable
         return Info(peerId);
     }
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> _osAsked = new();
+    /// <summary>Nodes that share nothing: the version of their list that was really asked for.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _emptyAsked = new();
     private bool OsAskDue(string peerId)
     {
         var now = DateTimeOffset.UtcNow;
@@ -291,6 +293,7 @@ public sealed class PeerService : IDisposable
             Address = p.Bridged ? "" : p.DisplayAddress.ToString(), Via = p.Via, ViaCount = p.Bridged ? p.LiveBridges().Count : 0,
             Cast = p.Online ? cat?.Cast : null,
             CastPlan = p.Online ? cat?.CastPlan : null,
+            Screen = p.Online ? cat?.Screen : null,
             CatalogVersion = p.CatalogVersion, LastSeen = p.LastSeen, FirstSeen = p.FirstSeen, Online = p.Online, OfflineSince = p.OfflineSince,
             ShareCount = p.ShareCount,
             ItemCount = cat?.Shares.Sum(s => s.ItemCount) ?? 0,
@@ -535,15 +538,21 @@ public sealed class PeerService : IDisposable
     private async Task<CatalogDto?> FetchCatalogAsync(string peerId, CancellationToken ct, bool fullOnly = false)
     {
         if (!_registry.TryGetOnline(peerId, out var peer)) return null;
-        // Its announcements say it shares nothing: no need to connect (and nothing can go wrong). Except when its
-        // whole list is asked for (node info: Windows and its Ocean version come only with the list).
+        // Its announcements say it shares nothing. Its list is still asked for once per version: it carries what the
+        // node does live (a screen shared with everyone), its Windows and its Ocean version. After that, and whenever
+        // it can't be reached, an empty list stands in: nothing to connect for, and nothing can go wrong.
         if (peer.ShareCount == 0 && !fullOnly)
         {
             var known = Cached(peerId);
+            var version = peer.CatalogVersion;
+            if (_emptyAsked.TryGetValue(peerId, out var asked) && asked == version && known is not null && known.Shares.Count == 0) return known;
+            _emptyAsked[peerId] = version;
+            try { if (await FetchCatalogAsync(peerId, ct, fullOnly: true) is { } real) return real; }
+            catch (Exception ex) when (!ct.IsCancellationRequested) { _log.LogDebug("list of {Peer} (shares nothing): {Msg}", peer.Name, ex.Message); }
             var empty = new CatalogDto
             {
                 NodeId = peer.Id, NodeName = peer.Name, UserName = peer.User, Host = peer.Host,
-                Version = peer.CatalogVersion, GeneratedAt = DateTimeOffset.UtcNow,
+                Version = version, GeneratedAt = DateTimeOffset.UtcNow,
                 // what it told before stays known
                 AppVersion = known?.AppVersion, Os = known?.Os,
             };
@@ -551,6 +560,7 @@ public sealed class PeerService : IDisposable
             _catalogs[peerId] = empty;
             _etags.TryRemove(peerId, out _);
             if (hadItems) _events.Publish("peerCatalog", new { peerId, version = empty.Version, newCount = 0, itemCount = 0 });
+            if (known?.Screen is not null) _events.Publish("peerScreen", new { peerId, peerName = DisplayNames.Of(peer.User, peer.Name), screen = (ScreenInfoDto?)null });
             return empty;
         }
         var gate = _fetchLocks.GetOrAdd(peerId, _ => new SemaphoreSlim(1, 1));
@@ -594,9 +604,9 @@ public sealed class PeerService : IDisposable
                     return await FetchCatalogAsync(peerId, ct, fullOnly: true);
                 }
                 var changedItems = cat.Shares.Sum(s => s.Items.Count);
-                var deltaCast = cat.Cast; var deltaPlan = cat.CastPlan;
+                var deltaCast = cat.Cast; var deltaPlan = cat.CastPlan; var deltaScreen = cat.Screen;
                 cat = MergeDelta(previous, cat);
-                cat.Cast = deltaCast; cat.CastPlan = deltaPlan;
+                cat.Cast = deltaCast; cat.CastPlan = deltaPlan; cat.Screen = deltaScreen;
                 _log.LogDebug("catalog v{Version} from {Peer}: {Changed} changed, {Removed} removed since v{From}",
                     cat.Version, peer.Name, changedItems, cat.RemovedItems?.Count ?? 0, from);
                 cat.RemovedItems = null;
@@ -609,6 +619,8 @@ public sealed class PeerService : IDisposable
             NoteVersion(peerId, cat.AppVersion);
             if (previous?.Cast?.SessionId != cat.Cast?.SessionId || PlanKey(previous?.CastPlan) != PlanKey(cat.CastPlan))
                 _events.Publish("peerCast", new { peerId, peerName = DisplayNames.Of(cat.UserName, cat.NodeName), cast = cat.Cast, plan = cat.CastPlan });
+            if (previous?.Screen?.SessionId != cat.Screen?.SessionId)
+                _events.Publish("peerScreen", new { peerId, peerName = DisplayNames.Of(cat.UserName, cat.NodeName), screen = cat.Screen });
             var itemCount = cat.Shares.Sum(s => s.ItemCount);
             var newCount = cat.Shares.Sum(s => s.Items.Count(i => i.IsNew));
             _events.Publish("peerCatalog", new { peerId, version = cat.Version, newCount, itemCount });

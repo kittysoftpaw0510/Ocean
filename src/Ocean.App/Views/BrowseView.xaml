@@ -534,6 +534,20 @@
                 </DockPanel>
             </Border>
 
+            <!-- this node shares its screen with everyone -->
+            <Border Margin="24,2,24,8" Background="#26E11D48" BorderBrush="#66FB7185" BorderThickness="1" CornerRadius="8" Padding="12,8"
+                    Visibility="{Binding Peer.IsSharingScreen, Converter={StaticResource BoolToVis}}">
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Style="{StaticResource BtnPrimary}" Content="Watch" Margin="12,0,0,0" VerticalAlignment="Center"
+                            ToolTip="Opens their screen in a window of its own. You only watch."
+                            Command="{Binding DataContext.Screen.WatchCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Peer}"/>
+                    <TextBlock DockPanel.Dock="Left" Text="&#xE7F4;" Style="{StaticResource Icon}" FontSize="15" Foreground="#FB7185" Margin="0,0,12,0" VerticalAlignment="Center"/>
+                    <TextBlock VerticalAlignment="Center" TextWrapping="Wrap">
+                        <Run Text="{Binding Peer.Label, Mode=OneWay}"/><Run Text=" is sharing their screen with everyone: "/><Run Text="{Binding Peer.Screen.Title, Mode=OneWay}" FontWeight="SemiBold"/><Run Text="."/>
+                    </TextBlock>
+                </DockPanel>
+            </Border>
+
             <!-- this node has a multicast scheduled: everyone sees it coming -->
             <Border Margin="24,2,24,8" Background="#1AE11D48" BorderBrush="#E11D48" BorderThickness="1.5" CornerRadius="8" Padding="12,8"
                     Visibility="{Binding Peer.IsScheduled, Converter={StaticResource BoolToVis}}">

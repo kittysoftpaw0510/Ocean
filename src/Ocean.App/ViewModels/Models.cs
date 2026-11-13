@@ -51,7 +51,7 @@ public partial class PeerVm : ObservableObject
     [ObservableProperty] private CastInfoDto? _cast;
     public bool IsLive => Cast is not null && Online;
     public string LiveText => Cast is null ? "" : $"Multicasting “{Cast.ItemName}”";
-    partial void OnCastChanged(CastInfoDto? value) { OnPropertyChanged(nameof(IsLive)); OnPropertyChanged(nameof(LiveText)); OnPlanChanged(); }
+    partial void OnCastChanged(CastInfoDto? value) { OnPropertyChanged(nameof(IsLive)); OnPropertyChanged(nameof(LiveText)); OnPlanChanged(); OnPropertyChanged(nameof(ShowScreenBadge)); }
 
     /// <summary>The multicast this node has scheduled to start later (null when none).</summary>
     [ObservableProperty] private CastPlanDto? _castPlan;
@@ -60,6 +60,22 @@ public partial class PeerVm : ObservableObject
     public string PlanTime => CastPlan is null ? "" : CastPlan.At.ToLocalTime().ToString("HH:mm");
     public string PlanText => CastPlan is null ? "" : $"Multicast of “{CastPlan.ItemName}” at {Format.ClockTime(CastPlan.At)} ({Format.Until(CastPlan.At)})";
     partial void OnCastPlanChanged(CastPlanDto? value) => OnPlanChanged();
+
+    /// <summary>The screen this node shares with everyone right now (null when none).</summary>
+    [ObservableProperty] private ScreenInfoDto? _screen;
+    public bool IsSharingScreen => Screen is not null && Online;
+    /// <summary>The LIVE mark for a shared screen (a multicast has its own).</summary>
+    public bool ShowScreenBadge => IsSharingScreen && !IsLive;
+    public string ScreenText => Screen is null ? "" : $"Sharing their screen with everyone: “{Screen.Title}”";
+    /// <summary>The screen menu entries: watch what is shared, or ask to see it.</summary>
+    public bool CanAskScreen => Online && !IsSharingScreen;
+    partial void OnScreenChanged(ScreenInfoDto? value) => OnScreenStateChanged();
+    private void OnScreenStateChanged()
+    {
+        OnPropertyChanged(nameof(IsSharingScreen)); OnPropertyChanged(nameof(ShowScreenBadge)); OnPropertyChanged(nameof(ScreenText)); OnPropertyChanged(nameof(CanAskScreen));
+    }
+    /// <summary>Its screen requests are not shown to me any more (I chose "Don't ask again").</summary>
+    [ObservableProperty] private bool _screenMuted;
     /// <summary>Also every half minute (the countdown).</summary>
     public void OnPlanChanged() { OnPropertyChanged(nameof(IsScheduled)); OnPropertyChanged(nameof(PlanTime)); OnPropertyChanged(nameof(PlanText)); }
 
@@ -87,7 +103,8 @@ public partial class PeerVm : ObservableObject
     {
         Name = d.Name; User = d.User; Host = d.Host; Address = d.Address;
         NewCount = d.NewCount; ItemCount = d.ItemCount; ShareCount = d.ShareCount; CatalogLoaded = d.CatalogLoaded; FirstSeen = d.FirstSeen;
-        Online = d.Online; OfflineSince = d.OfflineSince; Via = d.Via; ViaCount = d.ViaCount; Cast = d.Cast; CastPlan = d.CastPlan;
+        Online = d.Online; OfflineSince = d.OfflineSince; Via = d.Via; ViaCount = d.ViaCount; Cast = d.Cast; CastPlan = d.CastPlan; Screen = d.Screen;
+        OnScreenStateChanged();
         OnPropertyChanged(nameof(Initials)); OnPropertyChanged(nameof(Subtitle)); OnPropertyChanged(nameof(Label)); OnPropertyChanged(nameof(OfflineText)); OnPropertyChanged(nameof(IsLive));
         OnPlanChanged();
     }
@@ -105,6 +122,17 @@ public sealed partial class UpcomingCastVm : ObservableObject
     public string Time => Format.ClockTime(Plan.At);
     public string Meta => $"Starts {Format.Until(Plan.At)}  ·  you'll get a notice when it does";
     public void Tick() => OnPropertyChanged(nameof(Meta));
+}
+
+/// <summary>Home, "Live now": a screen a node shares with everyone.</summary>
+public sealed class LiveScreenVm
+{
+    public LiveScreenVm(PeerVm peer, ScreenInfoDto screen) { Peer = peer; Screen = screen; }
+    public PeerVm Peer { get; }
+    public ScreenInfoDto Screen { get; }
+    public string Title => Screen.Title;
+    public string Who => $"{Peer.Label} is sharing their screen";
+    public string Meta => (Screen.Viewers == 0 ? "Nobody watching yet" : $"{Screen.Viewers} watching") + $"  ·  started {Format.Ago(Screen.StartedAt)}";
 }
 
 public sealed class LiveCastVm

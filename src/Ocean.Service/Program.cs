@@ -105,6 +105,9 @@ builder.Services.AddSingleton<Ocean.Service.Cast.CastHost>();
 builder.Services.AddSingleton<Ocean.Service.Cast.CastScheduler>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Ocean.Service.Cast.CastScheduler>());
 builder.Services.AddSingleton<Ocean.Service.Cast.CastReceiver>();
+builder.Services.AddSingleton<Ocean.Service.Screen.ScreenHost>();
+builder.Services.AddSingleton<Ocean.Service.Screen.ScreenAsks>();
+builder.Services.AddSingleton<Ocean.Service.Screen.ScreenViewer>();
 builder.Services.AddSingleton<DownloadManager>();
 builder.Services.AddSingleton(new UploadScheduler { BytesPerSecond = cfg.UploadLimitKBps * 1024L });
 builder.Services.AddSingleton<MeshService>();
@@ -267,6 +270,8 @@ app.Services.GetRequiredService<AccessService>();
 app.Services.GetRequiredService<PeerService>();
 app.Services.GetRequiredService<Ocean.Service.Cast.ViewerTracker>(); // counts viewers for my listing
 app.Services.GetRequiredService<Ocean.Service.Cast.CastHost>();      // puts my multicast in my catalog
+app.Services.GetRequiredService<Ocean.Service.Screen.ScreenHost>();  // puts the screen I share with everyone in my catalog
+app.Services.GetRequiredService<Ocean.Service.Screen.ScreenAsks>();  // times out screen requests
 app.Services.GetRequiredService<Ocean.Service.Social.Ratings>();     // puts the votes on my videos in my catalog
 app.Services.GetRequiredService<Ocean.Service.Social.Notes>();       // puts the number of notes on my videos in my catalog
 

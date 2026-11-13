@@ -8,6 +8,7 @@ using Ocean.Service.Cast;
 using Ocean.Service.Catalog;
 using Ocean.Service.Net;
 using Ocean.Service.Peers;
+using Ocean.Service.Screen;
 using Ocean.Service.State;
 
 namespace Ocean.Service.Api;
@@ -87,7 +88,7 @@ public static class PeerApi
                     NodeId = cat.NodeId, NodeName = cat.NodeName, UserName = cat.UserName, Host = cat.Host,
                     AppVersion = cat.AppVersion, Os = cat.Os,
                     Version = changes.Version, GeneratedAt = cat.GeneratedAt, DeltaFrom = baseVersion,
-                    RemovedItems = changes.Removed.ToList(), Cast = cat.Cast, CastPlan = cat.CastPlan,
+                    RemovedItems = changes.Removed.ToList(), Cast = cat.Cast, CastPlan = cat.CastPlan, Screen = cat.Screen,
                 };
                 foreach (var s in cat.Shares)
                     delta.Shares.Add(new ShareDto
@@ -204,6 +205,76 @@ public static class PeerApi
         });
         g.MapPost("/cast/{sessionId}/leave", (HttpContext ctx, string sessionId, CastHost cast) => { cast.Leave(sessionId, PeerContext.Get(ctx).ClientId); return Results.Ok(); });
         g.MapGet("/cast/{sessionId}/state", (string sessionId, CastHost cast) => Results.Json(cast.State(sessionId), Json.Options));
+
+        // ---- screen sharing (see ScreenHost, ScreenAsks). Writes are POSTs, so they pass bridges and reverse links. ----
+        g.MapPost("/screen/ask", async (HttpContext ctx, ScreenAsks asks) =>
+        {
+            var ask = await ctx.Request.ReadFromJsonAsync<ScreenAskDto>(Json.Options, ctx.RequestAborted);
+            if (ask is null) return Results.BadRequest();
+            var pc = PeerContext.Get(ctx);
+            var no = asks.Incoming(pc.ClientId, DisplayNames.Of(pc.User, pc.Name), ask);
+            return no is null ? Results.Ok() : Results.Json(new ErrorDto { Error = no }, Json.Options, statusCode: 409);
+        });
+        g.MapPost("/screen/answer", async (HttpContext ctx, ScreenAsks asks) =>
+        {
+            var answer = await ctx.Request.ReadFromJsonAsync<ScreenAnswerDto>(Json.Options, ctx.RequestAborted);
+            if (answer is null) return Results.BadRequest();
+            asks.Answered(PeerContext.Get(ctx).ClientId, answer);
+            return Results.Ok();
+        });
+        g.MapPost("/screen/cancel", async (HttpContext ctx, ScreenAsks asks) =>
+        {
+            var answer = await ctx.Request.ReadFromJsonAsync<ScreenAnswerDto>(Json.Options, ctx.RequestAborted);
+            if (answer is null) return Results.BadRequest();
+            asks.Withdrawn(PeerContext.Get(ctx).ClientId, answer.AskId);
+            return Results.Ok();
+        });
+        g.MapPost("/screen/{sessionId}/join", async (HttpContext ctx, string sessionId, ScreenHost screen, Ocean.Service.Discovery.PeerRegistry registry) =>
+        {
+            var pc = PeerContext.Get(ctx);
+            var allowed = screen.Allowed(sessionId, pc.ClientId);
+            if (allowed is null) return Results.NotFound();
+            if (allowed == false) return Results.Json(new ErrorDto { Error = "private", Message = "This screen is shared with other PCs only" }, Json.Options, statusCode: 403);
+            var req = await ctx.Request.ReadFromJsonAsync<ScreenJoinRequestDto>(Json.Options, ctx.RequestAborted) ?? new ScreenJoinRequestDto();
+            // packets can go straight to the viewer only when this request came straight from it (not through a bridge or a reverse link)
+            System.Net.IPAddress? from = null;
+            if (ctx.Connection.RemoteIpAddress is { } remote && registry.TryGetOnline(pc.ClientId, out var peer) && !peer.Bridged && !peer.PreferRelay)
+            {
+                if (remote.IsIPv4MappedToIPv6) remote = remote.MapToIPv4();
+                if (peer.Addresses.ContainsKey(remote) || peer.Address.Equals(remote)) from = remote;
+            }
+            var join = screen.Join(sessionId, pc.ClientId, DisplayNames.Of(pc.User, pc.Name), from, req.UdpPort);
+            return join is null ? Results.NotFound() : Results.Json(join, Json.Options);
+        });
+        g.MapPost("/screen/{sessionId}/beat", async (HttpContext ctx, string sessionId, ScreenHost screen) =>
+        {
+            var beat = await ctx.Request.ReadFromJsonAsync<ScreenBeatDto>(Json.Options, ctx.RequestAborted) ?? new ScreenBeatDto();
+            var state = screen.Beat(sessionId, PeerContext.Get(ctx).ClientId, beat);
+            return state.Ended ? Results.NotFound() : Results.Json(state, Json.Options);
+        });
+        g.MapPost("/screen/{sessionId}/leave", (HttpContext ctx, string sessionId, ScreenHost screen) => { screen.Leave(sessionId, PeerContext.Get(ctx).ClientId); return Results.Ok(); });
+        g.MapGet("/screen/{sessionId}/stream", async (HttpContext ctx, string sessionId, long? from, long? to, ScreenHost screen) =>
+        {
+            var pc = PeerContext.Get(ctx);
+            var allowed = screen.Allowed(sessionId, pc.ClientId);
+            if (allowed is null) { ctx.Response.StatusCode = 404; return; }
+            if (allowed == false) { ctx.Response.StatusCode = 403; return; }
+            ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>()?.DisableBuffering();
+            if (ctx.Features.Get<Microsoft.AspNetCore.Server.Kestrel.Core.Features.IHttpMinResponseDataRateFeature>() is { } rate) rate.MinDataRate = null;
+            var began = false;
+            var ok = await screen.StreamAsync(sessionId, pc.ClientId, from ?? -1, to ?? 0,
+                async offset =>
+                {
+                    began = true;
+                    ctx.Response.ContentType = "video/h264";
+                    ctx.Response.Headers["X-Ocean-Offset"] = offset.ToString();
+                    ctx.Response.Headers.CacheControl = "no-store";
+                    await ctx.Response.StartAsync(ctx.RequestAborted);
+                },
+                async bytes => { await ctx.Response.Body.WriteAsync(bytes, ctx.RequestAborted); await ctx.Response.Body.FlushAsync(ctx.RequestAborted); },
+                ctx.RequestAborted);
+            if (!ok && !began) ctx.Response.StatusCode = 410; // those bytes are gone (too far behind), or no picture came: start again
+        });
 
         g.MapGet("/thumb/{itemId}", async (HttpContext ctx, string itemId, CatalogService catalog, AccessService access, ThumbnailService thumbs, ConfigStore config) =>
         {

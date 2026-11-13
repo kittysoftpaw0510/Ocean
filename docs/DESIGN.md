@@ -245,6 +245,8 @@ and the requester polls `GET /p/access/{requestId}` every 2 s.
 | GET/HEAD | `/p/stream/{itemId}` | `Accept-Ranges: bytes`; rate-limited through a global token bucket when an upload cap is set; `{itemId}@light` = the lighter copy |
 | GET/POST | `/p/light/{itemId}` | state of the lighter copy; POST asks for one ("I'm watching this") |
 | POST | `/p/cast/{id}/join`, `/beat`, `/leave`; GET `/state` | multicast: join (key + group), heartbeat with stats (returns the host's state), leave |
+| POST | `/p/screen/ask`, `/answer`, `/cancel` | screen sharing: "show me your screen" / "look at my screen", the answer, taking a question back |
+| POST | `/p/screen/{id}/join`, `/beat`, `/leave`; GET `/stream?from=` | screen sharing: join (key, size, where packets go), report in, leave; the stream itself for whatever UDP didn't bring |
 | GET | `/p/neighbors` | nodes this node hears directly, its load and a revision (304 when unchanged); empty when bridging is off |
 | GET/HEAD/POST | `/p/via/{nodeId}/p/…` | carry a signed request on to a node the caller can't reach |
 
@@ -326,6 +328,64 @@ See `Api/LocalApi.cs`.
   keeps the player at the host's position carried forward on this PC's clock, 1.5 s behind, seeking when more than
   2.5 s off and pausing with the host; controls are locked ("The host controls playback"); Leave or the host's end
   unlocks them and the cached bytes stay, so the video can go on as a normal stream.
+
+## Screen sharing (`Ocean.Service.Screen`, app: `ScreenViewModel`, `ScreenEncoder`, `ScreenDecoder`)
+
+A node shares one thing at a time: a monitor, one window or a part of a monitor; with everyone or with invited PCs.
+View only (nothing typed or clicked at the viewer reaches the host), picture only (no sound).
+
+- **Who does what.** The service cannot see the desktop (session 0), so the app captures and encodes and the
+  service carries. The app runs ffmpeg (shipped for the lighter copies): `gfxcapture` (Windows.Graphics.Capture:
+  a monitor or a window by handle, cropped for a region, scaled on the graphics card to at most 1920 x 1080) →
+  H.264 → HTTP POST straight to `POST /api/screen/feed/{session}`. Encoders in order: `h264_nvenc`, `h264_qsv`,
+  `h264_amf`, `libx264`; one that fails within 4 s is not tried again in that run of the app. Key picture every
+  4 s with its parameters (`dump_extra`), no B pictures. 15 pictures a second (30 with "Smooth motion"); at most
+  3 Mbps (5) for full HD, less for smaller pictures; a still desktop takes a fraction (measured: about 0.7 Mbps
+  for an ordinary full-HD desktop, a third to a half of one CPU core).
+- **Nobody watches, nothing runs.** `MyScreenDto.Wanted` is true while somebody watches, is joining or has just
+  accepted; the app starts and stops ffmpeg by it, so a share with everyone costs nothing until someone opens it.
+- **Never without the app.** ffmpeg is in a job object that ends with the app (also a crash). The service ends a
+  session after 8 s without any app connected (`EventHub.SubscriberCount`), and a session for invited PCs once no
+  invited PC watches, is coming or may still answer. An app that starts and finds a session it has no capture for
+  stops it.
+- **The stream** is a byte stream with offsets counted from the session's first byte. `ScreenRing` keeps the last
+  8 MB and notes where key pictures start (an SPS unit after a start code): a viewer always starts at the latest
+  one, from a run of the encoder that is still going (`MinStart`).
+- **Packets** (`ScreenHost.SendData`): the multicast's packet format (`CastWire`: sealed with AES-GCM under the
+  session key, one parity packet per 8 and at the end of every picture) on port 38474: to the multicast group
+  (239.255.77.1) when everyone may watch, straight to each viewer's own UDP port otherwise (only when the join came
+  straight from that PC, not through a bridge or a reverse link). A control packet twice a second: head offset,
+  viewers, ended.
+- **Nothing is ever missing** (`ScreenViewer`): UDP only gives the low delay. The viewer puts the stream together
+  in order from two sources: the packets, and `GET /p/screen/{id}/stream?from=` over the peer connection. The
+  direct stream always brings the start (`from=-1`: the latest key picture, waiting for one while the encoder
+  starts), then only what is missing for a moment: a hole after 120 ms, a missing end after 300 ms (the control
+  packet says where the head is), everything after 2 s without packets. It is dropped again as soon as packets
+  keep up (fresh, none lost for 2 s); after four switches in 20 s it stays for 30 s. Through bridges, reverse links
+  and where multicast doesn't arrive, everything comes that way. Measured between two services on one PC: 147 ms
+  median from "picture handed to the encoder" to "picture decoded at the viewer" at 15 pictures a second (two
+  picture intervals); with 3 % of the packets thrown away the same, worst case 224 ms; with 10 % and with all
+  packets thrown away every picture still decodes without an error.
+- **Asking** (`ScreenAsks`). "Show me your screen" (`kind: show`): the asked PC's user allows or declines; on allow
+  they pick what to share (or the asker is let into what they share already), and the answer names the session.
+  "Look at my screen" (`kind: watch`, sent by the host for every invited PC): watch or decline. A question needs
+  the app (`away` without one), waits 45 s (2 min while the user picks), one per PC and kind, not again within 10 s
+  of a decline, and a PC can be muted (`screen-muted.json`). Answers the asker may get: allowed, declined, timeout,
+  away, busy, muted, old (a 404: an Ocean without screen sharing).
+- **With everyone:** the session is in the catalog (`CatalogDto.Screen`, also in partial updates) and `PeerDto.Screen`;
+  `peerScreen` tells the apps (LIVE mark, Home card, toast). It counts with the multicasts towards "at most 30 % of
+  the PCs stream at once". A node that shares no videos is asked for its list once per version for this (and for
+  its Windows and Ocean version), where before it was never asked.
+- **Showing** (`ScreenDecoder`): ffmpeg reads `GET /api/screen/view/stream` (the stream put together by the service),
+  decodes and writes raw pictures to a pipe; the newest is drawn into a `WriteableBitmap`. No analysing before the
+  first picture (`-probesize 32 -analyzeduration 0`; not `-fflags nobuffer`, which holds everything back until the
+  second key picture): the first picture is there about a second after opening.
+- **Seen by the user:** a red bar "Sharing ... with ..., N watching, Stop sharing" on top of everything and on every
+  virtual desktop while a session runs; it is excluded from capture (`WDA_EXCLUDEFROMCAPTURE`) and can't be closed.
+- Local API: `/api/screen` (GET, `/start`, `/invite`, `/stop`, `/feed/{id}`), `/api/screen/ask/{peer}`,
+  `/api/screen/prompts[/{id}]`, `/api/screen/muted`, `/api/screen/view` (GET, `/leave`, `/stream`),
+  `/api/peers/{peer}/screen/{id}/join`. Events: `myScreen`, `screenPrompt`, `screenRequest`, `screenInvite`,
+  `screenView`, `peerScreen`.
 
 ## Votes, tags and "Top on the network" (`Ocean.Service.Social`)
 

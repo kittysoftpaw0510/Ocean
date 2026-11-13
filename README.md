@@ -106,7 +106,7 @@ To share even when nobody is signed in, install the Windows service (as administ
 
 ```powershell
 cd dist\Ocean
-.\install-service.ps1     # creates "OceanService", opens firewall ports 38471/tcp, 38472/udp and 38473/udp (multicast)
+.\install-service.ps1     # creates "OceanService", opens firewall ports 38471/tcp, 38472/udp and 38473-38474/udp (multicast)
 .\uninstall-service.ps1
 ```
 
@@ -126,6 +126,7 @@ Every rule accepts the local subnet only.
 | **My shares** | *Share a folder* / *Files* / *New folder* (an empty folder you fill later; rename or remove any time), or drop folders anywhere in the window. Pick who can watch: everyone, password, or ask-me. Right-click a video to give it its own rule or *Tags…* (up to 8 words everyone can filter by). Each row shows how many people liked it. *Who has access* lists issued grants (revoke any time). |
 | Votes | Thumbs up / down on anyone's video (tiles, rows, the player's top bar). The owner's PC counts them and everyone sees the totals, never who voted; your own vote is remembered and can be taken back. Watching a video to the end also counts a little. A vote the owner can't take yet is kept and delivered later: while it is offline, until it runs an Ocean with votes (1.3.2 or later), or until it approves you again for a locked video; the message says which. Votes fade with time (half-life 30 days), so new favourites rise. |
 | Notes | Leave notes on anyone's video, and 👍/👎 the notes others left; everyone sees the counts. In the player (💬 or N) a note is tied to the moment you started writing it, and clicking a note's time plays from there. Also *Notes…* on every video's menu; rows show 💬 with the number of notes. Sort by Top, Newest or By moment; edit or remove your own notes; on your videos you may remove any note and you're told when someone leaves one. Notes are kept on the video owner's PC and read only when opened, so a big network costs nothing; while the owner is offline you see the last notes you read. |
+| Screen sharing | *Share my screen* (left) shows your screen to everyone on the network: they see LIVE next to your name and a card on Home, and watch in a window of its own. Right-click a node for *Show them my screen…* (only they are asked to watch) or *Ask to see their screen* (they allow or decline, and choose what you see). You always pick what is shared first: a whole screen, one window (also when other windows cover it) or a part of a screen you mark with the mouse. While you share, a red bar on top of everything says so, with who is watching and *Stop sharing*; viewers don't see the bar. Nothing is captured while nobody watches, and sharing ends by itself if Ocean is closed. View only, picture only (no sound, no remote control). Needs Ocean 1.4.7 or later on both PCs. |
 | **Downloads** | Progress, speed, ETA; cancel, retry, open, show in folder. Partial files resume after restarts. |
 | **Settings** | Your name, shared secret, upload speed cap, how long videos count as "new", download folder, video cache size (what you watched from other PCs is kept so replays cost no network), networking mode (Auto picks a classic, IPmsg-like mode when a VPN or proxy add-on would break the fast one), start with Windows. |
 | Tray icon | Open, pause sharing, exit (keeps sharing) or exit and stop sharing. Balloon tips for access requests and new videos. |

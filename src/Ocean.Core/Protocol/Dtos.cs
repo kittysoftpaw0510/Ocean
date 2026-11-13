@@ -40,6 +40,8 @@ public sealed class CatalogDto
     public CastInfoDto? Cast { get; set; }
     /// <summary>The multicast this node has scheduled to start later, if any.</summary>
     public CastPlanDto? CastPlan { get; set; }
+    /// <summary>The screen this node shares with everyone right now, if any.</summary>
+    public ScreenInfoDto? Screen { get; set; }
 }
 
 public sealed class ShareDto
@@ -178,6 +180,8 @@ public sealed class PeerDto
     public CastInfoDto? Cast { get; set; }
     /// <summary>The multicast it has scheduled to start later, if any.</summary>
     public CastPlanDto? CastPlan { get; set; }
+    /// <summary>The screen it shares with everyone right now, if any.</summary>
+    public ScreenInfoDto? Screen { get; set; }
 }
 
 public sealed class ItemOverrideDto

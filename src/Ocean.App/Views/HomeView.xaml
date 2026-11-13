@@ -49,6 +49,29 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
 
+            <!-- Live now: screens shared with everyone -->
+            <ItemsControl ItemsSource="{Binding Screens}" Margin="0,8,0,0" Visibility="{Binding AnyScreens, Converter={StaticResource BoolToVis}}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Style="{StaticResource Card}" Padding="12" Margin="0,0,0,8" AutomationProperties.Name="Screen shared now">
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Style="{StaticResource BtnPrimary}" Content="Watch" Margin="12,0,0,0" VerticalAlignment="Center"
+                                        ToolTip="Opens their screen in a window of its own. You only watch."
+                                        Command="{Binding DataContext.WatchLiveScreenCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                <Border DockPanel.Dock="Left" Background="#E11D48" CornerRadius="5" Padding="6,4" Margin="0,0,12,0" VerticalAlignment="Center">
+                                    <TextBlock Text="&#xE7F4;" Style="{StaticResource Icon}" FontSize="14" Foreground="White"/>
+                                </Border>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Who}" Style="{StaticResource Muted}"/>
+                                    <TextBlock Text="{Binding Title}" Style="{StaticResource H2}" TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{Binding Meta}" Style="{StaticResource Dim}"/>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
             <!-- Coming up: multicasts scheduled on the network -->
             <ItemsControl ItemsSource="{Binding Upcoming}" Margin="0,28,0,0" Visibility="{Binding AnyUpcoming, Converter={StaticResource BoolToVis}}">
                 <ItemsControl.ItemTemplate>
