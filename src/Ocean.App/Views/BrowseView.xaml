@@ -389,7 +389,8 @@
                 <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <Button Style="{StaticResource ChipBtn}" Command="{Binding DataContext.SelectShareCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">
+                        <Button Style="{StaticResource ChipBtn}" Command="{Binding DataContext.SelectShareCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"
+                                ToolTip="{Binding LockTip}" ToolTipService.IsEnabled="{Binding IsProtected}">
                             <Button.ContextMenu>
                                 <ContextMenu>
                                     <MenuItem Header="Download all videos" Click="ChipDownload_Click"/>
@@ -398,6 +399,8 @@
                             </Button.ContextMenu>
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="{Binding LockGlyph}" Style="{StaticResource Icon}" FontSize="11" Margin="0,0,6,0" Visibility="{Binding IsLocked, Converter={StaticResource BoolToVis}}" Foreground="{StaticResource Warn}"/>
+                                <!-- protected, and I'm let in: it stays recognisable -->
+                                <TextBlock Text="&#xE785;" Style="{StaticResource Icon}" FontSize="11" Margin="0,0,6,0" Visibility="{Binding IsUnlocked, Converter={StaticResource BoolToVis}}" Foreground="{StaticResource Accent}"/>
                                 <TextBlock Text="{Binding Name}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" MaxWidth="220"/>
                                 <TextBlock Text="{Binding Count}" Style="{StaticResource Dim}" Margin="6,0,0,0" VerticalAlignment="Center"/>
                                 <Border Style="{StaticResource Badge}" Margin="6,0,0,0" Padding="5,0" Visibility="{Binding NewCount, Converter={StaticResource CountToVis}}">
@@ -540,6 +543,17 @@
                         <Run Text="{Binding Peer.Label, Mode=OneWay}" FontWeight="SemiBold"/><Run Text=":  "/><Run Text="{Binding Peer.PlanText, Mode=OneWay}"/><Run Text=". You'll get a notice when it starts; join to watch together." Foreground="{StaticResource TextMuted}"/>
                     </TextBlock>
                 </DockPanel>
+            </Border>
+
+            <!-- the share shown is protected and I'm let in -->
+            <Border Margin="24,2,24,6" Padding="10,6" CornerRadius="7" Background="{StaticResource AccentSoft}" HorizontalAlignment="Left"
+                    Visibility="{Binding SelectedShare.IsUnlocked, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="&#xE785;" Style="{StaticResource Icon}" FontSize="12" Foreground="{StaticResource Accent}" Margin="0,1,8,0" VerticalAlignment="Center"/>
+                    <TextBlock VerticalAlignment="Center">
+                        <Run Text="{Binding SelectedShare.ProtectionText, Mode=OneWay}" FontWeight="SemiBold"/><Run Text="  ·  "/><Run Text="{Binding SelectedShare.AccessText, Mode=OneWay}" Foreground="{StaticResource TextMuted}"/>
+                    </TextBlock>
+                </StackPanel>
             </Border>
 
             <!-- breadcrumb: where am I inside the share -->

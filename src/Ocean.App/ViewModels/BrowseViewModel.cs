@@ -198,6 +198,7 @@ public partial class BrowseViewModel : ObservableObject
             var chip = Shares.FirstOrDefault(c => c.Id == s.Id) ?? new ShareChipVm(s.Id);
             chip.Name = s.Name; chip.Count = s.ItemCount; chip.TotalBytes = s.TotalBytes; chip.Mode = s.Mode;
             chip.IsLocked = s.Lock is not null && !s.Unlocked;
+            chip.IsProtected = s.Lock is not null;
             chip.NewCount = s.Items.Count(i => i.IsNew);
             chips.Add(chip);
             foreach (var i in s.Items)

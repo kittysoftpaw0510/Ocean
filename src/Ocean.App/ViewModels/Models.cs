@@ -147,6 +147,9 @@ public partial class ItemVm : ObservableObject
     public long Size => Dto.Size;
     public long DurationMs => Dto.DurationMs ?? 0;
     public bool IsLocked => Dto.Lock is not null && !Dto.Unlocked;
+    /// <summary>This video has its own password or approval rule and I'm let in.</summary>
+    public bool IsUnlockedProtected => Dto.Lock is not null && Dto.Unlocked;
+    public string UnlockedTip => Dto.Lock?.Mode == AccessMode.Ask ? "Only people the owner approves can open this video: you are approved." : "Password protected video: you unlocked it on this PC.";
     public bool IsNew => Dto.IsNew;
     public bool IsMine => Dto.IsMine;
     public string LockText => Dto.Lock?.Mode == AccessMode.Password ? "Password protected" : Dto.Lock?.Mode == AccessMode.Ask ? "Owner approval required" : "";
@@ -370,6 +373,20 @@ public partial class ShareChipVm : ObservableObject
     [ObservableProperty] private AccessMode _mode;
     [ObservableProperty] private bool _isSelected;
     [ObservableProperty] private bool _isPending;
+    /// <summary>The owner protects this share (password or approval), whether or not I'm let in.</summary>
+    [ObservableProperty] private bool _isProtected;
+    /// <summary>Protected, and I'm let in (unlocked with the password, or approved).</summary>
+    public bool IsUnlocked => IsProtected && !IsLocked;
+    public string ProtectionText => Mode == AccessMode.Ask ? "Only people the owner approves" : Mode == AccessMode.Password ? "Password protected" : "";
+    /// <summary>Where I stand, once let in.</summary>
+    public string AccessText => Mode == AccessMode.Ask ? "you are approved" : "you unlocked it on this PC";
+    /// <summary>One line: what protects it and where I stand.</summary>
+    public string LockTip => !IsProtected ? "" : IsLocked
+        ? (Mode == AccessMode.Ask ? "Only people the owner approves can open it. Click to ask." : "Password protected. Click to unlock.")
+        : (Mode == AccessMode.Ask ? "Only people the owner approves can open it: you are approved." : "Password protected: you unlocked it on this PC.");
+    partial void OnIsLockedChanged(bool value) { OnPropertyChanged(nameof(IsUnlocked)); OnPropertyChanged(nameof(LockTip)); }
+    partial void OnIsProtectedChanged(bool value) { OnPropertyChanged(nameof(IsUnlocked)); OnPropertyChanged(nameof(LockTip)); }
+    partial void OnModeChanged(AccessMode value) { OnPropertyChanged(nameof(LockTip)); OnPropertyChanged(nameof(ProtectionText)); OnPropertyChanged(nameof(AccessText)); }
 
     public ShareChipVm(string? id) { Id = id; }
     public string SizeText => Format.Bytes(TotalBytes);
