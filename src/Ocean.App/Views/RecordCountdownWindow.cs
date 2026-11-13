@@ -9,15 +9,15 @@ using Ocean.App.Services;
 namespace Ocean.App.Views;
 
 /// <summary>
-/// 3, 2, 1 over what is about to be recorded: the area dims a little, a large number counts down in a ring that
+/// 3, 2, 1 over what is about to be recorded: the area dims a little, a small number counts down in a ring that
 /// sweeps once a second, so there is a moment to get ready and the video doesn't open on the Start click. Esc or a
 /// click cancels. Kept out of every capture (people watching a shared screen don't see it either).
 /// </summary>
 public sealed class RecordCountdownWindow : Window
 {
     private readonly TaskCompletionSource<bool> _result = new();
-    private readonly TextBlock _number = new() { FontSize = 96, FontWeight = FontWeights.Light, Foreground = Brushes.White, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, FontFamily = new FontFamily("Segoe UI"), RenderTransformOrigin = new Point(0.5, 0.5) };
-    private readonly Ellipse _sweep = new() { Width = 196, Height = 196, Stroke = new SolidColorBrush(Color.FromRgb(0xF4, 0x3F, 0x5E)), StrokeThickness = 4, StrokeDashCap = PenLineCap.Round, RenderTransformOrigin = new Point(0.5, 0.5), RenderTransform = new RotateTransform(-90) };
+    private readonly TextBlock _number = new() { FontSize = 44, FontWeight = FontWeights.Light, Foreground = Brushes.White, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, FontFamily = new FontFamily("Segoe UI"), RenderTransformOrigin = new Point(0.5, 0.5) };
+    private readonly Ellipse _sweep = new() { Width = 89, Height = 89, Stroke = new SolidColorBrush(Color.FromRgb(0xF4, 0x3F, 0x5E)), StrokeThickness = 3, StrokeDashCap = PenLineCap.Round, RenderTransformOrigin = new Point(0.5, 0.5), RenderTransform = new RotateTransform(-90) };
     private int _left;
     private System.Windows.Threading.DispatcherTimer? _timer;
 
@@ -28,11 +28,11 @@ public sealed class RecordCountdownWindow : Window
         Background = new SolidColorBrush(Color.FromArgb(0x4D, 0x05, 0x08, 0x10));
         WindowStartupLocation = WindowStartupLocation.Manual; Left = -32000; Top = -32000; Width = 10; Height = 10;
         Cursor = Cursors.Hand;
-        var ring = new Ellipse { Width = 200, Height = 200, Fill = new SolidColorBrush(Color.FromArgb(0xC0, 0x10, 0x0E, 0x16)), Stroke = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF)), StrokeThickness = 1.5 };
-        var dial = new Grid { Width = 200, Height = 200 };
+        var ring = new Ellipse { Width = 92, Height = 92, Fill = new SolidColorBrush(Color.FromArgb(0xC0, 0x10, 0x0E, 0x16)), Stroke = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF)), StrokeThickness = 1.5 };
+        var dial = new Grid { Width = 92, Height = 92 };
         dial.Children.Add(ring); dial.Children.Add(_sweep); dial.Children.Add(_number);
-        var caption = new TextBlock { Text = "Recording starts", Foreground = Brushes.White, FontSize = 16, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 18, 0, 2) };
-        var hint = new TextBlock { Text = "Esc or click to cancel", Foreground = new SolidColorBrush(Color.FromArgb(0xB0, 0xFF, 0xFF, 0xFF)), FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center };
+        var caption = new TextBlock { Text = "Recording starts", Foreground = Brushes.White, FontSize = 13, FontWeight = FontWeights.SemiBold, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 10, 0, 1) };
+        var hint = new TextBlock { Text = "Esc or click to cancel", Foreground = new SolidColorBrush(Color.FromArgb(0xB0, 0xFF, 0xFF, 0xFF)), FontSize = 11, HorizontalAlignment = HorizontalAlignment.Center };
         var stack = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         stack.Children.Add(dial); stack.Children.Add(caption); stack.Children.Add(hint);
         Content = new Grid { Children = { stack } };

@@ -25,25 +25,51 @@
                 <Button x:Name="PlayButton" DockPanel.Dock="Left" Style="{StaticResource BtnIcon}" Width="34" Height="30" FontSize="13" Content="&#xE768;" Foreground="{StaticResource Text}" Click="Play_Click" ToolTip="Play / pause (Space)"/>
                 <TextBlock x:Name="TimeText" DockPanel.Dock="Left" FontFamily="Consolas" Foreground="{StaticResource Text}" VerticalAlignment="Center" Margin="8,0,16,0" MinWidth="140"/>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                    <Button Click="SetStart_Click" Margin="0,0,6,0" Padding="10,5" ToolTip="The trimmed copy starts here (I)">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="[" FontWeight="Bold" Margin="0,0,6,0"/><TextBlock Text="Set start"/></StackPanel>
-                    </Button>
-                    <Button Click="SetEnd_Click" Padding="10,5" ToolTip="The trimmed copy ends here (O)">
-                        <StackPanel Orientation="Horizontal"><TextBlock Text="Set end"/><TextBlock Text="]" FontWeight="Bold" Margin="6,0,0,0"/></StackPanel>
-                    </Button>
+                    <Button Click="SetStart_Click" Margin="0,0,6,0" Padding="12,5" Content="Set start" ToolTip="The trimmed copy starts at the playhead (I)"/>
+                    <Button Click="SetEnd_Click" Padding="12,5" Content="Set end" ToolTip="The trimmed copy ends at the playhead (O)"/>
                 </StackPanel>
                 <TextBlock x:Name="RangeText" Style="{StaticResource Muted}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
             </DockPanel>
         </Border>
 
-        <!-- the timeline: the kept part is lit -->
-        <Grid DockPanel.Dock="Bottom" Margin="16,10,16,4" Height="26">
-            <Border Height="6" CornerRadius="3" Background="{StaticResource Bg3}" VerticalAlignment="Center" Margin="5,0"/>
-            <Canvas x:Name="Band" Margin="5,0" IsHitTestVisible="False">
-                <Border x:Name="Kept" Height="6" CornerRadius="3" Background="{StaticResource Accent}" Opacity="0.55" Canvas.Top="10"/>
+        <!-- the timeline: the cut-off parts stay dim, the kept part is a solid band between two handles; the
+             playhead is a white knob (the slider draws nothing else, so the band is never covered) -->
+        <Grid DockPanel.Dock="Bottom" Margin="16,10,16,4" Height="34">
+            <Border Height="6" CornerRadius="3" Background="#24FFFFFF" VerticalAlignment="Center" Margin="7,0"/>
+            <Canvas x:Name="Band" Margin="7,0" IsHitTestVisible="False">
+                <Border x:Name="Kept" Height="10" CornerRadius="2" Canvas.Top="12" Background="{StaticResource Accent}"/>
+                <Border x:Name="StartMark" Width="4" Height="26" CornerRadius="2" Canvas.Top="4" Background="White"/>
+                <Border x:Name="EndMark" Width="4" Height="26" CornerRadius="2" Canvas.Top="4" Background="White"/>
             </Canvas>
-            <Slider x:Name="Timeline" Minimum="0" Maximum="1" VerticalAlignment="Center" IsMoveToPointEnabled="True" Background="Transparent"
-                    ValueChanged="Timeline_ValueChanged" PreviewMouseLeftButtonDown="Timeline_Down" PreviewMouseLeftButtonUp="Timeline_Up"/>
+            <Slider x:Name="Timeline" Minimum="0" Maximum="1" VerticalAlignment="Center" IsMoveToPointEnabled="True" Height="34"
+                    ValueChanged="Timeline_ValueChanged" PreviewMouseLeftButtonDown="Timeline_Down" PreviewMouseLeftButtonUp="Timeline_Up">
+                <Slider.Template>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid Background="Transparent">
+                        <Track x:Name="PART_Track">
+                            <Track.DecreaseRepeatButton>
+                                <RepeatButton Command="Slider.DecreaseLarge"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate></RepeatButton.Template></RepeatButton>
+                            </Track.DecreaseRepeatButton>
+                            <Track.IncreaseRepeatButton>
+                                <RepeatButton Command="Slider.IncreaseLarge"><RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate></RepeatButton.Template></RepeatButton>
+                            </Track.IncreaseRepeatButton>
+                            <Track.Thumb>
+                                <Thumb Width="14" Height="34" Cursor="Hand">
+                                    <Thumb.Template>
+                                        <ControlTemplate TargetType="Thumb">
+                                            <Grid Background="Transparent">
+                                                <Border Width="2" Background="White" Opacity="0.85" HorizontalAlignment="Center"/>
+                                                <Ellipse Width="14" Height="14" Fill="White" Stroke="{StaticResource Bg1}" StrokeThickness="2" VerticalAlignment="Center"/>
+                                            </Grid>
+                                        </ControlTemplate>
+                                    </Thumb.Template>
+                                </Thumb>
+                            </Track.Thumb>
+                        </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Slider.Template>
+            </Slider>
         </Grid>
 
         <Grid Background="Black">

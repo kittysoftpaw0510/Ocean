@@ -111,8 +111,11 @@ public partial class TrimWindow : Window
         var w = Band.ActualWidth;
         if (w > 0 && _length > 0)
         {
-            Canvas.SetLeft(Kept, w * _start / _length);
-            Kept.Width = Math.Max(2, w * (_end - _start) / _length);
+            double a = w * _start / _length, b = w * _end / _length;
+            Canvas.SetLeft(Kept, a);
+            Kept.Width = Math.Max(2, b - a);
+            Canvas.SetLeft(StartMark, a - 2);
+            Canvas.SetLeft(EndMark, b - 2);
         }
         Hint.Text = _start <= 0.05
             ? "A new file is saved next to it; the original stays as it is. Cutting only the end is instant and keeps the quality exactly."
