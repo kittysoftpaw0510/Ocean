@@ -30,6 +30,8 @@ public sealed class ScreenStartDto
     public List<string> Invite { get; set; } = new();
     /// <summary>The request ("show me your screen") this answers, if any: its sender is let in and told.</summary>
     public string? AskId { get; set; }
+    /// <summary>My offer ("may I show you my screen?") that was accepted: that PC is let in and told where to watch.</summary>
+    public string? OfferAskId { get; set; }
 }
 
 public sealed class ScreenInviteDto
@@ -67,10 +69,14 @@ public sealed class MyScreenDto
     public string? Error { get; set; }
 }
 
-/// <summary>Node → node: "show me your screen" (kind show) or "look at my screen" (kind watch).</summary>
+/// <summary>
+/// Node → node: "show me your screen" (kind show), "may I show you my screen?" (kind offer: nothing is shared yet;
+/// the sender picks what to show once the answer is yes) or "look at my screen" (kind watch: an invitation into a
+/// session that runs already).
+/// </summary>
 public sealed class ScreenAskDto
 {
-    public const string Show = "show", Watch = "watch";
+    public const string Show = "show", Watch = "watch", Offer = "offer";
     public string AskId { get; set; } = "";
     public string Kind { get; set; } = Show;
     /// <summary>Kind watch: the session to join, and what it shows.</summary>
@@ -115,12 +121,28 @@ public sealed class ScreenPromptAnswerDto
 public sealed class ScreenRequestDto
 {
     public string AskId { get; set; } = "";
+    /// <summary>show (I asked to see theirs) or offer (I offered to show mine).</summary>
+    public string Kind { get; set; } = ScreenAskDto.Show;
     public string PeerId { get; set; } = "";
     public string PeerName { get; set; } = "";
     /// <summary>waiting, allowed, declined, timeout, away, busy, muted, old (its Ocean has no screen sharing), unreachable.</summary>
     public string State { get; set; } = "waiting";
     public string? SessionId { get; set; }
     public string? Message { get; set; }
+}
+
+/// <summary>
+/// Node → node, after an accepted offer: the sender now shares, and this is the session to watch (null: the sender
+/// didn't share after all; <see cref="Reason"/> says why: cancelled, timeout).
+/// </summary>
+public sealed class ScreenReadyDto
+{
+    public string AskId { get; set; } = "";
+    public string? SessionId { get; set; }
+    public string? Reason { get; set; }
+    /// <summary>Filled in for the app: who.</summary>
+    public string PeerId { get; set; } = "";
+    public string PeerName { get; set; } = "";
 }
 
 public sealed class ScreenJoinRequestDto

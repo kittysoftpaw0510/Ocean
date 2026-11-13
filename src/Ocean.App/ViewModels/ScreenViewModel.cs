@@ -28,10 +28,12 @@ public sealed partial class ScreenPromptVm : ObservableObject
     public ScreenPromptVm(ScreenPromptDto dto) { Dto = dto; Tick(); }
     public ScreenPromptDto Dto { get; }
     public bool IsShow => Dto.Kind == ScreenAskDto.Show;
+    public bool IsOffer => Dto.Kind == ScreenAskDto.Offer;
     public string Who => Dto.PeerName;
     public string Headline => IsShow ? $"{Dto.PeerName} asks to see your screen" : $"{Dto.PeerName} wants to show you their screen";
     public string Detail => IsShow
         ? "If you allow it, you choose what they see: a whole screen, one window or a part. You can stop at any time."
+        : IsOffer ? "If you say yes, they choose what to show and it opens here. You only watch; nothing of your PC is shown."
         : string.IsNullOrWhiteSpace(Dto.Title) ? "You only watch; nothing of your PC is shown." : $"“{Dto.Title}”. You only watch; nothing of your PC is shown.";
     public string AllowLabel => IsShow ? "Allow…" : "Watch";
     [ObservableProperty] private string _timeLeft = "";
@@ -149,30 +151,56 @@ public sealed partial class ScreenViewModel : ObservableObject
         await StartAsync(pick, everyone: true, Array.Empty<string>(), null);
     }
 
+    /// <summary>
+    /// "Show them my screen": the mirror of asking to see theirs. They are asked first; nothing is picked, captured
+    /// or shown before they say yes (<see cref="OfferAcceptedAsync"/>).
+    /// </summary>
     [RelayCommand]
     private async Task ShowTo(PeerVm? peer)
     {
         if (peer is null || !CanCapture()) return;
         if (!peer.Online) { _main.Toast("Offline", $"{peer.Label} is offline right now.", "warn"); return; }
+        if (Mine is { Everyone: true }) { _main.Toast("Already shared with everyone", $"{peer.Label} can watch your screen from their Ocean (it shows LIVE next to your name).", "info"); return; }
         try
         {
-            if (Mine is { } running)
+            var r = await _api.PostAsync<ScreenRequestDto>($"/api/screen/ask/{peer.Id}?kind={ScreenAskDto.Offer}", null);
+            if (r is null) return;
+            if (r.State == "waiting")
+                _main.Toast("Asked", $"{peer.Label} is asked whether they want to see your screen. Once they say yes, you pick what they see.", "info");
+            else _main.Toast("Couldn't ask", r.Message ?? $"{peer.Label} can't be asked right now.", "warn");
+        }
+        catch (Exception ex) { _main.Toast("Couldn't ask", ex.Message, "error"); }
+    }
+
+    /// <summary>They said yes to seeing my screen: into what I share already, or I pick now.</summary>
+    private async Task OfferAcceptedAsync(ScreenRequestDto r)
+    {
+        try
+        {
+            if (Mine is not null)
             {
-                // already sharing: this PC is asked into what runs
-                if (running.Everyone) { _main.Toast("Already shared with everyone", $"{peer.Label} can watch your screen from their Ocean (it shows LIVE next to your name).", "info"); return; }
-                var st = await _api.PostAsync<MyScreenDto>("/api/screen/invite", new ScreenInviteDto { PeerIds = { peer.Id } });
-                if (st?.Error is { } err) _main.Toast("Couldn't ask", err, "warn");
-                else { ApplyMine(st!); _main.Toast("Asked", $"{peer.Label} is asked to watch “{running.Title}”.", "info"); }
+                await _api.PostAsync("/api/screen/offer/" + r.AskId + "/go");
+                _main.Toast("Watching now", $"{r.PeerName} said yes and now sees what you are sharing.", "success");
                 return;
             }
-            var pick = await Ui.PickAsync($"Show your screen to {peer.Label}", $"{peer.Label} is asked to watch; nothing is shown unless they accept. Pick what they see.");
-            if (pick is null) return;
-            await StartAsync(pick, everyone: false, new[] { peer.Id }, null);
+            var pick = CanCapture() ? await Ui.PickAsync($"Show your screen to {r.PeerName}", $"{r.PeerName} said yes. Pick what they see; they watch until you stop.") : null;
+            if (pick is null || !await StartAsync(pick, everyone: false, Array.Empty<string>(), null, offerAskId: r.AskId))
+            {
+                try { await _api.DeleteAsync("/api/screen/ask/" + r.AskId); } catch { } // they stop waiting
+            }
         }
+        catch (ApiException ex) { _main.Toast("Too late", ex.Message, "info"); }
         catch (Exception ex) { _main.Toast("Screen sharing didn't start", ex.Message, "error"); }
     }
 
-    private async Task<bool> StartAsync(ScreenPick pick, bool everyone, IReadOnlyList<string> invite, string? askId)
+    /// <summary>An offer I said yes to: they share now (event "screenReady"), or not after all.</summary>
+    public void ApplyReady(ScreenReadyDto ready)
+    {
+        if (ready.SessionId is { } sid) { _ = WatchAsync(ready.PeerId, sid); return; }
+        _main.Toast("No screen", ready.Reason == "timeout" ? $"{ready.PeerName} didn't share their screen after all (nothing was picked in time)." : $"{ready.PeerName} didn't share their screen after all.", "info");
+    }
+
+    private async Task<bool> StartAsync(ScreenPick pick, bool everyone, IReadOnlyList<string> invite, string? askId, string? offerAskId = null)
     {
         _starting = true;
         try
@@ -180,7 +208,7 @@ public sealed partial class ScreenViewModel : ObservableObject
             var (w, h) = pick.SendSize();
             var st = await _api.PostAsync<MyScreenDto>("/api/screen/start", new ScreenStartDto
             {
-                Title = pick.Title, Width = w, Height = h, Fps = pick.Fps, Everyone = everyone, Invite = invite.ToList(), AskId = askId,
+                Title = pick.Title, Width = w, Height = h, Fps = pick.Fps, Everyone = everyone, Invite = invite.ToList(), AskId = askId, OfferAskId = offerAskId,
             });
             if (st is null || st.Error is not null || !st.Active) { _main.Toast("Screen sharing didn't start", st?.Error ?? "The service didn't start it.", "warn"); return false; }
             _encoder?.Dispose();
@@ -283,6 +311,12 @@ public sealed partial class ScreenViewModel : ObservableObject
     public void ApplyRequest(ScreenRequestDto r)
     {
         _waiting.Remove(r.AskId);
+        if (r.Kind == ScreenAskDto.Offer)
+        {
+            if (r.State == "allowed") { AppLog.Info("Screen", $"{r.PeerName} wants to see this PC's screen"); _ = OfferAcceptedAsync(r); }
+            else _main.Toast(r.State == "declined" ? "Declined" : "Not watching", r.Message ?? $"{r.PeerName} doesn't want to see your screen now.", "info");
+            return;
+        }
         if (r.State == "allowed" && r.SessionId is { } sid) { AppLog.Info("Screen", $"{r.PeerName} allowed their screen"); _ = WatchAsync(r.PeerId, sid); }
         else _main.Toast(r.State == "declined" ? "Declined" : "No screen", r.Message ?? $"{r.PeerName} doesn't show their screen.", "info");
     }
@@ -326,6 +360,7 @@ public sealed partial class ScreenViewModel : ObservableObject
             }
             if (!allow) return;
             if (res?.Result == "gone") { _main.Toast("Too late", $"{dto.PeerName}'s request is over.", "info"); return; }
+            if (prompt.IsOffer) { _main.Toast("Waiting", $"{dto.PeerName} is choosing what to show you. It opens here by itself.", "info"); return; }
             if (!prompt.IsShow) { if (dto.SessionId is { } sid) await WatchAsync(dto.PeerId, sid); return; }
             if (res?.Result == "ok") { _main.Toast("Allowed", $"{dto.PeerName} now watches what you are sharing.", "success"); return; }
             // nothing is shared yet: pick what they see

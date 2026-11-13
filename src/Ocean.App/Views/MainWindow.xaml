@@ -54,9 +54,9 @@
                       Visibility="{Binding CanAskScreen, Converter={StaticResource BoolToVis}}" ToolTip="They are asked; if they allow it, they choose what you see">
                 <MenuItem.Icon><TextBlock Text="&#xE7F4;" Style="{StaticResource Icon}" FontSize="12"/></MenuItem.Icon>
             </MenuItem>
-            <MenuItem Header="Show them my screen…" Command="{Binding PlacementTarget.Tag.Screen.ShowToCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"
-                      Visibility="{Binding Online, Converter={StaticResource BoolToVis}}" ToolTip="You pick what they see; they are asked whether they want to watch">
-                <MenuItem.Icon><TextBlock Text="&#xE8AF;" Style="{StaticResource Icon}" FontSize="12"/></MenuItem.Icon>
+            <MenuItem Header="Show them my screen" Command="{Binding PlacementTarget.Tag.Screen.ShowToCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"
+                      Visibility="{Binding Online, Converter={StaticResource BoolToVis}}" ToolTip="Only they are asked whether they want to see your screen; if they say yes, you pick what they see">
+                <MenuItem.Icon><TextBlock Text="&#xE72D;" Style="{StaticResource Icon}" FontSize="12"/></MenuItem.Icon>
             </MenuItem>
             <MenuItem Header="Allow their screen requests again" Command="{Binding PlacementTarget.Tag.Screen.UnmuteCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"
                       Visibility="{Binding ScreenMuted, Converter={StaticResource BoolToVis}}"/>
@@ -229,7 +229,7 @@
                     <Button Style="{StaticResource NavBtn}" Command="{Binding Screen.ShareWithEveryoneCommand}" Visibility="{Binding Screen.IsSharing, Converter={StaticResource InvBoolToVis}}"
                             ToolTip="Everyone on your network can watch your screen (a whole screen, one window or a part of it) until you stop. To show it to one person only, right-click them in the list.">
                         <DockPanel>
-                            <TextBlock Text="&#xE8AF;" Style="{StaticResource Icon}" Width="24" HorizontalAlignment="Left"/>
+                            <TextBlock Text="&#xE7F4;" Style="{StaticResource Icon}" Width="24" HorizontalAlignment="Left"/>
                             <TextBlock Text="Share my screen" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
                         </DockPanel>
                     </Button>

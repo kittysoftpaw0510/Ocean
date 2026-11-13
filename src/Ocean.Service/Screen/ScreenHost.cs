@@ -108,7 +108,7 @@ public sealed class ScreenHost : IDisposable
         {
             if (_s is not null) { var busy = Status(); busy.Error = "You are already sharing your screen; stop that first."; return busy; }
             if (req.Width < 16 || req.Height < 16 || req.Width > 4096 || req.Height > 4096) return new MyScreenDto { Error = "That picture size can't be shared." };
-            if (!req.Everyone && req.Invite.Count == 0 && req.AskId is null) return new MyScreenDto { Error = "Nobody was chosen to watch." };
+            if (!req.Everyone && req.Invite.Count == 0 && req.AskId is null && req.OfferAskId is null) return new MyScreenDto { Error = "Nobody was chosen to watch." };
             if (req.Everyone)
             {
                 // a screen for everyone loads the network like a multicast: the same limit

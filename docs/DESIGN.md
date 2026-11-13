@@ -245,7 +245,7 @@ and the requester polls `GET /p/access/{requestId}` every 2 s.
 | GET/HEAD | `/p/stream/{itemId}` | `Accept-Ranges: bytes`; rate-limited through a global token bucket when an upload cap is set; `{itemId}@light` = the lighter copy |
 | GET/POST | `/p/light/{itemId}` | state of the lighter copy; POST asks for one ("I'm watching this") |
 | POST | `/p/cast/{id}/join`, `/beat`, `/leave`; GET `/state` | multicast: join (key + group), heartbeat with stats (returns the host's state), leave |
-| POST | `/p/screen/ask`, `/answer`, `/cancel` | screen sharing: "show me your screen" / "look at my screen", the answer, taking a question back |
+| POST | `/p/screen/ask`, `/answer`, `/ready`, `/cancel` | screen sharing: "show me your screen" / "may I show you mine?" / "look at my screen", the answer, "I share now: watch here", taking a question back |
 | POST | `/p/screen/{id}/join`, `/beat`, `/leave`; GET `/stream?from=` | screen sharing: join (key, size, where packets go), report in, leave; the stream itself for whatever UDP didn't bring |
 | GET | `/p/neighbors` | nodes this node hears directly, its load and a revision (304 when unchanged); empty when bridging is off |
 | GET/HEAD/POST | `/p/via/{nodeId}/p/…` | carry a signed request on to a node the caller can't reach |
@@ -368,7 +368,10 @@ View only (nothing typed or clicked at the viewer reaches the host), picture onl
   packets thrown away every picture still decodes without an error.
 - **Asking** (`ScreenAsks`). "Show me your screen" (`kind: show`): the asked PC's user allows or declines; on allow
   they pick what to share (or the asker is let into what they share already), and the answer names the session.
-  "Look at my screen" (`kind: watch`, sent by the host for every invited PC): watch or decline. A question needs
+  "May I show you my screen?" (`kind: offer`, the mirror): watch or decline; on yes the asker's user picks what to
+  share, and `POST /p/screen/ready {askId, sessionId}` tells the other PC where to watch (or `/cancel` when nothing
+  was picked; either side gives up after 2 min). "Look at my screen" (`kind: watch`, sent by the host for every PC
+  invited into a running session): watch or decline. A question needs
   the app (`away` without one), waits 45 s (2 min while the user picks), one per PC and kind, not again within 10 s
   of a decline, and a PC can be muted (`screen-muted.json`). Answers the asker may get: allowed, declined, timeout,
   away, busy, muted, old (a 404: an Ocean without screen sharing).

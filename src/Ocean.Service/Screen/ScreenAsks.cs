@@ -14,6 +14,8 @@ namespace Ocean.Service.Screen;
 /// concerned:
 /// - "show me your screen" (kind show): the asked PC's user allows or declines; on allow they pick what to share
 ///   (or let the asker into what they share already), and the asker is told which session to join;
+/// - "may I show you my screen?" (kind offer, the mirror of show): the user watches or declines; on yes, the
+///   sender picks what to share and then tells this PC which session to watch (<c>/p/screen/ready</c>);
 /// - "look at my screen" (kind watch, sent by <see cref="ScreenHost"/> for every invited PC): the user watches or
 ///   declines.
 /// A question needs the app (someone to ask): without it the answer is "away". It waits 45 s (2 min while the
@@ -34,6 +36,10 @@ public sealed class ScreenAsks : IDisposable
     private readonly ConcurrentDictionary<string, ScreenPromptDto> _prompts = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, (ScreenRequestDto Dto, DateTimeOffset At)> _requests = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, DateTimeOffset> _declinedAt = new(StringComparer.Ordinal);
+    /// <summary>Offers this PC's user said yes to: waiting for the other PC to pick and share.</summary>
+    private readonly ConcurrentDictionary<string, (string PeerId, string PeerName, DateTimeOffset At)> _awaiting = new(StringComparer.Ordinal);
+    /// <summary>My offers the other PC said yes to: waiting for this PC's user to pick and share.</summary>
+    private readonly ConcurrentDictionary<string, (string PeerId, string PeerName, DateTimeOffset At)> _offered = new(StringComparer.Ordinal);
     private readonly HashSet<string> _muted = new(StringComparer.Ordinal);
     private readonly string _mutedPath = Path.Combine(OceanDefaults.DataDir, "screen-muted.json");
     private readonly Timer _tick;
@@ -58,7 +64,7 @@ public sealed class ScreenAsks : IDisposable
         if (_prompts.Values.Any(p => p.PeerId == peerId && p.Kind == ask.Kind)) return "busy";
         if (_prompts.Count >= 5) return "busy";
         if (_declinedAt.TryGetValue(peerId, out var at) && DateTimeOffset.UtcNow - at < AskAgainAfter) return "busy";
-        var kind = ask.Kind == ScreenAskDto.Watch ? ScreenAskDto.Watch : ScreenAskDto.Show;
+        var kind = ask.Kind is ScreenAskDto.Watch or ScreenAskDto.Offer ? ask.Kind : ScreenAskDto.Show;
         if (kind == ScreenAskDto.Watch && string.IsNullOrEmpty(ask.SessionId)) return "busy";
         var now = DateTimeOffset.UtcNow;
         var prompt = new ScreenPromptDto
@@ -67,16 +73,30 @@ public sealed class ScreenAsks : IDisposable
             Title = ask.Title is { Length: > 120 } t ? t[..120] : ask.Title, At = now, ExpiresAt = now + ScreenHost.AskTimeout,
         };
         _prompts[ask.AskId] = prompt;
-        _log.LogInformation("screen sharing: {Name} asks {What}", peerName, kind == ScreenAskDto.Show ? "to see this PC's screen" : "this PC to look at their screen");
+        _log.LogInformation("screen sharing: {Name} asks {What}", peerName, kind == ScreenAskDto.Show ? "to see this PC's screen" : kind == ScreenAskDto.Offer ? "whether they may show their screen" : "this PC to look at their screen");
         _events.Publish("screenPrompt", prompt);
         return null;
     }
 
-    /// <summary>The asking PC took its question back (or its session ended).</summary>
+    /// <summary>The asking PC took its question back (or its session ended, or it won't share after an accepted offer).</summary>
     public void Withdrawn(string peerId, string askId)
     {
+        if (_awaiting.TryGetValue(askId, out var w) && w.PeerId == peerId && _awaiting.TryRemove(askId, out _))
+        {
+            _events.Publish("screenReady", new ScreenReadyDto { AskId = askId, PeerId = peerId, PeerName = w.PeerName, Reason = "cancelled" });
+            return;
+        }
         if (!_prompts.TryGetValue(askId, out var p) || p.PeerId != peerId || !_prompts.TryRemove(askId, out _)) return;
         Gone(p, "withdrawn");
+    }
+
+    /// <summary>An offer this PC's user said yes to: the other PC shares now (or not after all).</summary>
+    public void Ready(string peerId, ScreenReadyDto ready)
+    {
+        if (!_awaiting.TryGetValue(ready.AskId, out var w) || w.PeerId != peerId || !_awaiting.TryRemove(ready.AskId, out _)) return;
+        ready.PeerId = peerId; ready.PeerName = w.PeerName;
+        _log.LogInformation("screen sharing: {Name} {What}", w.PeerName, ready.SessionId is null ? "doesn't share after all" : "shares their screen now");
+        _events.Publish("screenReady", ready);
     }
 
     private void Gone(ScreenPromptDto p, string why)
@@ -91,7 +111,8 @@ public sealed class ScreenAsks : IDisposable
 
     /// <summary>
     /// The user's answer. "ok": done. "pick": allowed to see my screen but nothing is shared yet: the app lets the
-    /// user pick and starts the session with this ask id (or answers again with allow = false). "gone": too late.
+    /// user pick and starts the session with this ask id (or answers again with allow = false). "wait": yes to an
+    /// offer; the other PC picks now and the screen opens when it shares (event screenReady). "gone": too late.
     /// </summary>
     public string Answer(string askId, ScreenPromptAnswerDto answer)
     {
@@ -104,6 +125,14 @@ public sealed class ScreenAsks : IDisposable
             Send(p.PeerId, "/p/screen/answer", new ScreenAnswerDto { AskId = askId, Allow = false, Reason = answer.Mute ? "muted" : "declined" });
             _log.LogInformation("screen sharing: declined {Name}", p.PeerName);
             return "ok";
+        }
+        if (p.Kind == ScreenAskDto.Offer)
+        {
+            _prompts.TryRemove(askId, out _);
+            _awaiting[askId] = (p.PeerId, p.PeerName, DateTimeOffset.UtcNow);
+            Send(p.PeerId, "/p/screen/answer", new ScreenAnswerDto { AskId = askId, Allow = true });
+            _log.LogInformation("screen sharing: will watch {Name}'s screen once they share it", p.PeerName);
+            return "wait";
         }
         if (p.Kind == ScreenAskDto.Watch)
         {
@@ -146,18 +175,19 @@ public sealed class ScreenAsks : IDisposable
         _log.LogInformation("screen sharing: requests from {Name} are {What}", _peers.NameOf(peerId), on ? "muted" : "allowed again");
     }
 
-    // ------------------------------------------------------------------ my questions to other PCs ("show me your screen")
+    // ------------------------------------------------------------------ my questions to other PCs ("show me your screen", "may I show you mine?")
 
-    public async Task<ScreenRequestDto> RequestAsync(string peerId, CancellationToken ct)
+    public async Task<ScreenRequestDto> RequestAsync(string peerId, string kind, CancellationToken ct)
     {
+        kind = kind == ScreenAskDto.Offer ? ScreenAskDto.Offer : ScreenAskDto.Show;
         var name = _peers.NameOf(peerId);
-        if (_requests.Values.FirstOrDefault(r => r.Dto.PeerId == peerId && r.Dto.State == "waiting") is { Dto: not null } open) return open.Dto;
-        var dto = new ScreenRequestDto { AskId = Guid.NewGuid().ToString("N"), PeerId = peerId, PeerName = name };
+        if (_requests.Values.FirstOrDefault(r => r.Dto.PeerId == peerId && r.Dto.Kind == kind && r.Dto.State == "waiting") is { Dto: not null } open) return open.Dto;
+        var dto = new ScreenRequestDto { AskId = Guid.NewGuid().ToString("N"), Kind = kind, PeerId = peerId, PeerName = name };
         if (!_registry.TryGetOnline(peerId, out var peer)) { dto.State = "unreachable"; dto.Message = $"{name} is offline."; return dto; }
         try
         {
             var req = _client.Build(peer, HttpMethod.Post, "/p/screen/ask");
-            req.Content = JsonContent.Create(new ScreenAskDto { AskId = dto.AskId, Kind = ScreenAskDto.Show }, options: Json.Options);
+            req.Content = JsonContent.Create(new ScreenAskDto { AskId = dto.AskId, Kind = kind }, options: Json.Options);
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(10_000);
             using var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseContentRead, cts.Token);
@@ -175,7 +205,7 @@ public sealed class ScreenAsks : IDisposable
             return dto;
         }
         _requests[dto.AskId] = (dto, DateTimeOffset.UtcNow);
-        _log.LogInformation("screen sharing: asked {Name} to show their screen", name);
+        _log.LogInformation("screen sharing: asked {Name} {What}", name, kind == ScreenAskDto.Offer ? "whether they want to see this PC's screen" : "to show their screen");
         return dto;
     }
 
@@ -190,10 +220,26 @@ public sealed class ScreenAsks : IDisposable
         _ => $"{name} can't be reached right now.",
     };
 
+    /// <summary>My question taken back, or my accepted offer given up (the user didn't pick anything to share).</summary>
     public void CancelRequest(string askId)
     {
+        if (_offered.TryRemove(askId, out var o)) { Send(o.PeerId, "/p/screen/cancel", new ScreenAnswerDto { AskId = askId }); return; }
         if (!_requests.TryRemove(askId, out var r)) return;
         Send(r.Dto.PeerId, "/p/screen/cancel", new ScreenAnswerDto { AskId = askId });
+    }
+
+    /// <summary>Is this accepted offer still open (the other PC waits for my screen)?</summary>
+    public bool OfferOpen(string askId) => _offered.ContainsKey(askId);
+
+    /// <summary>An accepted offer is kept: the other PC is let into what I share now and told where to watch. Null: too late, or nothing shared.</summary>
+    public string? OfferGo(string askId)
+    {
+        if (!_offered.TryRemove(askId, out var o)) return null;
+        var sid = _host.Admit(o.PeerId, o.PeerName);
+        if (sid is null) { Send(o.PeerId, "/p/screen/cancel", new ScreenAnswerDto { AskId = askId }); return null; }
+        _log.LogInformation("screen sharing: {Name} said yes and watches now", o.PeerName);
+        Send(o.PeerId, "/p/screen/ready", new ScreenReadyDto { AskId = askId, SessionId = sid });
+        return sid;
     }
 
     /// <summary>An answer from another PC: to my own question, or to an invitation of my session.</summary>
@@ -202,7 +248,9 @@ public sealed class ScreenAsks : IDisposable
         if (_requests.TryGetValue(answer.AskId, out var r) && r.Dto.PeerId == peerId && _requests.TryRemove(answer.AskId, out _))
         {
             var dto = r.Dto;
-            dto.State = answer.Allow && !string.IsNullOrEmpty(answer.SessionId) ? "allowed" : answer.Reason is "timeout" or "away" or "muted" or "busy" ? answer.Reason : "declined";
+            var yes = answer.Allow && (dto.Kind == ScreenAskDto.Offer || !string.IsNullOrEmpty(answer.SessionId));
+            dto.State = yes ? "allowed" : answer.Reason is "timeout" or "away" or "muted" or "busy" ? answer.Reason : "declined";
+            if (yes && dto.Kind == ScreenAskDto.Offer) _offered[dto.AskId] = (peerId, dto.PeerName, DateTimeOffset.UtcNow);
             dto.SessionId = answer.Allow ? answer.SessionId : null;
             dto.Message = dto.State == "allowed" ? null : Explain(dto.State, dto.PeerName);
             _log.LogInformation("screen sharing: {Name} answered: {State}", dto.PeerName, dto.State);
@@ -229,6 +277,12 @@ public sealed class ScreenAsks : IDisposable
             if (_events.SubscriberCount == 0)
                 foreach (var p in _prompts.Values)
                     if (_prompts.TryRemove(p.AskId, out _)) Send(p.PeerId, "/p/screen/answer", new ScreenAnswerDto { AskId = p.AskId, Allow = false, Reason = "away" });
+            // an offer said yes to, but its sender never shared (the picker left open, the app gone): over for both
+            foreach (var (id, w) in _awaiting)
+                if (now - w.At > PickTime + TimeSpan.FromSeconds(30) && _awaiting.TryRemove(id, out _))
+                    _events.Publish("screenReady", new ScreenReadyDto { AskId = id, PeerId = w.PeerId, PeerName = w.PeerName, Reason = "timeout" });
+            foreach (var (id, o) in _offered)
+                if (now - o.At > PickTime && _offered.TryRemove(id, out _)) Send(o.PeerId, "/p/screen/cancel", new ScreenAnswerDto { AskId = id });
             foreach (var (id, r) in _requests)
             {
                 if (now - r.At <= RequestTimeout || !_requests.TryRemove(id, out _)) continue;

@@ -222,6 +222,13 @@ public static class PeerApi
             asks.Answered(PeerContext.Get(ctx).ClientId, answer);
             return Results.Ok();
         });
+        g.MapPost("/screen/ready", async (HttpContext ctx, ScreenAsks asks) =>
+        {
+            var ready = await ctx.Request.ReadFromJsonAsync<ScreenReadyDto>(Json.Options, ctx.RequestAborted);
+            if (ready is null) return Results.BadRequest();
+            asks.Ready(PeerContext.Get(ctx).ClientId, ready);
+            return Results.Ok();
+        });
         g.MapPost("/screen/cancel", async (HttpContext ctx, ScreenAsks asks) =>
         {
             var answer = await ctx.Request.ReadFromJsonAsync<ScreenAnswerDto>(Json.Options, ctx.RequestAborted);

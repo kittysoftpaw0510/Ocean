@@ -214,8 +214,11 @@ public static class LocalApi
             if (req is null) return Results.BadRequest();
             if (req.AskId is not null && asks.Prompt(req.AskId) is null)
                 return Results.Json(new MyScreenDto { Error = "That request is over (it waited too long or was taken back)." }, Json.Options);
+            if (req.OfferAskId is not null && !asks.OfferOpen(req.OfferAskId))
+                return Results.Json(new MyScreenDto { Error = "That's over: the other PC stopped waiting." }, Json.Options);
             var st = screen.Start(req);
             if (st.Error is null && req.AskId is not null) { asks.Granted(req.AskId); st = screen.Status(); }
+            if (st.Error is null && req.OfferAskId is not null) { asks.OfferGo(req.OfferAskId); st = screen.Status(); }
             return Results.Json(st, Json.Options);
         });
         g.MapPost("/screen/invite", async (HttpContext ctx, Ocean.Service.Screen.ScreenHost screen) =>
@@ -234,8 +237,12 @@ public static class LocalApi
             catch (IOException) { return Results.Ok(); } // the encoder stopped
         });
         // ---- screen sharing: questions (see ScreenAsks) ----
-        g.MapPost("/screen/ask/{peerId}", async (string peerId, HttpContext ctx, Ocean.Service.Screen.ScreenAsks asks) =>
-            Results.Json(await asks.RequestAsync(peerId, ctx.RequestAborted), Json.Options));
+        g.MapPost("/screen/ask/{peerId}", async (string peerId, string? kind, HttpContext ctx, Ocean.Service.Screen.ScreenAsks asks) =>
+            Results.Json(await asks.RequestAsync(peerId, kind ?? ScreenAskDto.Show, ctx.RequestAborted), Json.Options));
+        // an accepted offer while I share already: that PC is let in at once
+        g.MapPost("/screen/offer/{askId}/go", (string askId, Ocean.Service.Screen.ScreenAsks asks) =>
+            asks.OfferGo(askId) is { } sid ? Results.Json(new { sessionId = sid }, Json.Options)
+                : Results.Json(new ErrorDto { Error = "gone", Message = "That's over: the other PC stopped waiting." }, Json.Options, statusCode: 409));
         g.MapDelete("/screen/ask/{askId}", (string askId, Ocean.Service.Screen.ScreenAsks asks) => { asks.CancelRequest(askId); return Results.Ok(); });
         g.MapGet("/screen/prompts", (Ocean.Service.Screen.ScreenAsks asks) => Results.Json(asks.Prompts(), Json.Options));
         g.MapPost("/screen/prompts/{askId}", async (string askId, HttpContext ctx, Ocean.Service.Screen.ScreenAsks asks) =>

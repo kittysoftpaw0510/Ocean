@@ -531,6 +531,9 @@ public partial class MainViewModel : ObservableObject
                 case "screenRequest":
                     if (Json.Deserialize<ScreenRequestDto>(data) is { } answer) Screen.ApplyRequest(answer);
                     break;
+                case "screenReady":
+                    if (Json.Deserialize<ScreenReadyDto>(data) is { } ready) Screen.ApplyReady(ready);
+                    break;
                 case "screenView":
                     if (Json.Deserialize<ScreenViewDto>(data) is { } watching) Screen.ApplyView(watching);
                     break;
