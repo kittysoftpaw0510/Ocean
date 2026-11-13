@@ -11,7 +11,11 @@ public sealed class TrayIcon : IDisposable
     private static readonly int TraySize = Math.Max(16, SystemInformation.SmallIconSize.Width);
     private readonly Icon _plain = IconFactory.CreateIcon(TraySize);
     private readonly Icon _badged = IconFactory.CreateIcon(TraySize, badge: true);
+    private readonly Icon _recording = IconFactory.CreateIcon(TraySize, recording: true);
+    private readonly Icon _recordingPaused = IconFactory.CreateIcon(TraySize, recording: true, paused: true);
+    private readonly ToolStripMenuItem _record, _recordPause, _recordStop;
     private bool _badge;
+    private bool _isRecording, _isPaused;
     private Action? _balloonAction;
 
     public event Action? OpenRequested;
@@ -19,12 +23,22 @@ public sealed class TrayIcon : IDisposable
     public event Action? ExitRequested;
     public event Action? ExitAndStopRequested;
     public event Action<bool>? PauseToggled;
+    /// <summary>"Record my screen…": the picker opens (Ocean's window stays as it is).</summary>
+    public event Action? RecordRequested;
+    public event Action? RecordPauseRequested;
+    public event Action? RecordStopRequested;
 
     public TrayIcon()
     {
         var menu = new ContextMenuStrip();
         menu.Items.Add(new ToolStripMenuItem("Open Ocean", null, (_, _) => OpenRequested?.Invoke()) { Font = new Font(Control.DefaultFont, FontStyle.Bold) });
         menu.Items.Add(new ToolStripMenuItem("Settings", null, (_, _) => SettingsRequested?.Invoke()));
+        menu.Items.Add(new ToolStripSeparator());
+        // recording, straight from here: no need to open Ocean's window
+        _record = new ToolStripMenuItem("Record my screen…", null, (_, _) => RecordRequested?.Invoke());
+        _recordStop = new ToolStripMenuItem("Stop recording", null, (_, _) => RecordStopRequested?.Invoke()) { Font = new Font(Control.DefaultFont, FontStyle.Bold), Visible = false };
+        _recordPause = new ToolStripMenuItem("Pause recording", null, (_, _) => RecordPauseRequested?.Invoke()) { Visible = false };
+        menu.Items.Add(_record); menu.Items.Add(_recordStop); menu.Items.Add(_recordPause);
         menu.Items.Add(new ToolStripSeparator());
         _pause =new ToolStripMenuItem("Pause sharing", null, (_, _) => PauseToggled?.Invoke(!_pause!.Checked)) { CheckOnClick = false };
         menu.Items.Add(_pause);
@@ -49,8 +63,22 @@ public sealed class TrayIcon : IDisposable
     {
         if (_badge == on) return;
         _badge = on;
-        _icon.Icon = on ? _badged : _plain;
+        ApplyIcon();
     }
+
+    /// <summary>A recording runs: the menu offers Stop and Pause / Go on (with the time), the icon carries a red dot (amber while paused).</summary>
+    public void SetRecording(bool recording, bool paused, string elapsed)
+    {
+        _record.Visible = !recording;
+        _recordStop.Visible = recording; _recordPause.Visible = recording;
+        _recordStop.Text = recording ? $"Stop recording  ({elapsed})" : "Stop recording";
+        _recordPause.Text = paused ? "Go on recording" : "Pause recording";
+        if (_isRecording == recording && _isPaused == paused) return;
+        _isRecording = recording; _isPaused = paused;
+        ApplyIcon();
+    }
+
+    private void ApplyIcon() => _icon.Icon = _isRecording ? (_isPaused ? _recordingPaused : _recording) : _badge ? _badged : _plain;
 
     public void SetPaused(bool paused) => _pause.Checked = paused;
 
@@ -66,5 +94,7 @@ public sealed class TrayIcon : IDisposable
         _icon.Dispose();
         _plain.Dispose();
         _badged.Dispose();
+        _recording.Dispose();
+        _recordingPaused.Dispose();
     }
 }

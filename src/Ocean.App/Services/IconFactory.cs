@@ -16,11 +16,19 @@ public static class IconFactory
     private static Stream OpenIcon() => Application.GetResourceStream(IconUri)!.Stream;
 
     /// <summary>Win32 icon at the requested size (closest frame), optionally with the "new" badge.</summary>
-    public static Icon CreateIcon(int size = 32, bool badge = false)
+    /// <param name="badge">The green "new videos" dot (top right).</param>
+    /// <param name="recording">A recording dot (bottom right): red while recording, amber when <paramref name="paused"/>.</param>
+    public static Icon CreateIcon(int size = 32, bool badge = false, bool recording = false, bool paused = false)
     {
         using var stream = OpenIcon();
         using var source = new Icon(stream, size, size);
+        if (recording) return WithDot(source, size, paused ? System.Drawing.Color.FromArgb(0xF5, 0xB0, 0x2E) : System.Drawing.Color.FromArgb(0xF4, 0x3F, 0x5E), bottom: true);
         if (!badge) return (Icon)source.Clone();
+        return WithDot(source, size, System.Drawing.Color.FromArgb(0x34, 0xD3, 0x99), bottom: false);
+    }
+
+    private static Icon WithDot(Icon source, int size, System.Drawing.Color color, bool bottom)
+    {
 
         using var bmp = new Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         using (var g = Graphics.FromImage(bmp))
@@ -28,10 +36,10 @@ public static class IconFactory
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             using (var frame = source.ToBitmap()) g.DrawImage(frame, 0, 0, size, size);
-            var d = size * 0.42f;
-            var rect = new RectangleF(size - d - 0.5f, 0.5f, d, d);
+            var d = size * (bottom ? 0.5f : 0.42f);
+            var rect = new RectangleF(size - d - 0.5f, bottom ? size - d - 0.5f : 0.5f, d, d);
             using var ring = new SolidBrush(System.Drawing.Color.FromArgb(0x0A, 0x11, 0x20));
-            using var dot = new SolidBrush(System.Drawing.Color.FromArgb(0x34, 0xD3, 0x99));
+            using var dot = new SolidBrush(color);
             g.FillEllipse(ring, rect);
             var inset = Math.Max(1f, size / 16f);
             g.FillEllipse(dot, RectangleF.Inflate(rect, -inset, -inset));

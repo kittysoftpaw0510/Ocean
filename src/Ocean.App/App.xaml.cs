@@ -101,6 +101,14 @@ public partial class App : Application
         _tray.ExitRequested += () => Dispatcher.InvokeAsync(() => ExitApp(stopService: false));
         _tray.ExitAndStopRequested += () => Dispatcher.InvokeAsync(() => ExitApp(stopService: true));
         _tray.PauseToggled += _ => Dispatcher.InvokeAsync(() => _vm.TogglePauseCommand.Execute(null));
+        // recording from the tray: Ocean's window stays hidden if it is
+        _tray.RecordRequested += () => Dispatcher.InvokeAsync(() => _vm.Record.StartCommand.Execute(null));
+        _tray.RecordPauseRequested += () => Dispatcher.InvokeAsync(() => _vm.Record.TogglePauseCommand.Execute(null));
+        _tray.RecordStopRequested += () => Dispatcher.InvokeAsync(() => _vm.Record.StopCommand.Execute(null));
+        _vm.Record.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(RecordViewModel.IsRecording) or nameof(RecordViewModel.Paused) or nameof(RecordViewModel.ElapsedText) or nameof(RecordViewModel.Saving)) UpdateTray();
+        };
         _vm.TrayNotify += (title, text, click) => Dispatcher.InvokeAsync(() =>
         {
             if (_window is { IsVisible: true, IsActive: true }) return; // the in-app toast is enough
@@ -126,7 +134,11 @@ public partial class App : Application
         if (_tray is null || _vm is null) return;
         _tray.SetBadge(_vm.TotalNew > 0);
         _tray.SetPaused(_vm.SharingPaused);
-        _tray.SetText("Ocean: " + _vm.StatusText + (_vm.TotalNew > 0 ? $"  ·  {_vm.TotalNew} new" : ""));
+        var rec = _vm.Record;
+        _tray.SetRecording(rec.IsRecording && !rec.Saving, rec.Paused, rec.ElapsedText);
+        _tray.SetText(rec.IsRecording
+            ? (rec.Saving ? "Ocean: saving the recording…" : rec.Paused ? $"Ocean: recording paused at {rec.ElapsedText}" : $"Ocean: recording {rec.ElapsedText}")
+            : "Ocean: " + _vm.StatusText + (_vm.TotalNew > 0 ? $"  ·  {_vm.TotalNew} new" : ""));
     }
 
     private void ShowWindow()
