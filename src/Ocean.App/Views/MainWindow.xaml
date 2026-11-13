@@ -225,43 +225,6 @@
 
                 <!-- library -->
                 <StackPanel Grid.Row="4" Margin="0,6,0,6">
-                    <!-- my screen: share it with everyone, or stop -->
-                    <Button Style="{StaticResource NavBtn}" Command="{Binding Screen.ShareWithEveryoneCommand}" Visibility="{Binding Screen.IsSharing, Converter={StaticResource InvBoolToVis}}"
-                            ToolTip="Everyone on your network can watch your screen (a whole screen, one window or a part of it) until you stop. To show it to one person only, right-click them in the list.">
-                        <DockPanel>
-                            <TextBlock Text="&#xE7F4;" Style="{StaticResource Icon}" Width="24" HorizontalAlignment="Left"/>
-                            <TextBlock Text="Share my screen" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
-                        </DockPanel>
-                    </Button>
-                    <Button Style="{StaticResource NavBtn}" Command="{Binding Screen.StopCommand}" Visibility="{Binding Screen.IsSharing, Converter={StaticResource BoolToVis}}"
-                            ToolTip="{Binding Screen.SharingDetail}">
-                        <DockPanel>
-                            <Ellipse DockPanel.Dock="Left" Width="10" Height="10" Fill="#FB7185" Margin="5,0,9,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="Stop sharing my screen" Foreground="#FB7185" FontWeight="SemiBold"/>
-                        </DockPanel>
-                    </Button>
-                    <!-- my screen: record it (with the speaker and the microphone), or stop -->
-                    <Button Style="{StaticResource NavBtn}" Command="{Binding Record.StartCommand}" Visibility="{Binding Record.IsRecording, Converter={StaticResource InvBoolToVis}}"
-                            ToolTip="Record a screen, a window or a part of one, with the speaker sound and your microphone. Saved as MP4 (quality and folder: Settings › Screen recordings).">
-                        <DockPanel>
-                            <TextBlock Text="&#xE7C8;" Style="{StaticResource Icon}" Width="24" HorizontalAlignment="Left"/>
-                            <TextBlock Text="Record my screen" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
-                        </DockPanel>
-                    </Button>
-                    <Button Style="{StaticResource NavBtn}" Command="{Binding Record.StopCommand}" Visibility="{Binding Record.IsRecording, Converter={StaticResource BoolToVis}}">
-                        <DockPanel>
-                            <Ellipse DockPanel.Dock="Left" Width="10" Height="10" Fill="#FB7185" Margin="5,0,9,0" VerticalAlignment="Center"/>
-                            <TextBlock DockPanel.Dock="Right" Text="{Binding Record.ElapsedText}" FontFamily="Consolas" Foreground="#FB7185" VerticalAlignment="Center"/>
-                            <TextBlock Foreground="#FB7185" FontWeight="SemiBold">
-                                <TextBlock.Style>
-                                    <Style TargetType="TextBlock">
-                                        <Setter Property="Text" Value="Stop recording"/>
-                                        <Style.Triggers><DataTrigger Binding="{Binding Record.Paused}" Value="True"><Setter Property="Text" Value="Stop recording (paused)"/></DataTrigger></Style.Triggers>
-                                    </Style>
-                                </TextBlock.Style>
-                            </TextBlock>
-                        </DockPanel>
-                    </Button>
                     <TextBlock Text="LIBRARY" Style="{StaticResource Dim}" FontWeight="SemiBold" Margin="18,6,14,4"/>
                     <Button Command="{Binding ShowSharesCommand}">
                         <Button.Style>
@@ -316,11 +279,101 @@
                     </Button>
                 </StackPanel>
 
-                <!-- footer -->
-                <Border Grid.Row="5" BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="16,10">
-                    <Grid>
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <Ellipse Width="8" Height="8" Margin="0,0,8,0">
+                <!-- footer: the network's state; my screen (share, record: each turns red while it runs, a click then
+                     stops it); pause sharing. In the footer, so the node list above keeps all its room. -->
+                <Border Grid.Row="5" BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="16,8,10,8">
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button Height="28" MinWidth="28" Padding="6,0" FontSize="13" AutomationProperties.Name="Share my screen">
+                                <Button.Style>
+                                    <Style TargetType="Button" BasedOn="{StaticResource BtnIcon}">
+                                        <Setter Property="Width" Value="NaN"/>
+                                        <Setter Property="Command" Value="{Binding Screen.ShareWithEveryoneCommand}"/>
+                                        <Setter Property="ToolTip" Value="Share my screen with everyone (a screen, a window or a part of it). To show it to one person only, right-click them in the list."/>
+                                        <Setter Property="Content"><Setter.Value><TextBlock Text="&#xE7F4;" Style="{StaticResource Icon}"/></Setter.Value></Setter>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Screen.IsSharing}" Value="True">
+                                                <Setter Property="Command" Value="{Binding Screen.StopCommand}"/>
+                                                <Setter Property="ToolTip" Value="{Binding Screen.SharingDetail}"/>
+                                                <Setter Property="Background" Value="#26E11D48"/>
+                                                <Setter Property="Content">
+                                                    <Setter.Value>
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="&#xE7F4;" Style="{StaticResource Icon}" Foreground="#FB7185" VerticalAlignment="Center"/>
+                                                            <TextBlock Text="Stop" FontFamily="{StaticResource UiFont}" FontSize="12" FontWeight="SemiBold" Foreground="#FB7185" Margin="5,0,0,0" VerticalAlignment="Center"/>
+                                                        </StackPanel>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
+                            <Button Height="28" MinWidth="28" Padding="6,0" Margin="2,0,0,0" FontSize="13" AutomationProperties.Name="Record my screen">
+                                <Button.Style>
+                                    <Style TargetType="Button" BasedOn="{StaticResource BtnIcon}">
+                                        <Setter Property="Width" Value="NaN"/>
+                                        <Setter Property="Command" Value="{Binding Record.StartCommand}"/>
+                                        <Setter Property="ToolTip" Value="Record my screen, with the speaker sound and your microphone (also from the tray icon)"/>
+                                        <Setter Property="Content"><Setter.Value><TextBlock Text="&#xE7C8;" Style="{StaticResource Icon}"/></Setter.Value></Setter>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Record.IsRecording}" Value="True">
+                                                <Setter Property="Command" Value="{Binding Record.StopCommand}"/>
+                                                <Setter Property="ToolTip" Value="Stop recording and save it (pause it on the recording bar or from the tray icon)"/>
+                                                <Setter Property="Background" Value="#26E11D48"/>
+                                                <Setter Property="Content">
+                                                    <Setter.Value>
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <Ellipse Width="8" Height="8" VerticalAlignment="Center">
+                                                                <Ellipse.Style>
+                                                                    <Style TargetType="Ellipse">
+                                                                        <Setter Property="Fill" Value="#FB7185"/>
+                                                                        <Style.Triggers><DataTrigger Binding="{Binding Record.Paused}" Value="True"><Setter Property="Fill" Value="#FBBF24"/></DataTrigger></Style.Triggers>
+                                                                    </Style>
+                                                                </Ellipse.Style>
+                                                            </Ellipse>
+                                                            <TextBlock Text="{Binding Record.ElapsedText}" FontFamily="Consolas" FontSize="12" FontWeight="SemiBold" Foreground="#FB7185" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                                                        </StackPanel>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
+                            <Border Width="1" Height="16" Background="{StaticResource Border}" Margin="6,0" VerticalAlignment="Center"/>
+                            <Button Style="{StaticResource BtnIcon}" Command="{Binding TogglePauseCommand}" Width="28" Height="28" FontSize="13">
+                                <Button.Content>
+                                    <TextBlock>
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock" BasedOn="{StaticResource Icon}">
+                                                <Setter Property="Text" Value="&#xE769;"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding SharingPaused}" Value="True">
+                                                        <Setter Property="Text" Value="&#xE768;"/>
+                                                        <Setter Property="Foreground" Value="{StaticResource Warn}"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Button.Content>
+                                <Button.ToolTip>
+                                    <TextBlock>
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Text" Value="Pause sharing (hide my shares)"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding SharingPaused}" Value="True"><Setter Property="Text" Value="Resume sharing"/></DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Button.ToolTip>
+                            </Button>
+                        </StackPanel>
+                        <DockPanel VerticalAlignment="Center">
+                            <Ellipse DockPanel.Dock="Left" Width="8" Height="8" Margin="0,0,8,0">
                                 <Ellipse.Style>
                                     <Style TargetType="Ellipse">
                                         <Setter Property="Fill" Value="{StaticResource New}"/>
@@ -331,38 +384,9 @@
                                     </Style>
                                 </Ellipse.Style>
                             </Ellipse>
-                            <TextBlock Text="{Binding StatusText}" Style="{StaticResource Dim}" MaxWidth="150"/>
-                        </StackPanel>
-                        <Button Style="{StaticResource BtnIcon}" HorizontalAlignment="Right" Command="{Binding TogglePauseCommand}" Width="28" Height="28" FontSize="13">
-                            <Button.Content>
-                                <TextBlock>
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock" BasedOn="{StaticResource Icon}">
-                                            <Setter Property="Text" Value="&#xE769;"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding SharingPaused}" Value="True">
-                                                    <Setter Property="Text" Value="&#xE768;"/>
-                                                    <Setter Property="Foreground" Value="{StaticResource Warn}"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
-                            </Button.Content>
-                            <Button.ToolTip>
-                                <TextBlock>
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                            <Setter Property="Text" Value="Pause sharing (hide my shares)"/>
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding SharingPaused}" Value="True"><Setter Property="Text" Value="Resume sharing"/></DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
-                            </Button.ToolTip>
-                        </Button>
-                    </Grid>
+                            <TextBlock Text="{Binding StatusText}" Style="{StaticResource Dim}" TextTrimming="CharacterEllipsis" ToolTip="{Binding StatusText}" VerticalAlignment="Center"/>
+                        </DockPanel>
+                    </DockPanel>
                 </Border>
             </Grid>
         </Border>
