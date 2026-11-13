@@ -73,8 +73,8 @@
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                             <TextBlock Text="Start" Style="{StaticResource Muted}" VerticalAlignment="Center" Width="62"/>
-                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Countdown}" AutomationProperties.Name="Count down 3, 2, 1 first"/>
-                            <TextBlock Text="Count down 3, 2, 1 first" Margin="8,0,0,0" VerticalAlignment="Center" ToolTip="A moment to get ready, so the video doesn't open on the Start click (Esc or a click cancels)"/>
+                            <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding Countdown}" AutomationProperties.Name="Countdown"/>
+                            <TextBlock Text="Countdown" Margin="8,0,0,0" VerticalAlignment="Center" ToolTip="3, 2, 1 before recording starts: a moment to get ready (Esc or a click cancels)"/>
                         </StackPanel>
                         <TextBlock Style="{StaticResource Dim}" Margin="0,8,0,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding Folder}">
                             <Run Text="Saved in "/><Run Text="{Binding Folder, Mode=OneWay}"/><Run Text="  (Settings › Screen recordings)"/>
