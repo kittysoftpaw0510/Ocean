@@ -7,8 +7,22 @@
     <Border Background="#F21A0F14" BorderBrush="#E11D48" BorderThickness="1.5" CornerRadius="9" Padding="12,6,6,6" Margin="6" Cursor="SizeAll">
         <Border.Effect><DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.5"/></Border.Effect>
         <StackPanel Orientation="Horizontal">
-            <Ellipse x:Name="Dot" Width="10" Height="10" Fill="#FB7185" VerticalAlignment="Center" Margin="0,0,9,0"/>
-            <TextBlock Text="{Binding StatusText}" FontWeight="Bold" Foreground="#FB7185" VerticalAlignment="Center" Margin="0,0,10,0"/>
+            <Ellipse x:Name="Dot" Width="10" Height="10" VerticalAlignment="Center" Margin="0,0,9,0">
+                <Ellipse.Style>
+                    <Style TargetType="Ellipse">
+                        <Setter Property="Fill" Value="#FB7185"/>
+                        <Style.Triggers><DataTrigger Binding="{Binding Paused}" Value="True"><Setter Property="Fill" Value="#FBBF24"/></DataTrigger></Style.Triggers>
+                    </Style>
+                </Ellipse.Style>
+            </Ellipse>
+            <TextBlock Text="{Binding StatusText}" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,10,0">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Foreground" Value="#FB7185"/>
+                        <Style.Triggers><DataTrigger Binding="{Binding Paused}" Value="True"><Setter Property="Foreground" Value="#FBBF24"/></DataTrigger></Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
             <TextBlock Text="{Binding ElapsedText}" FontFamily="Consolas" FontSize="14" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center" MinWidth="44"/>
             <TextBlock VerticalAlignment="Center" Margin="10,0,0,0" FontSize="12" Foreground="#FBCFD6">
                 <Run Text="{Binding SizeText, Mode=OneWay}"/><Run Text="  ·  "/><Run Text="{Binding SoundText, Mode=OneWay}"/>
@@ -24,6 +38,21 @@
                             <DataTrigger Binding="{Binding MicMuted}" Value="True">
                                 <Setter Property="Content" Value="&#xF781;"/>
                                 <Setter Property="Foreground" Value="#FB7185"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+            </Button>
+            <!-- pause / go on -->
+            <Button Width="32" Height="28" Margin="4,0,0,0" Command="{Binding TogglePauseCommand}" ToolTip="{Binding PauseTip}" Cursor="Hand" AutomationProperties.Name="Pause or go on recording">
+                <Button.Style>
+                    <Style TargetType="Button" BasedOn="{StaticResource BtnIcon}">
+                        <Setter Property="Content" Value="&#xE769;"/>
+                        <Setter Property="Foreground" Value="White"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Paused}" Value="True">
+                                <Setter Property="Content" Value="&#xE768;"/>
+                                <Setter Property="Foreground" Value="#FBBF24"/>
                             </DataTrigger>
                         </Style.Triggers>
                     </Style>

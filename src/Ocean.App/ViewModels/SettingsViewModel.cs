@@ -85,7 +85,7 @@ public partial class SettingsViewModel : ObservableObject
     partial void OnNodeNameChanged(string value) => MarkDirty();
     partial void OnUserNameChanged(string value) => MarkDirty();
     partial void OnSecretChanged(string value) => MarkDirty();
-    partial void OnDownloadDirChanged(string value) => MarkDirty();
+    partial void OnDownloadDirChanged(string value) { MarkDirty(); OnPropertyChanged(nameof(IsDefaultDownloadDir)); }
     partial void OnNewDaysChanged(int value) => MarkDirty();
     partial void OnMaxConcurrentDownloadsChanged(int value) => MarkDirty();
     partial void OnOfflineKeepHoursChanged(int value) => MarkDirty();
@@ -191,6 +191,9 @@ public partial class SettingsViewModel : ObservableObject
 
     /// <summary>Screen recordings: saved at once, per Windows user (not part of Save / Discard).</summary>
     public RecordViewModel Record => _main.Record;
+
+    [RelayCommand] private void DefaultDownloadDir() => DownloadDir = MainViewModel.MyDownloadDir;
+    public bool IsDefaultDownloadDir => string.Equals(DownloadDir.Trim().TrimEnd('\\'), MainViewModel.MyDownloadDir, StringComparison.OrdinalIgnoreCase);
 
     [RelayCommand]
     private void BrowseDownloadDir()

@@ -221,14 +221,14 @@
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
                                     <TextBlock Text="Save recordings to" Style="{StaticResource RowTitle}"/>
-                                    <TextBlock Text="Your Videos folder unless you choose another. Changes are saved at once." Style="{StaticResource RowHint}"/>
+                                    <TextBlock Text="Your Videos\Ocean\Recordings unless you choose another. Changes are saved at once." Style="{StaticResource RowHint}" TextWrapping="Wrap"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                     <TextBox Width="240" Text="{Binding Folder, UpdateSourceTrigger=LostFocus}" ToolTip="{Binding Folder}" AutomationProperties.Name="Folder for screen recordings"/>
                                     <Button Content="Browse…" Margin="6,0,0,0" Command="{Binding BrowseFolderCommand}"/>
                                     <Button Style="{StaticResource BtnGhost}" Content="Open" Margin="6,0,0,0" Padding="8,6" Command="{Binding OpenFolderCommand}" ToolTip="Show the folder"/>
                                     <Button Style="{StaticResource BtnGhost}" Content="Default" Margin="2,0,0,0" Padding="8,6" Command="{Binding DefaultFolderCommand}"
-                                            ToolTip="Back to your Videos folder" Visibility="{Binding IsDefaultFolder, Converter={StaticResource InvBoolToVis}}"/>
+                                            ToolTip="Back to your Videos\Ocean\Recordings" Visibility="{Binding IsDefaultFolder, Converter={StaticResource InvBoolToVis}}"/>
                                 </StackPanel>
                             </Grid>
                             <Border Style="{StaticResource Divider}"/>
@@ -279,11 +279,13 @@
                                         <TextBlock Text="Save downloads to" Style="{StaticResource RowTitle}"/>
                                         <TextBlock Style="{StaticResource InfoTip}" ToolTip="Each node gets its own folder; the original folder structure is kept." AutomationProperties.HelpText="Each node gets its own folder; the original folder structure is kept."/>
                                     </StackPanel>
-                                    <TextBlock Text="Each PC gets its own folder." Style="{StaticResource RowHint}"/>
+                                    <TextBlock Text="Your Videos\Ocean\Downloads unless you choose another. Each PC gets its own folder in it." Style="{StaticResource RowHint}" TextWrapping="Wrap"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                     <TextBox Width="240" Text="{Binding DownloadDir, UpdateSourceTrigger=PropertyChanged}" ToolTip="{Binding DownloadDir}"/>
                                     <Button Content="Browse…" Margin="6,0,0,0" Command="{Binding BrowseDownloadDirCommand}"/>
+                                    <Button Style="{StaticResource BtnGhost}" Content="Default" Margin="2,0,0,0" Padding="8,6" Command="{Binding DefaultDownloadDirCommand}"
+                                            ToolTip="Back to your Videos\Ocean\Downloads (then Save)" Visibility="{Binding IsDefaultDownloadDir, Converter={StaticResource InvBoolToVis}}"/>
                                 </StackPanel>
                             </Grid>
                             <Border Style="{StaticResource Divider}"/>

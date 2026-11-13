@@ -99,9 +99,22 @@ public sealed class ScreenUi : IScreenUi
         if (_recordBar is not null) return;
         _recordBar = new RecordBarWindow(record, below: _bar);
         _recordBar.Show();
+        // the boundary of what is recorded
+        _boundary?.Dispose();
+        if (record.Target is { } target)
+        {
+            try { _boundary = new RecordBoundary(target, record); }
+            catch (Exception ex) { AppLog.Warn("Record", "the recording boundary can't be shown", ex); }
+        }
     }
 
-    public void HideRecordBar() { var b = _recordBar; _recordBar = null; b?.CloseForGood(); }
+    public void HideRecordBar()
+    {
+        var b = _recordBar; _recordBar = null; b?.CloseForGood();
+        _boundary?.Dispose(); _boundary = null;
+    }
+
+    private RecordBoundary? _boundary;
 }
 
 /// <summary>

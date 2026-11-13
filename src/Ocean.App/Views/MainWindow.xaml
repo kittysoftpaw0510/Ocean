@@ -252,7 +252,14 @@
                         <DockPanel>
                             <Ellipse DockPanel.Dock="Left" Width="10" Height="10" Fill="#FB7185" Margin="5,0,9,0" VerticalAlignment="Center"/>
                             <TextBlock DockPanel.Dock="Right" Text="{Binding Record.ElapsedText}" FontFamily="Consolas" Foreground="#FB7185" VerticalAlignment="Center"/>
-                            <TextBlock Text="Stop recording" Foreground="#FB7185" FontWeight="SemiBold"/>
+                            <TextBlock Foreground="#FB7185" FontWeight="SemiBold">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Text" Value="Stop recording"/>
+                                        <Style.Triggers><DataTrigger Binding="{Binding Record.Paused}" Value="True"><Setter Property="Text" Value="Stop recording (paused)"/></DataTrigger></Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
                         </DockPanel>
                     </Button>
                     <TextBlock Text="LIBRARY" Style="{StaticResource Dim}" FontWeight="SemiBold" Margin="18,6,14,4"/>

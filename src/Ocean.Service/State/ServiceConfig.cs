@@ -80,7 +80,8 @@ public sealed class ServiceConfig
         if (string.IsNullOrWhiteSpace(videos) || Environment.UserName.Equals("SYSTEM", StringComparison.OrdinalIgnoreCase))
             videos = Environment.GetFolderPath(Environment.SpecialFolder.CommonVideos);
         if (string.IsNullOrWhiteSpace(videos)) videos = @"C:\Users\Public\Videos";
-        return Path.Combine(videos, "Ocean");
+        // (as a Windows service this is the Public Videos folder; the app then moves it to its user's Videos\Ocean\Downloads)
+        return Path.Combine(videos, "Ocean", "Downloads");
     }
 }
 

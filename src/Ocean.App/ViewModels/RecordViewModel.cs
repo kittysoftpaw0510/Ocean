@@ -106,13 +106,19 @@ public sealed partial class RecordViewModel : ObservableObject
     [ObservableProperty] private bool _micMuted;
     [ObservableProperty] private bool _hasMic;
     [ObservableProperty] private bool _hasSpeaker;
-    public string StatusText => Saving ? "Saving…" : "REC";
+    /// <summary>Paused: nothing is captured; the time stands still.</summary>
+    [ObservableProperty] private bool _paused;
+    /// <summary>What is being recorded (for the boundary drawn around it).</summary>
+    public ScreenPick? Target => _rec?.Pick;
+    public string StatusText => Saving ? "Saving…" : Paused ? "PAUSED" : "REC";
+    public string PauseTip => Paused ? "Go on recording (the recording continues in the same file)" : "Pause: nothing is recorded until you go on";
+    partial void OnPausedChanged(bool value) { OnPropertyChanged(nameof(StatusText)); OnPropertyChanged(nameof(PauseTip)); }
     public string MicTip => MicMuted ? "The microphone is muted: click to record it again" : "Recording the microphone: click to mute it";
     public string SoundText => !HasSpeaker && !HasMic ? "no sound" : HasSpeaker && HasMic ? (MicMuted ? "speaker; mic muted" : "speaker + mic") : HasSpeaker ? "speaker" : MicMuted ? "mic muted" : "mic";
     partial void OnSavingChanged(bool value) => OnPropertyChanged(nameof(StatusText));
     partial void OnMicMutedChanged(bool value)
     {
-        if (_rec?.Audio is { } a) a.MicMuted = value;
+        if (_rec is { } r) r.MicMuted = value;
         OnPropertyChanged(nameof(MicTip)); OnPropertyChanged(nameof(SoundText));
     }
     partial void OnHasMicChanged(bool value) => OnPropertyChanged(nameof(SoundText));
@@ -138,13 +144,39 @@ public sealed partial class RecordViewModel : ObservableObject
         catch (Exception ex) { _main.Toast("The recording didn't start", ex.Message, "error"); AppLog.Warn("Record", "start", ex); return; }
         _rec = rec;
         MicMuted = false;
-        HasMic = rec.Audio?.HasMic == true; HasSpeaker = rec.Audio?.HasSpeaker == true;
-        IsRecording = true; Saving = false;
+        HasMic = rec.HasMic; HasSpeaker = rec.HasSpeaker;
+        IsRecording = true; Saving = false; Paused = false;
+        OnPropertyChanged(nameof(Target));
         Refresh();
         _tick.Start();
         Ui.ShowRecordBar(this);
         if (rec.Problems.Count > 0)
             _main.Toast("Recording without some sound", char.ToUpper(rec.Problems[0][0]) + string.Join("; ", rec.Problems)[1..] + ".", "warn");
+    }
+
+    [RelayCommand]
+    private void TogglePause()
+    {
+        if (_rec is not { } rec || Saving) return;
+        if (!Paused)
+        {
+            rec.Pause();
+            Paused = true;
+            _tick.Stop();
+            Refresh();
+            return;
+        }
+        try
+        {
+            rec.Resume();
+            Paused = false;
+            _tick.Start();
+        }
+        catch (Exception ex)
+        {
+            AppLog.Warn("Record", "resume", ex);
+            _main.Toast("Can't go on recording", ex.Message + " The recording so far is saved when you stop.", "warn");
+        }
     }
 
     [RelayCommand]
@@ -172,7 +204,7 @@ public sealed partial class RecordViewModel : ObservableObject
         if (!ReferenceEquals(_rec, rec)) return;
         _rec = null;
         _tick.Stop();
-        IsRecording = false; Saving = false;
+        IsRecording = false; Saving = false; Paused = false;
         Ui.HideRecordBar();
         if (r.Path is null)
         {

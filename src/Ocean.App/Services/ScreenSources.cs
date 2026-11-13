@@ -185,16 +185,26 @@ public static class ScreenSources
         finally { DeleteObject(hbmp); }
     }
 
-    /// <summary>Keeps a window of ours out of every capture (the "you are sharing" bar, the picker): viewers never see it.</summary>
-    public static void HideFromCapture(Window window)
+    /// <summary>
+    /// Keeps a window of ours out of every capture (the "you are sharing" bar, the recording boundary): viewers and
+    /// recordings never show it. False where Windows can't (before Windows 10 2004): the window is then captured.
+    /// </summary>
+    public static bool HideFromCapture(Window window)
     {
         try
         {
             var h = new WindowInteropHelper(window).EnsureHandle();
-            if (!SetWindowDisplayAffinity(h, 0x11 /* WDA_EXCLUDEFROMCAPTURE */)) SetWindowDisplayAffinity(h, 0);
+            if (SetWindowDisplayAffinity(h, 0x11 /* WDA_EXCLUDEFROMCAPTURE */)) return true;
+            SetWindowDisplayAffinity(h, 0);
         }
         catch { }
+        return false;
     }
+
+    /// <summary>A window that can be seen right now: there, shown, not minimized, on this desktop.</summary>
+    public static bool IsOnScreen(IntPtr h)
+        => IsWindow(h) && IsWindowVisible(h) && !IsIconic(h)
+           && !(DwmGetWindowAttribute(h, 14 /* DWMWA_CLOAKED */, out int cloaked, sizeof(int)) == 0 && cloaked != 0);
 
     public static Int32Rect VirtualScreen()
         => new(GetSystemMetrics(76), GetSystemMetrics(77), GetSystemMetrics(78), GetSystemMetrics(79));

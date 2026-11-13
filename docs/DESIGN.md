@@ -395,6 +395,24 @@ View only (nothing typed or clicked at the viewer reaches the host), picture onl
 Entirely in the app (the service isn't involved). Settings per Windows user in `%LocalAppData%\Ocean\recording.json`
 (quality, speaker, microphone, folder; the folder defaults to the user's Videos folder).
 
+- **Segments and pause.** A recording is one or more segments: Pause ends the running one (its file is finished
+  in the background), going on starts the next (picture and sound as before; the microphone's mute carries over).
+  At the end each segment is cut at its own end (`-t`, last picture held to it with `setts`) and they are joined
+  with the concat demuxer, stream copy, into the MP4; the segment files go once that worked (otherwise they stay,
+  each playable). Measured: a 4.6 s pause is gone from the timeline, a mark made while paused isn't in the file, and
+  sound and picture stay together on both sides of it.
+- **The boundary** (`Views.RecordBoundary`). Four thin click-through strips (top, bottom, left, right), each its own
+  layered window, kept out of every capture (`WDA_EXCLUDEFROMCAPTURE`; measured: none of its red in the recording):
+  a fine line with rounded corner accents and a soft glow breathing every 1.6 s (red), finely dashed and still while
+  paused (amber), with a small REC / PAUSED tag. Strips rather than one see-through window over the whole area:
+  Windows redraws layered windows in software, the whole area at every step of the pulse. A part of a screen and
+  a window get the line 3 px outside them, a whole screen along its edges (only where capture exclusion works:
+  Windows 10 2004 and later). A recorded window is followed every 80 ms; the boundary hides while it is minimized
+  or on another desktop.
+- **Folders.** Recordings: `Videos\Ocean\Recordings` of the Windows user. Downloads: the service runs as the
+  system account, whose Videos is the Public one, so its default is `C:\Users\Public\Videos\Ocean\Downloads`;
+  the app moves that (and the older `...\Videos\Ocean`) to its user's `Videos\Ocean\Downloads` when it connects.
+  A folder someone chose is never changed.
 - **Two ffmpeg processes.** The capture (`gfxcapture` → download → colour conversion → raw pictures in NUT) writes
   straight into the encoder's input (`ChildProcess`: the pipe handle is given to it with an explicit inherit list, so
   no other handle of the app leaks into it and nothing passes through the app). The capture waits for the screen to

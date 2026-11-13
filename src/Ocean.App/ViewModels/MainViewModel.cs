@@ -156,6 +156,7 @@ public partial class MainViewModel : ObservableObject
         _initialPeersLoaded = true;
         RefreshResumeCard();
         await SharesVm.LoadAsync();
+        await ClaimDownloadDirAsync();
         await DownloadsVm.LoadAsync();
         await SettingsVm.LoadAsync();
         await LoadPendingAsync();
@@ -163,6 +164,40 @@ public partial class MainViewModel : ObservableObject
         _ = LoadUpdateAsync();
         AppLog.Info("Main", $"ready: {Peers.Count} nodes known ({Peers.Count(p => p.Online)} online)");
         UpdateStatusText();
+    }
+
+    /// <summary>The download folder for this Windows user: Videos\Ocean\Downloads in their own Videos folder.</summary>
+    public static string MyDownloadDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "Ocean", "Downloads");
+
+    /// <summary>
+    /// The service runs as Windows' system account, whose "Videos" is the Public one: downloads would land in
+    /// C:\Users\Public\Videos\Ocean. While the setting is still one of those defaults, it becomes this user's
+    /// Videos\Ocean\Downloads. A folder someone chose is never touched; what was downloaded before stays where it is.
+    /// </summary>
+    private async Task ClaimDownloadDirAsync()
+    {
+        try
+        {
+            var s = await Api.GetAsync<SettingsDto>("/api/settings");
+            if (s is null) return;
+            static string Norm(string p) => p.Trim().TrimEnd('\\', '/');
+            var common = Environment.GetFolderPath(Environment.SpecialFolder.CommonVideos);
+            var myVideos = Environment.GetFolderPath(Environment.SpecialFolder.MyVideos);
+            var oldDefaults = new[]
+            {
+                Path.Combine(common, "Ocean"), Path.Combine(common, "Ocean", "Downloads"),
+                @"C:\Users\Public\Videos\Ocean", @"C:\Users\Public\Videos\Ocean\Downloads",
+                Path.Combine(myVideos, "Ocean"), // the default when the service ran as this user (portable)
+            }.Where(p => !string.IsNullOrWhiteSpace(p)).Select(Norm).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var mine = MyDownloadDir;
+            if (string.IsNullOrWhiteSpace(myVideos) || !oldDefaults.Contains(Norm(s.DownloadDir)) || Norm(s.DownloadDir).Equals(Norm(mine), StringComparison.OrdinalIgnoreCase)) return;
+            Directory.CreateDirectory(mine); // made by this user: theirs, and the service can write into it
+            var from = s.DownloadDir;
+            s.DownloadDir = mine;
+            await Api.PutAsync("/api/settings", s);
+            AppLog.Info("Main", $"downloads now go to {mine} (was the default {from})");
+        }
+        catch (Exception ex) { AppLog.Warn("Main", "the download folder couldn't be set to this user's Videos folder", ex); }
     }
 
     private void ApplyStatus(NodeStatusDto status)
