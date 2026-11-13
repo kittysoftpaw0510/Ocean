@@ -33,6 +33,10 @@ public partial class ScreenPickerWindow : Window
     private readonly ObservableCollection<ScreenSourceCard> _windows = new();
     private ScreenSourceCard? _chosen;
     private bool _selecting;
+    /// <summary>While a part of a screen is being marked (the picker is minimized meanwhile): its window list is not refreshed.</summary>
+    private bool _marking;
+    /// <summary>Marks a part of a monitor with the mouse (replaceable for checks, which can't drag a mouse).</summary>
+    internal static Func<MonitorInfo, Int32Rect?> MarkArea = RegionSelectWindow.Select;
 
     public ScreenPick? Result { get; private set; }
 
@@ -54,7 +58,7 @@ public partial class ScreenPickerWindow : Window
         foreach (var m in ScreenSources.Monitors())
             _screens.Add(new ScreenSourceCard { Name = m.Name, Detail = m.Detail, Monitor = m, Preview = ScreenSources.Snapshot(m.Bounds) });
         Loaded += (_, _) => LoadWindows();
-        Activated += (_, _) => { if (IsLoaded && !_selecting) RefreshWindows(); };
+        Activated += (_, _) => { if (IsLoaded && !_selecting && !_marking) RefreshWindows(); };
         if (_screens.Count > 0) Screens.SelectedIndex = 0;
     }
 
@@ -117,11 +121,11 @@ public partial class ScreenPickerWindow : Window
         var monitor = _chosen?.Monitor ?? _screens.FirstOrDefault()?.Monitor;
         if (monitor is null) return;
         // out of the way while marking (minimized, not hidden: hiding would end this dialog)
-        _selecting = true;
+        _marking = true;
         WindowState = WindowState.Minimized;
         Int32Rect? area;
-        try { area = RegionSelectWindow.Select(monitor); }
-        finally { WindowState = WindowState.Normal; Activate(); Dispatcher.BeginInvoke(() => _selecting = false, System.Windows.Threading.DispatcherPriority.ApplicationIdle); }
+        try { area = MarkArea(monitor); }
+        finally { WindowState = WindowState.Normal; Activate(); Dispatcher.BeginInvoke(() => _marking = false, System.Windows.Threading.DispatcherPriority.ApplicationIdle); }
         if (area is not { } r) return;
         foreach (var old in _screens.Where(c => c.Region is not null).ToList()) _screens.Remove(old);
         var card = new ScreenSourceCard
@@ -130,8 +134,15 @@ public partial class ScreenPickerWindow : Window
             Preview = ScreenSources.Snapshot(new Int32Rect(monitor.Bounds.X + r.X, monitor.Bounds.Y + r.Y, r.Width, r.Height)),
         };
         _screens.Add(card);
+        // chosen outright (not left to the list's selection event): Share must share this part, nothing else
+        _selecting = true;
+        Windows.SelectedItem = null;
         Screens.SelectedItem = card;
+        _selecting = false;
+        Choose(card);
     }
+
+    internal ScreenPick? CurrentPick => _chosen is null ? null : ToPick(_chosen);
 
     private ScreenPick ToPick(ScreenSourceCard card)
     {
