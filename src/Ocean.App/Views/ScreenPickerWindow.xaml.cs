@@ -40,10 +40,24 @@ public partial class ScreenPickerWindow : Window
 
     public ScreenPick? Result { get; private set; }
 
-    public ScreenPickerWindow(string heading, string detail)
+    /// <summary>Recording (null: sharing): its options show instead of sharing's, and sizes follow its quality.</summary>
+    private readonly ViewModels.RecordViewModel? _record;
+
+    public ScreenPickerWindow(string heading, string detail, ViewModels.RecordViewModel? record = null)
     {
+        _record = record;
         InitializeComponent();
         Heading.Text = heading; Detail.Text = detail;
+        if (record is not null)
+        {
+            Title = "Record your screen";
+            RecordOptions.DataContext = record;
+            RecordOptions.Visibility = Visibility.Visible;
+            ShareOptions.Visibility = Visibility.Collapsed;
+            ShareButton.Content = "Start recording";
+            record.PropertyChanged += OnRecordChanged;
+            Closed += (_, _) => record.PropertyChanged -= OnRecordChanged;
+        }
         try { Icon = IconFactory.WindowIcon(); } catch { }
         SourceInitialized += (_, _) => DarkTitleBar.Apply(this);
         Screens.ItemsSource = _screens; Windows.ItemsSource = _windows;
@@ -106,8 +120,9 @@ public partial class ScreenPickerWindow : Window
         ShareButton.IsEnabled = card is not null;
         if (card is null) { Chosen.Text = ""; return; }
         var pick = ToPick(card);
-        var (w, h) = pick.SendSize();
-        Chosen.Text = w == pick.SourceWidth && h == pick.SourceHeight ? $"Shared at {w} × {h}" : $"Shared at {w} × {h} (scaled down from {pick.SourceWidth} × {pick.SourceHeight})";
+        var (w, h) = _record is null ? pick.SendSize() : Services.RecordingQuality.Fit(Services.RecordingQuality.Of(_record.Quality), pick.SourceWidth, pick.SourceHeight);
+        var verb = _record is null ? "Shared" : "Recorded";
+        Chosen.Text = w == pick.SourceWidth && h == pick.SourceHeight ? $"{verb} at {w} × {h}" : $"{verb} at {w} × {h} (scaled down from {pick.SourceWidth} × {pick.SourceHeight})";
     }
 
     private void Source_DoubleClick(object sender, MouseButtonEventArgs e)
@@ -176,6 +191,12 @@ public partial class ScreenPickerWindow : Window
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => DialogResult = false;
+
+    /// <summary>Another quality: another recorded size.</summary>
+    private void OnRecordChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ViewModels.RecordViewModel.Quality) && _chosen is not null) Choose(_chosen);
+    }
     private void SmoothLabel_Click(object sender, MouseButtonEventArgs e) => Smooth.IsChecked = Smooth.IsChecked != true;
 }
 

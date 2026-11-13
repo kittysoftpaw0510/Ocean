@@ -10,6 +10,8 @@
     <ApplicationIcon>..\..\assets\ocean.ico</ApplicationIcon>
     <StartupObject>Ocean.App.App</StartupObject>
     <ServerGarbageCollection>false</ServerGarbageCollection>
+    <!-- the recording's sound reads the audio devices' buffers directly -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
     <!-- Per-monitor DPI is declared in app.manifest for WPF; the WinForms analyzer only covers the tray icon. -->
     <NoWarn>$(NoWarn);WFAC010</NoWarn>
@@ -24,6 +26,7 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.2" />
+    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.1" />
   </ItemGroup>
   <ItemGroup>

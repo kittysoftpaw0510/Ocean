@@ -189,6 +189,9 @@ public partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private Task Discard() => LoadAsync();
 
+    /// <summary>Screen recordings: saved at once, per Windows user (not part of Save / Discard).</summary>
+    public RecordViewModel Record => _main.Record;
+
     [RelayCommand]
     private void BrowseDownloadDir()
     {

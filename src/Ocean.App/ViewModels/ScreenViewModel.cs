@@ -20,6 +20,11 @@ public interface IScreenUi
     /// <summary>The "you are sharing your screen" bar, kept on top of everything while a session runs.</summary>
     void ShowBar();
     void HideBar();
+    /// <summary>Lets the user pick what to record, with the recording's options. Null = cancelled.</summary>
+    Task<ScreenPick?> PickToRecordAsync(RecordViewModel record);
+    /// <summary>The "recording" bar (timer, size, mute the microphone, stop), kept out of the recording.</summary>
+    void ShowRecordBar(RecordViewModel record);
+    void HideRecordBar();
 }
 
 /// <summary>A question waiting for the user: someone wants to see this PC's screen, or to show theirs.</summary>

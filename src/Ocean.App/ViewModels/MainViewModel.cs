@@ -94,6 +94,8 @@ public partial class MainViewModel : ObservableObject
     public PlayerViewModel Player { get; }
     /// <summary>Screen sharing: mine, the one I watch, and the questions about it.</summary>
     public ScreenViewModel Screen { get; }
+    /// <summary>Screen recording (with the speaker and the microphone).</summary>
+    public RecordViewModel Record { get; }
     public HomeViewModel Home { get; } = new();
     /// <summary>My multicast (null when none) and the one I'm watching (null when none).</summary>
     [ObservableProperty] private MyCastDto? _myCast;
@@ -127,6 +129,7 @@ public partial class MainViewModel : ObservableObject
         SearchVm = new SearchViewModel(this);
         Player = new PlayerViewModel(this);
         Screen = new ScreenViewModel(api, this);
+        Record = new RecordViewModel(this);
         // updates wait while a video plays: what was held back (a notice, an install) happens once it is closed
         Player.PropertyChanged += (_, e) =>
         {
@@ -358,7 +361,7 @@ public partial class MainViewModel : ObservableObject
         await LoadPendingAsync();
     }
 
-    public void Shutdown() { Screen.Shutdown(); _eventsCts?.Cancel(); }
+    public void Shutdown() { Record.Shutdown(); Screen.Shutdown(); _eventsCts?.Cancel(); }
 
     // ------------------------------------------------------------------ events
 

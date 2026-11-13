@@ -19,6 +19,7 @@ public sealed class ScreenUi : IScreenUi
     private readonly Dictionary<string, ScreenPromptWindow> _prompts = new(StringComparer.Ordinal);
     private ScreenViewWindow? _viewer;
     private ScreenBarWindow? _bar;
+    private RecordBarWindow? _recordBar;
 
     public ScreenUi(ScreenViewModel vm) { _vm = vm; }
 
@@ -84,6 +85,60 @@ public sealed class ScreenUi : IScreenUi
     }
 
     public void HideBar() { var b = _bar; _bar = null; b?.CloseForGood(); }
+
+    public Task<ScreenPick?> PickToRecordAsync(RecordViewModel record)
+    {
+        var w = new ScreenPickerWindow("Record your screen", "Pick what to record: a whole screen, one window or a part of a screen.", record);
+        var main = Application.Current.MainWindow;
+        if (main is { IsVisible: true, WindowState: not WindowState.Minimized }) { w.Owner = main; w.WindowStartupLocation = WindowStartupLocation.CenterOwner; }
+        return Task.FromResult(w.ShowDialog() == true ? w.Result : null);
+    }
+
+    public void ShowRecordBar(RecordViewModel record)
+    {
+        if (_recordBar is not null) return;
+        _recordBar = new RecordBarWindow(record, below: _bar);
+        _recordBar.Show();
+    }
+
+    public void HideRecordBar() { var b = _recordBar; _recordBar = null; b?.CloseForGood(); }
+}
+
+/// <summary>
+/// "Recording": a small bar on top of everything and on every desktop while a recording runs: time, size, the
+/// sound, mute the microphone, Stop. Kept out of every capture (it is never in the recording). Can be dragged
+/// aside; not closed: only Stop removes it.
+/// </summary>
+public partial class RecordBarWindow : Window
+{
+    private readonly AllDesktops _allDesktops;
+    private bool _closing;
+
+    public RecordBarWindow(RecordViewModel vm, Window? below)
+    {
+        InitializeComponent();
+        DataContext = vm;
+        SourceInitialized += (_, _) => ScreenSources.HideFromCapture(this);
+        _allDesktops = new AllDesktops(this);
+        _allDesktops.Set(true);
+        Loaded += (_, _) =>
+        {
+            // top middle of the main screen; under the sharing bar when both run
+            var area = SystemParameters.WorkArea;
+            Left = area.Left + (area.Width - ActualWidth) / 2;
+            Top = below is { IsVisible: true } ? below.Top + below.ActualHeight : area.Top + 8;
+        };
+        SizeChanged += (_, e) => { if (e.WidthChanged && IsLoaded && e.PreviousSize.Width > 0) Left -= (e.NewSize.Width - e.PreviousSize.Width) / 2; };
+        MouseLeftButtonDown += (_, e) => { if (e.ButtonState == MouseButtonState.Pressed) { try { DragMove(); } catch (InvalidOperationException) { } } };
+    }
+
+    public void CloseForGood() { _closing = true; _allDesktops.Dispose(); Close(); }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        if (!_closing) e.Cancel = true; // Alt+F4 must not hide that the screen is being recorded
+        base.OnClosing(e);
+    }
 }
 
 /// <summary>A question from another PC, in a small window of its own (also seen when Ocean is in the tray).</summary>

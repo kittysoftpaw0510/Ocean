@@ -390,6 +390,45 @@ View only (nothing typed or clicked at the viewer reaches the host), picture onl
   `/api/peers/{peer}/screen/{id}/join`. Events: `myScreen`, `screenPrompt`, `screenRequest`, `screenInvite`,
   `screenView`, `peerScreen`.
 
+## Screen recording (app: `ScreenRecorder`, `RecordingAudio`, `RecordViewModel`)
+
+Entirely in the app (the service isn't involved). Settings per Windows user in `%LocalAppData%\Ocean\recording.json`
+(quality, speaker, microphone, folder; the folder defaults to the user's Videos folder).
+
+- **Two ffmpeg processes.** The capture (`gfxcapture` → download → colour conversion → raw pictures in NUT) writes
+  straight into the encoder's input (`ChildProcess`: the pipe handle is given to it with an explicit inherit list, so
+  no other handle of the app leaks into it and nothing passes through the app). The capture waits for the screen to
+  change, also before it can stop: with one process, stopping a still window waited forever and the encoder kept the
+  last pictures. Now Stop ends the capture at once; the encoder sees the end of its input, writes what it holds and
+  closes the file (ready about 0.4 s after Stop). Measured on a test window changing every frame: the two processes
+  together cost the same processor time as one ffmpeg doing the same (about 25 ms per 1280x720 picture).
+- **Pictures.** Only changed pictures (`-fps_mode vfr`, at most 15/30/60 a second), a key picture at least every
+  10 s, H.264 with B-pictures (16–25 % smaller than without, measured), MP4 + AAC: plays everywhere, Ocean included.
+  Small file and Balanced: x264 `veryfast`, CRF 30/27 (the smallest files: on real screen recordings Balanced is
+  about a sixth of Windows' own recorder at SSIM 0.993); High: the graphics card's encoder if one passes a test
+  encode with the exact options (`RecordingEncoders`, once per run of the app), else x264. HEVC would be about 40 %
+  smaller again but needs a paid extension on many PCs (and in Ocean's player), so it isn't used. Colour conversion
+  stays on the processor (this ffmpeg can't create the textures for `scale_d3d11` here); at 60 fps the fast
+  converter (12 instead of 14 ms per full-HD picture).
+- **Sound** (`RecordingAudio`). WASAPI loopback of the default output and the default microphone, read every 5 ms.
+  Every block carries Windows' capture time stamp (QPC) and is put on the timeline at that moment; time 0 is the
+  first picture (reported by `showinfo` on the capture's first frame, minus 12 ms for the report's own delay, plus
+  half a picture's time: a change on screen shows in the next picture, on average half an interval later). The mix
+  goes to the encoder 250 ms behind real time, so late blocks still land in place. Jitter of the stamps within 15 ms
+  is smoothed (blocks stay continuous); larger gaps stay gaps; a device that goes away is opened again (the new
+  default) within a second. Soft limiter on the sum. The microphone can be muted while recording.
+  Measured with flashes and beeps (sound vs picture): High within ±15 ms, Balanced within ±30 ms, Small file within
+  ±55 ms (at 15 pictures a second the picture itself is up to 67 ms late); no drift over 2 and 3 minutes; before the
+  time stamps, the sound was 150–200 ms late (Windows hands sound over in chunks).
+- **The file.** Matroska while recording (playable after a crash or a power cut), then MP4 with the index at the
+  front (stream copy, under a second). It ends exactly at Stop (`-t`), and the last picture lasts until then (`setts`
+  on the last packet by decode time): a still screen would otherwise end the video early. Stops by itself when a
+  recorded window closes or the disk has less than 500 MB free; quitting Ocean finishes the file first. A sound
+  device that can't be opened is reported, and the recording goes on without it.
+- **UI.** *Record my screen* (sidebar) → the picker in recording mode (quality, speaker, microphone, where it is
+  saved) → the red recording bar (time, size, sound, mute the microphone, Stop), on top, on every desktop, excluded
+  from capture → a toast that opens the folder with the file selected.
+
 ## Votes, tags and "Top on the network" (`Ocean.Service.Social`)
 
 Tags belong to the owner (`ShareDefinition.ItemTags`, at most 8 per video, 24 characters each) and travel inside

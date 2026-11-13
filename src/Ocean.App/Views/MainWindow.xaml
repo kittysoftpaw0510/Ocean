@@ -240,6 +240,21 @@
                             <TextBlock Text="Stop sharing my screen" Foreground="#FB7185" FontWeight="SemiBold"/>
                         </DockPanel>
                     </Button>
+                    <!-- my screen: record it (with the speaker and the microphone), or stop -->
+                    <Button Style="{StaticResource NavBtn}" Command="{Binding Record.StartCommand}" Visibility="{Binding Record.IsRecording, Converter={StaticResource InvBoolToVis}}"
+                            ToolTip="Record a screen, a window or a part of one, with the speaker sound and your microphone. Saved as MP4 (quality and folder: Settings › Screen recordings).">
+                        <DockPanel>
+                            <TextBlock Text="&#xE7C8;" Style="{StaticResource Icon}" Width="24" HorizontalAlignment="Left"/>
+                            <TextBlock Text="Record my screen" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
+                        </DockPanel>
+                    </Button>
+                    <Button Style="{StaticResource NavBtn}" Command="{Binding Record.StopCommand}" Visibility="{Binding Record.IsRecording, Converter={StaticResource BoolToVis}}">
+                        <DockPanel>
+                            <Ellipse DockPanel.Dock="Left" Width="10" Height="10" Fill="#FB7185" Margin="5,0,9,0" VerticalAlignment="Center"/>
+                            <TextBlock DockPanel.Dock="Right" Text="{Binding Record.ElapsedText}" FontFamily="Consolas" Foreground="#FB7185" VerticalAlignment="Center"/>
+                            <TextBlock Text="Stop recording" Foreground="#FB7185" FontWeight="SemiBold"/>
+                        </DockPanel>
+                    </Button>
                     <TextBlock Text="LIBRARY" Style="{StaticResource Dim}" FontWeight="SemiBold" Margin="18,6,14,4"/>
                     <Button Command="{Binding ShowSharesCommand}">
                         <Button.Style>

@@ -213,6 +213,61 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- ===================== Screen recordings (per Windows user, saved at once) ===================== -->
+                    <TextBlock Text="Screen recordings" Style="{StaticResource Section}"/>
+                    <Border Style="{StaticResource Group}" DataContext="{Binding Record}">
+                        <StackPanel>
+                            <Grid Style="{StaticResource Row}">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                    <TextBlock Text="Save recordings to" Style="{StaticResource RowTitle}"/>
+                                    <TextBlock Text="Your Videos folder unless you choose another. Changes are saved at once." Style="{StaticResource RowHint}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBox Width="240" Text="{Binding Folder, UpdateSourceTrigger=LostFocus}" ToolTip="{Binding Folder}" AutomationProperties.Name="Folder for screen recordings"/>
+                                    <Button Content="Browse…" Margin="6,0,0,0" Command="{Binding BrowseFolderCommand}"/>
+                                    <Button Style="{StaticResource BtnGhost}" Content="Open" Margin="6,0,0,0" Padding="8,6" Command="{Binding OpenFolderCommand}" ToolTip="Show the folder"/>
+                                    <Button Style="{StaticResource BtnGhost}" Content="Default" Margin="2,0,0,0" Padding="8,6" Command="{Binding DefaultFolderCommand}"
+                                            ToolTip="Back to your Videos folder" Visibility="{Binding IsDefaultFolder, Converter={StaticResource InvBoolToVis}}"/>
+                                </StackPanel>
+                            </Grid>
+                            <Border Style="{StaticResource Divider}"/>
+                            <Grid Style="{StaticResource Row}">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Quality" Style="{StaticResource RowTitle}"/>
+                                        <TextBlock Style="{StaticResource InfoTip}" ToolTip="Every quality records only what changes on the screen, so a still screen costs almost nothing. Saved as MP4 (H.264 and AAC), which plays on every PC and in Ocean." AutomationProperties.HelpText="Every quality records only what changes on the screen, so a still screen costs almost nothing. Saved as MP4 (H.264 and AAC), which plays on every PC and in Ocean."/>
+                                    </StackPanel>
+                                    <TextBlock Text="{Binding QualityHint}" Style="{StaticResource RowHint}" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <RadioButton GroupName="SettingsRecQuality" Content="Small file" IsChecked="{Binding IsSmall}" Margin="0,0,16,0"/>
+                                    <RadioButton GroupName="SettingsRecQuality" Content="Balanced" IsChecked="{Binding IsBalanced}" Margin="0,0,16,0"/>
+                                    <RadioButton GroupName="SettingsRecQuality" Content="High" IsChecked="{Binding IsHigh}"/>
+                                </StackPanel>
+                            </Grid>
+                            <Border Style="{StaticResource Divider}"/>
+                            <Grid Style="{StaticResource Row}">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                    <TextBlock Text="Record the speaker sound" Style="{StaticResource RowTitle}"/>
+                                    <TextBlock Text="What your PC plays: videos, calls, games." Style="{StaticResource RowHint}"/>
+                                </StackPanel>
+                                <CheckBox Grid.Column="1" Style="{StaticResource Switch}" IsChecked="{Binding Speaker}" AutomationProperties.Name="Record the speaker sound"/>
+                            </Grid>
+                            <Border Style="{StaticResource Divider}"/>
+                            <Grid Style="{StaticResource Row}">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                    <TextBlock Text="Record the microphone" Style="{StaticResource RowTitle}"/>
+                                    <TextBlock Text="Your voice, from the default microphone. It can be muted on the recording bar at any time." Style="{StaticResource RowHint}"/>
+                                </StackPanel>
+                                <CheckBox Grid.Column="1" Style="{StaticResource Switch}" IsChecked="{Binding Mic}" AutomationProperties.Name="Record the microphone"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
                     <!-- ===================== Downloads ===================== -->
                     <TextBlock Text="Downloads" Style="{StaticResource Section}"/>
                     <Border Style="{StaticResource Group}">

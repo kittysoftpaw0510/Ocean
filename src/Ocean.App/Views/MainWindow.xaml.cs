@@ -21,7 +21,9 @@ public partial class MainWindow : Window, IDialogs
         _vm = vm;
         InitializeComponent();
         DataContext = vm;
-        vm.Screen.Ui = new ScreenUi(vm.Screen);
+        var screenUi = new ScreenUi(vm.Screen);
+        vm.Screen.Ui = screenUi;
+        vm.Record.Ui = screenUi;
         Icon = IconFactory.WindowIcon();
         Logo.Source = IconFactory.Artwork();
         SourceInitialized += (_, _) => DarkTitleBar.Apply(this);
