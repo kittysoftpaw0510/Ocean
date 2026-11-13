@@ -54,15 +54,20 @@
                     <Button x:Name="ShareButton" Style="{StaticResource BtnPrimary}" Content="Share" IsDefault="True" IsEnabled="False" Click="Share_Click" MinWidth="90"/>
                 </StackPanel>
                 <StackPanel VerticalAlignment="Center">
-                    <CheckBox x:Name="Smooth" Style="{StaticResource Switch}" Content="Smooth motion"
-                              ToolTip="30 pictures a second instead of 15: for video and animation. Uses about twice the network and processor; for documents, code and slides it makes no visible difference."/>
+                    <StackPanel Orientation="Horizontal" ToolTip="30 pictures a second instead of 15: for video and animation. Uses about twice the network and processor; for documents, code and slides it makes no visible difference.">
+                        <!-- (the Switch style shows On/Off, not its content: the label is beside it) -->
+                        <CheckBox x:Name="Smooth" Style="{StaticResource Switch}" AutomationProperties.Name="Smooth motion"/>
+                        <TextBlock Text="Smooth motion (30 fps)" Margin="10,0,0,0" VerticalAlignment="Center" Cursor="Hand"
+                                   MouseLeftButtonUp="SmoothLabel_Click"/>
+                    </StackPanel>
                     <TextBlock x:Name="Chosen" Style="{StaticResource Dim}" Margin="0,4,0,0" TextTrimming="CharacterEllipsis"/>
                 </StackPanel>
             </DockPanel>
         </Border>
 
-        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="20,6,10,6">
-            <StackPanel>
+        <!-- (the theme's ScrollViewer ignores Padding: the gap is the content's margin) -->
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="20,6,10,6">
                 <DockPanel Margin="0,8,0,8">
                     <Button DockPanel.Dock="Right" Click="Region_Click" ToolTip="Mark a rectangle on the selected screen with the mouse; only that part is shared" Margin="0,0,10,0">
                         <StackPanel Orientation="Horizontal">

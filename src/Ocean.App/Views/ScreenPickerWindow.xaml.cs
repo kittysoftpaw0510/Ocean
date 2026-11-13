@@ -165,6 +165,7 @@ public partial class ScreenPickerWindow : Window
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => DialogResult = false;
+    private void SmoothLabel_Click(object sender, MouseButtonEventArgs e) => Smooth.IsChecked = Smooth.IsChecked != true;
 }
 
 /// <summary>
