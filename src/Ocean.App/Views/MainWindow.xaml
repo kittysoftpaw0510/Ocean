@@ -310,11 +310,18 @@
                                 </Button.Style>
                             </Button>
                             <Button Height="28" MinWidth="28" Padding="6,0" Margin="2,0,0,0" FontSize="13" AutomationProperties.Name="Record my screen">
+                                <Button.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Record…" Command="{Binding Record.StartCommand}"/>
+                                        <MenuItem Header="{Binding Record.RecordAgainText}" Command="{Binding Record.RecordAgainCommand}"
+                                                  Visibility="{Binding Record.CanRecordAgain, Converter={StaticResource BoolToVis}}"/>
+                                    </ContextMenu>
+                                </Button.ContextMenu>
                                 <Button.Style>
                                     <Style TargetType="Button" BasedOn="{StaticResource BtnIcon}">
                                         <Setter Property="Width" Value="NaN"/>
                                         <Setter Property="Command" Value="{Binding Record.StartCommand}"/>
-                                        <Setter Property="ToolTip" Value="Record my screen, with the speaker sound and your microphone (also from the tray icon)"/>
+                                        <Setter Property="ToolTip" Value="Record my screen, with the speaker sound and your microphone. Right-click: record the same again."/>
                                         <Setter Property="Content"><Setter.Value><TextBlock Text="&#xE7C8;" Style="{StaticResource Icon}"/></Setter.Value></Setter>
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding Record.IsRecording}" Value="True">

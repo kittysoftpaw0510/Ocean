@@ -58,6 +58,8 @@
                     </Style>
                 </Button.Style>
             </Button>
+            <Button Style="{StaticResource BtnIcon}" Width="32" Height="28" Margin="2,0,0,0" Command="{Binding DiscardCommand}" Content="&#xE74D;" Foreground="#FBCFD6"
+                    ToolTip="Discard: stop and throw this recording away (asks first)" Cursor="Hand" AutomationProperties.Name="Discard the recording"/>
             <Button Margin="8,0,0,0" Command="{Binding StopCommand}" Background="#E11D48" BorderBrush="#E11D48" Foreground="White" FontWeight="SemiBold" Cursor="Hand"
                     AutomationProperties.Name="Stop recording">
                 <StackPanel Orientation="Horizontal">

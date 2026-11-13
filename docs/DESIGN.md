@@ -409,6 +409,22 @@ Entirely in the app (the service isn't involved). Settings per Windows user in `
   a window get the line 3 px outside them, a whole screen along its edges (only where capture exclusion works:
   Windows 10 2004 and later). A recorded window is followed every 80 ms; the boundary hides while it is minimized
   or on another desktop.
+- **Before and after.** A 3-2-1 countdown over the recorded area (`RecordCountdownWindow`, kept out of capture;
+  Esc or a click cancels; off in the settings). Less than 2 GB free: a warning first, with how many minutes that is
+  at the chosen quality. A reminder at every full hour. *Discard* (asks first; the question is kept out of the
+  recording) deletes every segment. "Record the same again" (`LastTarget` in recording.json): a screen is found
+  again by its position and size, a part of a screen by its screen, a window only while it is open (else the picker).
+  Saved: `RecordSavedWindow` (bottom right, 30 s): Open, Add to my shares (an existing share, or a new "My
+  recordings" for everyone or for approved people; or "Shared in X" when its folder is shared already), Trim…, Show
+  in folder, Copy path.
+- **Trim** (`RecordingTrim`, `TrimWindow`). Only the end: stream copy, instant and lossless; it is cut in decode
+  order (every packet from the first picture shown after the end on is dropped, `noise=drop=gte(n,N)`), never by
+  time, which could keep a B-picture without the later picture it is built on. A new start: encoded again (x264
+  CRF 23, a little above Balanced, so a second generation stays sharp; about 50x real time for screen content). A
+  new "(trimmed)" file; the original stays.
+- **The area marker** (`RegionSelectWindow`): drag (edges snap within 10 px to window and screen edges; Shift keeps
+  16:9), or click a window for exactly its area, or pick 1280 × 720 / 1920 × 1080 / 1080 × 1080 and click where
+  the frame goes.
 - **Folders.** Recordings: `Videos\Ocean\Recordings` of the Windows user. Downloads: the service runs as the
   system account, whose Videos is the Public one, so its default is `C:\Users\Public\Videos\Ocean\Downloads`;
   the app moves that (and the older `...\Videos\Ocean`) to its user's `Videos\Ocean\Downloads` when it connects.

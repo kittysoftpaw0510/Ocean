@@ -1,0 +1,55 @@
+<Window x:Class="Ocean.App.Views.TrimWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Trim" Width="920" Height="640" MinWidth="560" MinHeight="420" WindowStartupLocation="CenterScreen"
+        Background="{StaticResource Bg1}" Foreground="{StaticResource Text}" FontFamily="{StaticResource UiFont}">
+    <!-- Cut off the start and the end of a recording; the original stays as it is. -->
+    <DockPanel>
+        <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="16,12">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="CancelButton" Content="Cancel" Margin="0,0,8,0" Click="Cancel_Click"/>
+                    <Button x:Name="SaveButton" Style="{StaticResource BtnPrimary}" Content="Save trimmed copy" Click="Save_Click" MinWidth="140"/>
+                </StackPanel>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock x:Name="Hint" Style="{StaticResource Dim}" TextWrapping="Wrap"
+                               Text="A new file is saved next to it; the original stays as it is. Cutting only the end is instant."/>
+                    <ProgressBar x:Name="Progress" Height="4" Margin="0,6,12,0" Maximum="1" Visibility="Collapsed"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- marks -->
+        <Border DockPanel.Dock="Bottom" Padding="16,4,16,10">
+            <DockPanel>
+                <Button x:Name="PlayButton" DockPanel.Dock="Left" Style="{StaticResource BtnIcon}" Width="34" Height="30" FontSize="13" Content="&#xE768;" Foreground="{StaticResource Text}" Click="Play_Click" ToolTip="Play / pause (Space)"/>
+                <TextBlock x:Name="TimeText" DockPanel.Dock="Left" FontFamily="Consolas" Foreground="{StaticResource Text}" VerticalAlignment="Center" Margin="8,0,16,0" MinWidth="140"/>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Click="SetStart_Click" Margin="0,0,6,0" Padding="10,5" ToolTip="The trimmed copy starts here (I)">
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="[" FontWeight="Bold" Margin="0,0,6,0"/><TextBlock Text="Set start"/></StackPanel>
+                    </Button>
+                    <Button Click="SetEnd_Click" Padding="10,5" ToolTip="The trimmed copy ends here (O)">
+                        <StackPanel Orientation="Horizontal"><TextBlock Text="Set end"/><TextBlock Text="]" FontWeight="Bold" Margin="6,0,0,0"/></StackPanel>
+                    </Button>
+                </StackPanel>
+                <TextBlock x:Name="RangeText" Style="{StaticResource Muted}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+            </DockPanel>
+        </Border>
+
+        <!-- the timeline: the kept part is lit -->
+        <Grid DockPanel.Dock="Bottom" Margin="16,10,16,4" Height="26">
+            <Border Height="6" CornerRadius="3" Background="{StaticResource Bg3}" VerticalAlignment="Center" Margin="5,0"/>
+            <Canvas x:Name="Band" Margin="5,0" IsHitTestVisible="False">
+                <Border x:Name="Kept" Height="6" CornerRadius="3" Background="{StaticResource Accent}" Opacity="0.55" Canvas.Top="10"/>
+            </Canvas>
+            <Slider x:Name="Timeline" Minimum="0" Maximum="1" VerticalAlignment="Center" IsMoveToPointEnabled="True" Background="Transparent"
+                    ValueChanged="Timeline_ValueChanged" PreviewMouseLeftButtonDown="Timeline_Down" PreviewMouseLeftButtonUp="Timeline_Up"/>
+        </Grid>
+
+        <Grid Background="Black">
+            <MediaElement x:Name="Player" LoadedBehavior="Manual" UnloadedBehavior="Close" ScrubbingEnabled="True" Stretch="Uniform"
+                          MediaOpened="Player_Opened" MediaEnded="Player_Ended" MediaFailed="Player_Failed"/>
+            <TextBlock x:Name="Problem" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed" TextWrapping="Wrap" Margin="24"/>
+        </Grid>
+    </DockPanel>
+</Window>

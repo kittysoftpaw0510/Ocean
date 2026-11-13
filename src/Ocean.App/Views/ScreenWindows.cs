@@ -115,6 +115,45 @@ public sealed class ScreenUi : IScreenUi
     }
 
     private RecordBoundary? _boundary;
+
+    public Task<bool> CountdownAsync(ScreenPick target)
+    {
+        // the area: a screen, a part of one, a window (when it can't be seen, the main screen)
+        var mon = ScreenSources.Monitors();
+        var m = mon.FirstOrDefault(x => x.Handle == target.Monitor) ?? mon.FirstOrDefault();
+        Int32Rect area = target.Kind switch
+        {
+            ScreenPick.Kinds.Window when ScreenSources.IsOnScreen(target.Window) && ScreenSources.WindowBounds(target.Window) is { } w => w,
+            ScreenPick.Kinds.Region when m is not null => new Int32Rect(m.Bounds.X + target.CropLeft, m.Bounds.Y + target.CropTop, target.SourceWidth, target.SourceHeight),
+            _ => m?.Bounds ?? new Int32Rect(0, 0, 800, 600),
+        };
+        return RecordCountdownWindow.RunAsync(area);
+    }
+
+    public bool Confirm(string title, string message, string okLabel, bool danger, bool hideFromCapture)
+    {
+        var w = new ConfirmWindow(title, message, okLabel, "Cancel", danger) { Topmost = true };
+        var main = Application.Current.MainWindow;
+        if (main is { IsVisible: true, WindowState: not WindowState.Minimized } && !hideFromCapture) w.Owner = main;
+        else w.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        if (hideFromCapture) w.SourceInitialized += (_, _) => ScreenSources.HideFromCapture(w);
+        return w.ShowDialog() == true;
+    }
+
+    public void ShowSaved(RecordingResult result, string heading)
+    {
+        var record = (Application.Current.MainWindow?.DataContext as MainViewModel)?.Record;
+        RecordSavedWindow.Show(_vm.Api, result, heading,
+            (title, text, kind) => (Application.Current.MainWindow?.DataContext as MainViewModel)?.Toast(title, text, kind),
+            (path, duration) => record?.Trim(path, duration));
+    }
+
+    public void OpenTrim(string path, double duration, Action<RecordingTrim.Result, double> done)
+    {
+        var w = new TrimWindow(path, duration, done);
+        w.Show();
+        w.Activate();
+    }
 }
 
 /// <summary>

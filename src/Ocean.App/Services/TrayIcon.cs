@@ -13,7 +13,7 @@ public sealed class TrayIcon : IDisposable
     private readonly Icon _badged = IconFactory.CreateIcon(TraySize, badge: true);
     private readonly Icon _recording = IconFactory.CreateIcon(TraySize, recording: true);
     private readonly Icon _recordingPaused = IconFactory.CreateIcon(TraySize, recording: true, paused: true);
-    private readonly ToolStripMenuItem _record, _recordPause, _recordStop;
+    private readonly ToolStripMenuItem _record, _recordPause, _recordStop, _recordAgain;
     private bool _badge;
     private bool _isRecording, _isPaused;
     private Action? _balloonAction;
@@ -27,6 +27,7 @@ public sealed class TrayIcon : IDisposable
     public event Action? RecordRequested;
     public event Action? RecordPauseRequested;
     public event Action? RecordStopRequested;
+    public event Action? RecordAgainRequested;
 
     public TrayIcon()
     {
@@ -38,7 +39,8 @@ public sealed class TrayIcon : IDisposable
         _record = new ToolStripMenuItem("Record my screen…", null, (_, _) => RecordRequested?.Invoke());
         _recordStop = new ToolStripMenuItem("Stop recording", null, (_, _) => RecordStopRequested?.Invoke()) { Font = new Font(Control.DefaultFont, FontStyle.Bold), Visible = false };
         _recordPause = new ToolStripMenuItem("Pause recording", null, (_, _) => RecordPauseRequested?.Invoke()) { Visible = false };
-        menu.Items.Add(_record); menu.Items.Add(_recordStop); menu.Items.Add(_recordPause);
+        _recordAgain = new ToolStripMenuItem("Record the same again", null, (_, _) => RecordAgainRequested?.Invoke()) { Visible = false };
+        menu.Items.Add(_record); menu.Items.Add(_recordAgain); menu.Items.Add(_recordStop); menu.Items.Add(_recordPause);
         menu.Items.Add(new ToolStripSeparator());
         _pause =new ToolStripMenuItem("Pause sharing", null, (_, _) => PauseToggled?.Invoke(!_pause!.Checked)) { CheckOnClick = false };
         menu.Items.Add(_pause);
@@ -67,9 +69,12 @@ public sealed class TrayIcon : IDisposable
     }
 
     /// <summary>A recording runs: the menu offers Stop and Pause / Go on (with the time), the icon carries a red dot (amber while paused).</summary>
-    public void SetRecording(bool recording, bool paused, string elapsed)
+    /// <param name="again">"Record the same again: …" (null: nothing to repeat).</param>
+    public void SetRecording(bool recording, bool paused, string elapsed, string? again = null)
     {
         _record.Visible = !recording;
+        _recordAgain.Visible = !recording && again is not null;
+        if (again is not null) _recordAgain.Text = again.Length > 60 ? again[..60] + "…" : again;
         _recordStop.Visible = recording; _recordPause.Visible = recording;
         _recordStop.Text = recording ? $"Stop recording  ({elapsed})" : "Stop recording";
         _recordPause.Text = paused ? "Go on recording" : "Pause recording";

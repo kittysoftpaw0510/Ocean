@@ -36,7 +36,7 @@ public sealed partial class RecordViewModel : ObservableObject
     {
         _main = main;
         _loading = true;
-        Quality = _settings.Quality; Speaker = _settings.Speaker; Mic = _settings.Mic; Folder = _settings.FolderOrDefault;
+        Quality = _settings.Quality; Speaker = _settings.Speaker; Mic = _settings.Mic; Folder = _settings.FolderOrDefault; Countdown = _settings.Countdown;
         _loading = false;
         _tick.Tick += (_, _) => Refresh();
         RecordingEncoders.Warm(); // High's graphics card encoder is known before anyone records
@@ -48,6 +48,9 @@ public sealed partial class RecordViewModel : ObservableObject
     [ObservableProperty] private bool _speaker = true;
     [ObservableProperty] private bool _mic = true;
     [ObservableProperty] private string _folder = "";
+    /// <summary>3-2-1 over the area before recording starts.</summary>
+    [ObservableProperty] private bool _countdown = true;
+    partial void OnCountdownChanged(bool value) => Save();
     public string QualityHint => RecordingQuality.Of(Quality).Hint;
     public bool IsSmall { get => Quality == RecordingQuality.Small; set { if (value) Quality = RecordingQuality.Small; } }
     public bool IsBalanced { get => Quality == RecordingQuality.Balanced; set { if (value) Quality = RecordingQuality.Balanced; } }
@@ -70,7 +73,7 @@ public sealed partial class RecordViewModel : ObservableObject
     private void Save()
     {
         if (_loading) return;
-        _settings.Quality = Quality; _settings.Speaker = Speaker; _settings.Mic = Mic;
+        _settings.Quality = Quality; _settings.Speaker = Speaker; _settings.Mic = Mic; _settings.Countdown = Countdown;
         _settings.Folder = IsDefaultFolder ? null : Folder;
         _settings.Save();
     }
@@ -127,11 +130,69 @@ public sealed partial class RecordViewModel : ObservableObject
     [RelayCommand]
     private async Task Start()
     {
-        if (IsRecording) return;
+        if (IsRecording || _starting) return;
         if (ScreenTools.Ffmpeg is null) { _main.Toast("Recording isn't available", "ffmpeg.exe is missing next to Ocean. Installing Ocean again puts it back.", "error"); return; }
         CheckDevices();
         var pick = await Ui.PickToRecordAsync(this);
         if (pick is null) return;
+        await BeginAsync(pick);
+    }
+
+    /// <summary>"Record the same again": what was recorded last, without the picker.</summary>
+    [RelayCommand]
+    private async Task RecordAgain()
+    {
+        if (IsRecording || _starting) return;
+        if (_settings.Last?.Resolve() is not { } pick)
+        {
+            _main.Toast("Pick again", _settings.Last is null ? "Nothing was recorded yet." : $"“{_settings.Last.Label}” isn't there any more.", "info");
+            await Start();
+            return;
+        }
+        CheckDevices();
+        await BeginAsync(pick);
+    }
+
+    /// <summary>What "Record the same again" records (for menus); null when there is nothing to repeat.</summary>
+    public string? RecordAgainText => _settings.Last is { } l ? "Record the same again: " + l.Label : null;
+    public bool CanRecordAgain => _settings.Last is not null;
+
+    private bool _starting;
+
+    private async Task BeginAsync(ScreenPick pick)
+    {
+        _starting = true;
+        try
+        {
+            // little room on the disk: say so first, with how long it lasts
+            if (DiskWarning(out var warning) && !Ui.Confirm("Little free space", warning, "Record anyway", danger: false, hideFromCapture: false)) return;
+            if (Countdown && !await Ui.CountdownAsync(pick)) return;
+            Begin(pick);
+        }
+        finally { _starting = false; }
+    }
+
+    /// <summary>Less than 2 GB free where recordings go: how long that is at the chosen quality.</summary>
+    private bool DiskWarning(out string text)
+    {
+        text = "";
+        try
+        {
+            Directory.CreateDirectory(Folder);
+            var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(Folder))!);
+            if (drive.AvailableFreeSpace >= 2L * 1024 * 1024 * 1024) return false;
+            // what a minute of ordinary screen work takes at each quality (measured: a still screen takes far less)
+            var perMinute = Quality switch { RecordingQuality.Small => 1.5, RecordingQuality.High => 8.0, _ => 4.0 } * 1024 * 1024;
+            var minutes = Math.Max(0, (drive.AvailableFreeSpace - ScreenRecorder.MinFreeBytes) / perMinute);
+            text = $"Only {Format.Bytes(drive.AvailableFreeSpace)} is free on {drive.Name.TrimEnd('\\')} where recordings are saved. " +
+                   $"At {RecordingQuality.Of(Quality).Name} that is roughly {(minutes < 1 ? "less than a minute" : $"{minutes:0} minutes")} of recording; it stops by itself before the disk is full.";
+            return true;
+        }
+        catch { return false; }
+    }
+
+    private void Begin(ScreenPick pick)
+    {
         ScreenRecorder rec;
         try
         {
@@ -143,6 +204,10 @@ public sealed partial class RecordViewModel : ObservableObject
         }
         catch (Exception ex) { _main.Toast("The recording didn't start", ex.Message, "error"); AppLog.Warn("Record", "start", ex); return; }
         _rec = rec;
+        _settings.Last = LastTarget.From(pick);
+        _settings.Save();
+        OnPropertyChanged(nameof(RecordAgainText)); OnPropertyChanged(nameof(CanRecordAgain));
+        _remindedHours = 0;
         MicMuted = false;
         HasMic = rec.HasMic; HasSpeaker = rec.HasSpeaker;
         IsRecording = true; Saving = false; Paused = false;
@@ -191,13 +256,34 @@ public sealed partial class RecordViewModel : ObservableObject
 
     [RelayCommand] private void ToggleMic() => MicMuted = !MicMuted;
 
+    /// <summary>Throw this recording away (after asking; the question is never in the recording).</summary>
+    [RelayCommand]
+    private void Discard()
+    {
+        if (_rec is not { } rec || Saving) return;
+        if (!Ui.Confirm("Discard this recording?", $"The {ElapsedText} recorded so far are deleted, nothing is saved.", "Discard", danger: true, hideFromCapture: true)) return;
+        if (!ReferenceEquals(_rec, rec)) return;
+        Saving = true;
+        _tick.Stop();
+        rec.Discard();
+    }
+
     private void Refresh()
     {
         if (_rec is null) return;
         var t = _rec.Elapsed;
         ElapsedText = t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"m\:ss");
         SizeText = _rec.Bytes > 0 ? Format.Bytes(_rec.Bytes) : "";
+        // a gentle reminder at every full hour (a recording that was simply forgotten fills the disk)
+        if ((int)t.TotalHours > _remindedHours && !Paused)
+        {
+            _remindedHours = (int)t.TotalHours;
+            var text = $"{ElapsedText} so far ({SizeText}). Stop it on the recording bar or from the tray icon.";
+            _main.Toast("Still recording", text, "info");
+            _main.Notify("Still recording: " + ElapsedText, SizeText, null);
+        }
     }
+    private int _remindedHours;
 
     private void OnFinished(ScreenRecorder rec, RecordingResult r)
     {
@@ -206,19 +292,22 @@ public sealed partial class RecordViewModel : ObservableObject
         _tick.Stop();
         IsRecording = false; Saving = false; Paused = false;
         Ui.HideRecordBar();
+        if (r.Discarded) { _main.Toast("Recording discarded", "Nothing was saved.", "info"); return; }
         if (r.Path is null)
         {
             _main.Toast("Nothing was recorded", r.Error is null ? "The recording stopped before it began." : char.ToUpper(r.Error[0]) + r.Error[1..] + ".", "error");
             return;
         }
-        var path = r.Path;
-        void show() { try { Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true }); } catch { } }
-        var length = r.Duration.TotalHours >= 1 ? r.Duration.ToString(@"h\:mm\:ss") : r.Duration.ToString(@"m\:ss");
-        var text = $"{Path.GetFileName(path)}  ·  {length}  ·  {Format.Bytes(r.Bytes)}. Click to show it in its folder.";
-        if (r.Reason is { } why) _main.Toast("Recording stopped: " + why, text, "warn", show);
-        else _main.Toast("Recording saved", text, "success", show);
-        _main.Notify("Recording saved", Path.GetFileName(path), show);
+        // what to do next: open, share, trim, show in the folder, copy the path
+        Ui.ShowSaved(r, "Recording saved");
     }
+
+    /// <summary>Trim a recording (from the saved card); the trimmed copy gets its own card.</summary>
+    public void Trim(string path, double duration) => Ui.OpenTrim(path, duration, (result, length) =>
+    {
+        if (result.Path is null) return;
+        Ui.ShowSaved(new RecordingResult { Path = result.Path, Bytes = new FileInfo(result.Path).Length, Duration = TimeSpan.FromSeconds(length) }, "Trimmed copy saved");
+    });
 
     /// <summary>The app is closing: a running recording is finished and saved first (a few seconds at most).</summary>
     public void Shutdown()

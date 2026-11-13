@@ -105,9 +105,10 @@ public partial class App : Application
         _tray.RecordRequested += () => Dispatcher.InvokeAsync(() => _vm.Record.StartCommand.Execute(null));
         _tray.RecordPauseRequested += () => Dispatcher.InvokeAsync(() => _vm.Record.TogglePauseCommand.Execute(null));
         _tray.RecordStopRequested += () => Dispatcher.InvokeAsync(() => _vm.Record.StopCommand.Execute(null));
+        _tray.RecordAgainRequested += () => Dispatcher.InvokeAsync(() => _vm.Record.RecordAgainCommand.Execute(null));
         _vm.Record.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName is nameof(RecordViewModel.IsRecording) or nameof(RecordViewModel.Paused) or nameof(RecordViewModel.ElapsedText) or nameof(RecordViewModel.Saving)) UpdateTray();
+            if (e.PropertyName is nameof(RecordViewModel.IsRecording) or nameof(RecordViewModel.Paused) or nameof(RecordViewModel.ElapsedText) or nameof(RecordViewModel.Saving) or nameof(RecordViewModel.RecordAgainText)) UpdateTray();
         };
         _vm.TrayNotify += (title, text, click) => Dispatcher.InvokeAsync(() =>
         {
@@ -135,7 +136,7 @@ public partial class App : Application
         _tray.SetBadge(_vm.TotalNew > 0);
         _tray.SetPaused(_vm.SharingPaused);
         var rec = _vm.Record;
-        _tray.SetRecording(rec.IsRecording && !rec.Saving, rec.Paused, rec.ElapsedText);
+        _tray.SetRecording(rec.IsRecording && !rec.Saving, rec.Paused, rec.ElapsedText, rec.RecordAgainText);
         _tray.SetText(rec.IsRecording
             ? (rec.Saving ? "Ocean: saving the recording…" : rec.Paused ? $"Ocean: recording paused at {rec.ElapsedText}" : $"Ocean: recording {rec.ElapsedText}")
             : "Ocean: " + _vm.StatusText + (_vm.TotalNew > 0 ? $"  ·  {_vm.TotalNew} new" : ""));

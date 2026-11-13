@@ -265,6 +265,15 @@
                                 </StackPanel>
                                 <CheckBox Grid.Column="1" Style="{StaticResource Switch}" IsChecked="{Binding Mic}" AutomationProperties.Name="Record the microphone"/>
                             </Grid>
+                            <Border Style="{StaticResource Divider}"/>
+                            <Grid Style="{StaticResource Row}">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                                    <TextBlock Text="Count down 3, 2, 1 before recording" Style="{StaticResource RowTitle}"/>
+                                    <TextBlock Text="A moment to get ready, so the video doesn't open on the Start click. Esc or a click cancels it." Style="{StaticResource RowHint}" TextWrapping="Wrap"/>
+                                </StackPanel>
+                                <CheckBox Grid.Column="1" Style="{StaticResource Switch}" IsChecked="{Binding Countdown}" AutomationProperties.Name="Count down before recording"/>
+                            </Grid>
                         </StackPanel>
                     </Border>
 

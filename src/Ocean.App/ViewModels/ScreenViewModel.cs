@@ -25,6 +25,13 @@ public interface IScreenUi
     /// <summary>The "recording" bar (timer, size, mute the microphone, stop), kept out of the recording.</summary>
     void ShowRecordBar(RecordViewModel record);
     void HideRecordBar();
+    /// <summary>3-2-1 over what is about to be recorded. False: cancelled.</summary>
+    Task<bool> CountdownAsync(ScreenPick target);
+    /// <summary>A question on its own (Ocean's window may be closed); kept out of the recording when asked while recording.</summary>
+    bool Confirm(string title, string message, string okLabel, bool danger, bool hideFromCapture);
+    /// <summary>The "recording saved" card with what to do next.</summary>
+    void ShowSaved(RecordingResult result, string heading);
+    void OpenTrim(string path, double duration, Action<RecordingTrim.Result, double> done);
 }
 
 /// <summary>A question waiting for the user: someone wants to see this PC's screen, or to show theirs.</summary>

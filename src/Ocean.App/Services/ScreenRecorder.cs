@@ -12,6 +12,10 @@ public sealed class RecordingSettings
     public bool Speaker { get; set; } = true;
     public bool Mic { get; set; } = true;
     public string? Folder { get; set; }
+    /// <summary>3-2-1 over the area before recording starts.</summary>
+    public bool Countdown { get; set; } = true;
+    /// <summary>What was recorded last, for "Record the same again" (a screen or a part of one; a window only while it exists).</summary>
+    public LastTarget? Last { get; set; }
 
     /// <summary>Videos\Ocean\Recordings in the Windows user's own Videos folder.</summary>
     public static string DefaultFolder => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyVideos), "Ocean", "Recordings");
@@ -244,6 +248,14 @@ public sealed class ScreenRecorder : IDisposable
     /// <summary>Ends the recording; the file is finished in the background (<see cref="Finished"/>).</summary>
     public void Stop(string? why = null) => Stop(why, segmentAlreadyEnded: false);
 
+    /// <summary>Ends the recording and throws it away: nothing is kept (<see cref="Finished"/> says Discarded).</summary>
+    public void Discard()
+    {
+        _discard = true;
+        Stop("discarded", segmentAlreadyEnded: false);
+    }
+    private volatile bool _discard;
+
     private void Stop(string? why, bool segmentAlreadyEnded)
     {
         RecordingSegment? seg;
@@ -267,6 +279,13 @@ public sealed class ScreenRecorder : IDisposable
         try
         {
             foreach (var s in segments) await s.Done;
+            if (_discard)
+            {
+                foreach (var s in segments) s.DeleteFile();
+                result.Discarded = true;
+                AppLog.Info("Record", $"discarded after {result.Duration:hh\\:mm\\:ss}");
+                return;
+            }
             var good = segments.Where(s => s.HasFile).ToList();
             if (good.Count == 0)
             {
@@ -336,10 +355,11 @@ public sealed class ScreenRecorder : IDisposable
         var args = new List<string> { "-hide_banner", "-loglevel", "error", "-i", from, "-map", "0", "-c", "copy" };
         if (s.Length is > 0.3 and var length)
         {
-            // Matroska counts in milliseconds; by decode time, which is right with B-pictures too (measured)
+            // The last picture lasts until the end (Matroska counts in milliseconds; by decode time, which is right
+            // with B-pictures too: measured). Nothing is cut off: the capture ended at that moment, and the sound
+            // ends there too. (A cut by time could leave a B-picture without the later picture it is built on.)
             var endMs = ((long)Math.Round(length * 1000)).ToString(CultureInfo.InvariantCulture);
             args.AddRange(new[] { "-bsf:v", $@"setts=duration='if(eq(NEXT_DTS\,NOPTS)\,max(DURATION\,{endMs}-DTS)\,DURATION)'" });
-            args.AddRange(new[] { "-t", length.ToString("0.000", CultureInfo.InvariantCulture) });
         }
         if (mp4) args.AddRange(new[] { "-movflags", "+faststart" });
         else args.AddRange(new[] { "-f", "matroska" });
@@ -627,8 +647,62 @@ public static class RecordingEncoders
     }
 }
 
+/// <summary>
+/// What was recorded last, kept across restarts. A screen is found again by its position and size (Windows gives
+/// monitors new handles), a part of a screen by its screen and its place on it; a window only by its handle, so
+/// only while it still exists.
+/// </summary>
+public sealed class LastTarget
+{
+    public ScreenPick.Kinds Kind { get; set; }
+    public int MonitorX { get; set; }
+    public int MonitorY { get; set; }
+    public int MonitorWidth { get; set; }
+    public int MonitorHeight { get; set; }
+    public int CropLeft { get; set; }
+    public int CropTop { get; set; }
+    public int Width { get; set; }
+    public int Height { get; set; }
+    public long Window { get; set; }
+    public string Title { get; set; } = "";
+
+    public static LastTarget From(ScreenPick p)
+    {
+        var t = new LastTarget { Kind = p.Kind, CropLeft = p.CropLeft, CropTop = p.CropTop, Width = p.SourceWidth, Height = p.SourceHeight, Window = p.Window.ToInt64(), Title = p.Title };
+        if (ScreenSources.Monitors().FirstOrDefault(m => m.Handle == p.Monitor) is { } mon)
+        { t.MonitorX = mon.Bounds.X; t.MonitorY = mon.Bounds.Y; t.MonitorWidth = mon.Bounds.Width; t.MonitorHeight = mon.Bounds.Height; }
+        return t;
+    }
+
+    /// <summary>The same thing now, or null when it is gone (the window closed, the screen unplugged or changed).</summary>
+    public ScreenPick? Resolve()
+    {
+        if (Kind == ScreenPick.Kinds.Window)
+        {
+            var h = new IntPtr(Window);
+            if (!ScreenSources.Exists(h) || ScreenSources.WindowBounds(h) is not { } b) return null;
+            return new ScreenPick { Kind = Kind, Window = h, SourceWidth = b.Width, SourceHeight = b.Height, Title = Title };
+        }
+        var mon = ScreenSources.Monitors().FirstOrDefault(m => m.Bounds.X == MonitorX && m.Bounds.Y == MonitorY && m.Bounds.Width == MonitorWidth && m.Bounds.Height == MonitorHeight);
+        if (mon is null) return null;
+        if (Kind == ScreenPick.Kinds.Monitor)
+            return new ScreenPick { Kind = Kind, Monitor = mon.Handle, SourceWidth = mon.Bounds.Width, SourceHeight = mon.Bounds.Height, Title = mon.Name };
+        if (CropLeft + Width > mon.Bounds.Width || CropTop + Height > mon.Bounds.Height) return null;
+        return new ScreenPick
+        {
+            Kind = Kind, Monitor = mon.Handle, SourceWidth = Width, SourceHeight = Height, Title = $"Part of {mon.Name.ToLowerInvariant()}",
+            CropLeft = CropLeft, CropTop = CropTop, CropRight = mon.Bounds.Width - CropLeft - Width, CropBottom = mon.Bounds.Height - CropTop - Height,
+        };
+    }
+
+    /// <summary>For menus: "Monitor 1", "Part of monitor 2 (1280 × 720)", a window's title.</summary>
+    public string Label => Kind == ScreenPick.Kinds.Region ? $"{Title} ({Width} × {Height})" : Title.Length > 40 ? Title[..40] + "…" : Title;
+}
+
 public sealed class RecordingResult
 {
+    /// <summary>The recording was thrown away on purpose (Discard).</summary>
+    public bool Discarded { get; set; }
     /// <summary>The finished file (null when nothing was recorded).</summary>
     public string? Path { get; set; }
     public long Bytes { get; set; }

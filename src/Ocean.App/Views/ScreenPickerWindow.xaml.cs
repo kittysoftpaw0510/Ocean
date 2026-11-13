@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Shapes;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Ocean.App.Services;
 
@@ -201,74 +202,195 @@ public partial class ScreenPickerWindow : Window
 }
 
 /// <summary>
-/// Marks a part of a monitor with the mouse: the monitor dims, a rectangle is dragged, its size shows while
-/// dragging. Esc or a click without dragging cancels. The result is in real pixels, relative to the monitor.
+/// Marks a part of a monitor with the mouse. The monitor dims; then:
+/// - drag a rectangle: its edges snap to the edges of windows and of the screen (within a few pixels), Shift keeps
+///   it 16:9, its size shows while dragging;
+/// - or point at a window (it lights up) and click: exactly that window's area;
+/// - or pick a size above (1280 × 720, 1920 × 1080, 1080 × 1080): a frame of that size follows the mouse, a click
+///   puts it there. Common sizes make tutorial videos come out a standard size.
+/// Esc or a right click cancels. The result is in real pixels, relative to the monitor.
 /// </summary>
 public sealed class RegionSelectWindow : Window
 {
+    private const int Snap = 10; // real pixels
+    private static readonly (string Label, int W, int H)[] Presets = { ("Free", 0, 0), ("1280 × 720", 1280, 720), ("1920 × 1080", 1920, 1080), ("1080 × 1080", 1080, 1080) };
+
     private readonly MonitorInfo _monitor;
     private readonly Canvas _canvas = new();
-    private readonly System.Windows.Shapes.Rectangle _box = new() { Stroke = new SolidColorBrush(Color.FromRgb(0x2D, 0xD4, 0xBF)), StrokeThickness = 2, Fill = new SolidColorBrush(Color.FromArgb(0x30, 0xFF, 0xFF, 0xFF)), Visibility = Visibility.Collapsed };
-    private readonly TextBlock _size = new() { Foreground = Brushes.White, FontSize = 13, FontWeight = FontWeights.SemiBold, Visibility = Visibility.Collapsed };
-    private Point? _start;
+    private readonly Rectangle _box = new() { Stroke = new SolidColorBrush(Color.FromRgb(0x2D, 0xD4, 0xBF)), StrokeThickness = 2, Fill = new SolidColorBrush(Color.FromArgb(0x26, 0xFF, 0xFF, 0xFF)), Visibility = Visibility.Collapsed, IsHitTestVisible = false };
+    private readonly Rectangle _hover = new() { Stroke = new SolidColorBrush(Color.FromArgb(0xCC, 0x2D, 0xD4, 0xBF)), StrokeThickness = 2, StrokeDashArray = new DoubleCollection { 4, 3 }, Fill = new SolidColorBrush(Color.FromArgb(0x1A, 0x2D, 0xD4, 0xBF)), Visibility = Visibility.Collapsed, IsHitTestVisible = false };
+    private readonly Border _sizeTag = new() { Background = new SolidColorBrush(Color.FromArgb(0xE0, 0x0A, 0x11, 0x20)), CornerRadius = new CornerRadius(4), Padding = new Thickness(7, 2, 7, 3), Visibility = Visibility.Collapsed, IsHitTestVisible = false };
+    private readonly TextBlock _sizeText = new() { Foreground = Brushes.White, FontSize = 12, FontWeight = FontWeights.SemiBold, FontFamily = new FontFamily("Segoe UI") };
+    private readonly Border _toolbar;
+    private readonly List<Int32Rect> _windows = new();   // visible windows on this monitor, top first (real pixels, relative)
+    private readonly int[] _xs, _ys;                      // the edges to snap to
+    private Point? _startPx;                              // where a drag began (real pixels)
+    private bool _dragged;
+    private (int W, int H) _preset;
     private Int32Rect? _result;
+    private DpiScale _dpi = new(1, 1);
 
-    private RegionSelectWindow(MonitorInfo monitor)
+    private RegionSelectWindow(MonitorInfo monitor, IEnumerable<IntPtr> skip)
     {
         _monitor = monitor;
         WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize; AllowsTransparency = true; Topmost = true; ShowInTaskbar = false;
-        Background = new SolidColorBrush(Color.FromArgb(0x66, 0, 0, 0));
+        Background = new SolidColorBrush(Color.FromArgb(0x59, 0, 0, 0));
         Cursor = Cursors.Cross;
         WindowStartupLocation = WindowStartupLocation.Manual;
         Left = 0; Top = 0; Width = 200; Height = 200;
-        var hint = new Border
+
+        // windows on this monitor (for snapping and for "click a window")
+        var b = monitor.Bounds;
+        foreach (var w in ScreenSources.Windows(skip))
         {
-            Background = new SolidColorBrush(Color.FromArgb(0xE6, 0x0A, 0x11, 0x20)), CornerRadius = new CornerRadius(8), Padding = new Thickness(16, 9, 16, 9),
-            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 28, 0, 0), IsHitTestVisible = false,
-            Child = new TextBlock { Text = "Drag to mark the part to share.  Esc cancels.", Foreground = Brushes.White, FontSize = 14 },
+            var r = w.Bounds;
+            int x0 = Math.Max(r.X, b.X), y0 = Math.Max(r.Y, b.Y), x1 = Math.Min(r.X + r.Width, b.X + b.Width), y1 = Math.Min(r.Y + r.Height, b.Y + b.Height);
+            if (x1 - x0 >= 64 && y1 - y0 >= 64) _windows.Add(new Int32Rect(x0 - b.X, y0 - b.Y, x1 - x0, y1 - y0));
+        }
+        _xs = _windows.SelectMany(r => new[] { r.X, r.X + r.Width }).Append(0).Append(b.Width).Distinct().ToArray();
+        _ys = _windows.SelectMany(r => new[] { r.Y, r.Y + r.Height }).Append(0).Append(b.Height).Distinct().ToArray();
+
+        // the toolbar: sizes and what to do
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        foreach (var p in Presets)
+        {
+            var fits = p.W <= b.Width && p.H <= b.Height;
+            var chip = new RadioButton
+            {
+                Content = p.Label, GroupName = "size", IsChecked = p.W == 0, IsEnabled = fits, Margin = new Thickness(0, 0, 14, 0), Foreground = Brushes.White, Cursor = Cursors.Hand,
+                ToolTip = p.W == 0 ? "Drag any rectangle (Shift: 16:9), or click a window" : fits ? $"A {p.Label} frame follows the mouse; click to put it there" : "Larger than this screen",
+            };
+            var preset = (p.W, p.H);
+            chip.Checked += (_, _) => { _preset = preset; _box.Visibility = Visibility.Collapsed; _hover.Visibility = Visibility.Collapsed; _sizeTag.Visibility = Visibility.Collapsed; Follow(Mouse.GetPosition(_canvas)); };
+            row.Children.Add(chip);
+        }
+        var hint = new TextBlock { Text = "Drag a rectangle, or click a window.  Esc cancels.", Foreground = new SolidColorBrush(Color.FromArgb(0xC0, 0xFF, 0xFF, 0xFF)), FontSize = 12, Margin = new Thickness(6, 1, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        row.Children.Add(hint);
+        _toolbar = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(0xF0, 0x0A, 0x11, 0x20)), CornerRadius = new CornerRadius(9), Padding = new Thickness(16, 9, 16, 9),
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 24, 0, 0), Child = row, Cursor = Cursors.Arrow,
+            BorderBrush = new SolidColorBrush(Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF)), BorderThickness = new Thickness(1),
         };
-        _canvas.Children.Add(_box); _canvas.Children.Add(_size);
+        _sizeTag.Child = _sizeText;
+        _canvas.Children.Add(_hover); _canvas.Children.Add(_box); _canvas.Children.Add(_sizeTag);
         var root = new Grid();
-        root.Children.Add(_canvas); root.Children.Add(hint);
+        root.Children.Add(_canvas); root.Children.Add(_toolbar);
         Content = root;
-        SourceInitialized += (_, _) => ScreenSources.MoveTo(this, monitor.Bounds);
-        Loaded += (_, _) => { ScreenSources.MoveTo(this, monitor.Bounds); Activate(); Focus(); };
-        KeyDown += (_, e) => { if (e.Key == Key.Escape) Close(); };
-        MouseLeftButtonDown += (_, e) => { _start = e.GetPosition(_canvas); CaptureMouse(); hint.Visibility = Visibility.Collapsed; };
-        MouseMove += (_, e) => { if (_start is { } s) Draw(s, e.GetPosition(_canvas)); };
-        MouseLeftButtonUp += (_, e) =>
-        {
-            if (_start is not { } s) return;
-            ReleaseMouseCapture();
-            _result = ToPixels(s, e.GetPosition(_canvas));
-            Close();
-        };
+        SourceInitialized += (_, _) => { ScreenSources.HideFromCapture(this); ScreenSources.MoveTo(this, monitor.Bounds); };
+        Loaded += (_, _) => { ScreenSources.MoveTo(this, monitor.Bounds); _dpi = VisualTreeHelper.GetDpi(this); Activate(); Focus(); Follow(Mouse.GetPosition(_canvas)); };
+        KeyDown += (_, e) => { if (e.Key == Key.Escape) Close(); else if (e.Key is Key.LeftShift or Key.RightShift && _startPx is { } s) Draw(s, ToPx(Mouse.GetPosition(_canvas))); };
         MouseRightButtonDown += (_, _) => Close();
+        MouseLeftButtonDown += OnDown;
+        MouseMove += (_, e) => { if (_startPx is { } s) { _dragged |= Distance(s, ToPx(e.GetPosition(_canvas))) > 4; Draw(s, ToPx(e.GetPosition(_canvas))); } else Follow(e.GetPosition(_canvas)); };
+        MouseLeftButtonUp += OnUp;
     }
 
-    private void Draw(Point a, Point b)
+    private bool OnToolbar(MouseEventArgs e) => _toolbar.IsMouseOver;
+    private Point ToPx(Point dip) => new(dip.X * _dpi.DpiScaleX, dip.Y * _dpi.DpiScaleY);
+    private Rect ToDip(Int32Rect px) => new(px.X / _dpi.DpiScaleX, px.Y / _dpi.DpiScaleY, px.Width / _dpi.DpiScaleX, px.Height / _dpi.DpiScaleY);
+    private static double Distance(Point a, Point b) => Math.Abs(a.X - b.X) + Math.Abs(a.Y - b.Y);
+
+    /// <summary>Not dragging: a preset frame follows the mouse, or the window under it lights up.</summary>
+    private void Follow(Point dip)
     {
-        double x = Math.Min(a.X, b.X), y = Math.Min(a.Y, b.Y), w = Math.Abs(a.X - b.X), h = Math.Abs(a.Y - b.Y);
-        Canvas.SetLeft(_box, x); Canvas.SetTop(_box, y); _box.Width = w; _box.Height = h; _box.Visibility = Visibility.Visible;
-        if (ToPixels(a, b) is { } px) { _size.Text = $"{px.Width} × {px.Height}"; _size.Visibility = Visibility.Visible; }
-        else _size.Visibility = Visibility.Collapsed;
-        Canvas.SetLeft(_size, x + 6); Canvas.SetTop(_size, y > 26 ? y - 22 : y + 6);
+        if (_toolbar.IsMouseOver) return;
+        var p = ToPx(dip);
+        if (_preset.W > 0)
+        {
+            var r = PresetAt(p);
+            Show(_box, r); Tag(r, _preset.W == _preset.H ? "square" : null);
+            return;
+        }
+        if (WindowAt(p) is { } w) { Show(_hover, w); Tag(w, "click: this window"); }
+        else { _hover.Visibility = Visibility.Collapsed; _sizeTag.Visibility = Visibility.Collapsed; }
     }
 
-    /// <summary>Null when too small to be meant (a click).</summary>
-    private Int32Rect? ToPixels(Point a, Point b)
+    private Int32Rect? WindowAt(Point px) => _windows.Cast<Int32Rect?>().FirstOrDefault(r => px.X >= r!.Value.X && px.X < r.Value.X + r.Value.Width && px.Y >= r.Value.Y && px.Y < r.Value.Y + r.Value.Height);
+
+    private Int32Rect PresetAt(Point px)
     {
-        var dpi = VisualTreeHelper.GetDpi(this);
-        int x = (int)Math.Round(Math.Min(a.X, b.X) * dpi.DpiScaleX), y = (int)Math.Round(Math.Min(a.Y, b.Y) * dpi.DpiScaleY);
-        int w = (int)Math.Round(Math.Abs(a.X - b.X) * dpi.DpiScaleX), h = (int)Math.Round(Math.Abs(a.Y - b.Y) * dpi.DpiScaleY);
-        x = Math.Clamp(x, 0, _monitor.Bounds.Width - 1); y = Math.Clamp(y, 0, _monitor.Bounds.Height - 1);
-        w = Math.Min(w, _monitor.Bounds.Width - x) & ~1; h = Math.Min(h, _monitor.Bounds.Height - y) & ~1;
-        return w < 64 || h < 64 ? null : new Int32Rect(x, y, w, h);
+        var b = _monitor.Bounds;
+        var x = (int)Math.Clamp(px.X - _preset.W / 2.0, 0, b.Width - _preset.W);
+        var y = (int)Math.Clamp(px.Y - _preset.H / 2.0, 0, b.Height - _preset.H);
+        return new Int32Rect(x, y, _preset.W, _preset.H);
+    }
+
+    private void OnDown(object sender, MouseButtonEventArgs e)
+    {
+        if (OnToolbar(e)) return;
+        var p = ToPx(e.GetPosition(_canvas));
+        if (_preset.W > 0) { _result = PresetAt(p); Close(); return; }
+        _startPx = new Point(SnapTo(p.X, _xs), SnapTo(p.Y, _ys));
+        _dragged = false;
+        CaptureMouse();
+        _hover.Visibility = Visibility.Collapsed;
+    }
+
+    private void OnUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_startPx is not { } s) return;
+        ReleaseMouseCapture();
+        _startPx = null;
+        var p = ToPx(e.GetPosition(_canvas));
+        // a click (no drag) on a window: exactly its area
+        if (!_dragged) { if (WindowAt(p) is { } w) { _result = Even(w); Close(); } return; }
+        _result = Rect(s, p);
+        if (_result is null) { _box.Visibility = Visibility.Collapsed; _sizeTag.Visibility = Visibility.Collapsed; return; } // too small to be meant
+        Close();
+    }
+
+    private static int SnapTo(double v, int[] edges)
+    {
+        var best = (int)Math.Round(v); var d = Snap + 1.0;
+        foreach (var e in edges) if (Math.Abs(e - v) < d) { d = Math.Abs(e - v); best = e; }
+        return best;
+    }
+
+    /// <summary>The rectangle from where the drag began to the mouse: edges snapped, Shift keeps 16:9, even sizes, at least 64 × 64.</summary>
+    private Int32Rect? Rect(Point a, Point bPt)
+    {
+        var m = _monitor.Bounds;
+        double x2 = SnapTo(Math.Clamp(bPt.X, 0, m.Width), _xs), y2 = SnapTo(Math.Clamp(bPt.Y, 0, m.Height), _ys);
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
+        {
+            var w = Math.Abs(x2 - a.X); var h = w * 9 / 16;
+            y2 = a.Y + Math.Sign(y2 - a.Y == 0 ? 1 : y2 - a.Y) * h;
+        }
+        int x = (int)Math.Min(a.X, x2), y = (int)Math.Min(a.Y, y2), wd = (int)Math.Abs(a.X - x2), ht = (int)Math.Abs(a.Y - y2);
+        x = Math.Clamp(x, 0, m.Width - 1); y = Math.Clamp(y, 0, m.Height - 1);
+        wd = Math.Min(wd, m.Width - x); ht = Math.Min(ht, m.Height - y);
+        var r = Even(new Int32Rect(x, y, wd, ht));
+        return r.Width < 64 || r.Height < 64 ? null : r;
+    }
+
+    private static Int32Rect Even(Int32Rect r) => new(r.X, r.Y, r.Width & ~1, r.Height & ~1);
+
+    private void Draw(Point a, Point bPt)
+    {
+        if (Rect(a, bPt) is { } r) { Show(_box, r); Tag(r, null); }
+        else { _box.Visibility = Visibility.Collapsed; _sizeTag.Visibility = Visibility.Collapsed; }
+    }
+
+    private void Show(Rectangle shape, Int32Rect px)
+    {
+        var d = ToDip(px);
+        Canvas.SetLeft(shape, d.X); Canvas.SetTop(shape, d.Y); shape.Width = d.Width; shape.Height = d.Height;
+        shape.Visibility = Visibility.Visible;
+    }
+
+    private void Tag(Int32Rect px, string? note)
+    {
+        _sizeText.Text = $"{px.Width} × {px.Height}" + (note is null ? "" : "  ·  " + note);
+        var d = ToDip(px);
+        Canvas.SetLeft(_sizeTag, d.X + 6); Canvas.SetTop(_sizeTag, d.Y > 30 ? d.Y - 26 : d.Y + 6);
+        _sizeTag.Visibility = Visibility.Visible;
     }
 
     public static Int32Rect? Select(MonitorInfo monitor)
     {
-        var w = new RegionSelectWindow(monitor);
+        var own = Application.Current?.Windows.OfType<Window>().Select(w => new System.Windows.Interop.WindowInteropHelper(w).Handle).Where(h => h != IntPtr.Zero).ToList() ?? new();
+        var w = new RegionSelectWindow(monitor, own);
         w.ShowDialog();
         return w._result;
     }
