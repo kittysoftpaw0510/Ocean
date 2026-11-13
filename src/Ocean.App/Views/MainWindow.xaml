@@ -277,30 +277,73 @@
                             <TextBlock Text="Settings" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
                         </DockPanel>
                     </Button>
-                </StackPanel>
-
-                <!-- footer: the network's state; my screen (share, record: each turns red while it runs, a click then
-                     stops it); pause sharing. In the footer, so the node list above keeps all its room. -->
-                <Border Grid.Row="5" BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="16,8,10,8">
-                    <DockPanel>
-                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Button Height="28" MinWidth="28" Padding="6,0" FontSize="13" AutomationProperties.Name="Share my screen">
+                    <!-- my screen: share it, record it. A pair of its own, tinted, unlike the pages above: these start
+                         something. Each half turns red while it runs (Share: "Stop sharing"; Record: its time, amber
+                         while paused); a click then stops it. Right-click Record: record the same again. -->
+                    <Border Margin="12,10,12,6" CornerRadius="10" BorderThickness="1" Padding="3" ClipToBounds="True">
+                        <Border.BorderBrush>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                <GradientStop Color="#662DD4BF" Offset="0"/>
+                                <GradientStop Color="#66818CF8" Offset="1"/>
+                            </LinearGradientBrush>
+                        </Border.BorderBrush>
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                <GradientStop Color="#1F2DD4BF" Offset="0"/>
+                                <GradientStop Color="#1F818CF8" Offset="1"/>
+                            </LinearGradientBrush>
+                        </Border.Background>
+                        <Border.Resources>
+                            <Style x:Key="PairBtn" TargetType="Button">
+                                <Setter Property="Foreground" Value="#CFFAF4"/>
+                                <Setter Property="Background" Value="Transparent"/>
+                                <Setter Property="Height" Value="34"/>
+                                <Setter Property="Cursor" Value="Hand"/>
+                                <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+                                <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
+                                <Setter Property="FontSize" Value="12.5"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="7" Padding="6,0">
+                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="#262DD4BF"/></Trigger>
+                                                <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Background" Value="#402DD4BF"/></Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </Border.Resources>
+                        <Grid>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <Button Grid.Column="0" AutomationProperties.Name="Share my screen">
                                 <Button.Style>
-                                    <Style TargetType="Button" BasedOn="{StaticResource BtnIcon}">
-                                        <Setter Property="Width" Value="NaN"/>
+                                    <Style TargetType="Button" BasedOn="{StaticResource PairBtn}">
                                         <Setter Property="Command" Value="{Binding Screen.ShareWithEveryoneCommand}"/>
                                         <Setter Property="ToolTip" Value="Share my screen with everyone (a screen, a window or a part of it). To show it to one person only, right-click them in the list."/>
-                                        <Setter Property="Content"><Setter.Value><TextBlock Text="&#xE7F4;" Style="{StaticResource Icon}"/></Setter.Value></Setter>
+                                        <Setter Property="Content">
+                                            <Setter.Value>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="&#xE7F4;" Style="{StaticResource Icon}" FontSize="13" Margin="0,0,7,0" VerticalAlignment="Center"/>
+                                                    <TextBlock Text="Share screen" VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                            </Setter.Value>
+                                        </Setter>
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding Screen.IsSharing}" Value="True">
                                                 <Setter Property="Command" Value="{Binding Screen.StopCommand}"/>
                                                 <Setter Property="ToolTip" Value="{Binding Screen.SharingDetail}"/>
-                                                <Setter Property="Background" Value="#26E11D48"/>
+                                                <Setter Property="Background" Value="#33E11D48"/>
+                                                <Setter Property="Foreground" Value="#FDA4AF"/>
                                                 <Setter Property="Content">
                                                     <Setter.Value>
                                                         <StackPanel Orientation="Horizontal">
-                                                            <TextBlock Text="&#xE7F4;" Style="{StaticResource Icon}" Foreground="#FB7185" VerticalAlignment="Center"/>
-                                                            <TextBlock Text="Stop" FontFamily="{StaticResource UiFont}" FontSize="12" FontWeight="SemiBold" Foreground="#FB7185" Margin="5,0,0,0" VerticalAlignment="Center"/>
+                                                            <Ellipse Width="8" Height="8" Fill="#FB7185" Margin="0,0,7,0" VerticalAlignment="Center"/>
+                                                            <TextBlock Text="Stop sharing" VerticalAlignment="Center"/>
                                                         </StackPanel>
                                                     </Setter.Value>
                                                 </Setter>
@@ -309,7 +352,8 @@
                                     </Style>
                                 </Button.Style>
                             </Button>
-                            <Button Height="28" MinWidth="28" Padding="6,0" Margin="2,0,0,0" FontSize="13" AutomationProperties.Name="Record my screen">
+                            <Border Grid.Column="1" Width="1" Margin="2,7" Background="#40818CF8"/>
+                            <Button Grid.Column="2" AutomationProperties.Name="Record my screen">
                                 <Button.ContextMenu>
                                     <ContextMenu>
                                         <MenuItem Header="Record…" Command="{Binding Record.StartCommand}"/>
@@ -318,20 +362,30 @@
                                     </ContextMenu>
                                 </Button.ContextMenu>
                                 <Button.Style>
-                                    <Style TargetType="Button" BasedOn="{StaticResource BtnIcon}">
-                                        <Setter Property="Width" Value="NaN"/>
+                                    <Style TargetType="Button" BasedOn="{StaticResource PairBtn}">
                                         <Setter Property="Command" Value="{Binding Record.StartCommand}"/>
                                         <Setter Property="ToolTip" Value="Record my screen, with the speaker sound and your microphone. Right-click: record the same again."/>
-                                        <Setter Property="Content"><Setter.Value><TextBlock Text="&#xE7C8;" Style="{StaticResource Icon}"/></Setter.Value></Setter>
+                                        <Setter Property="Content">
+                                            <Setter.Value>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Grid Width="13" Height="13" Margin="0,0,7,0" VerticalAlignment="Center">
+                                                        <Ellipse Stroke="#FB7185" StrokeThickness="1.5"/>
+                                                        <Ellipse Width="6" Height="6" Fill="#FB7185"/>
+                                                    </Grid>
+                                                    <TextBlock Text="Record" VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                            </Setter.Value>
+                                        </Setter>
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding Record.IsRecording}" Value="True">
                                                 <Setter Property="Command" Value="{Binding Record.StopCommand}"/>
                                                 <Setter Property="ToolTip" Value="Stop recording and save it (pause it on the recording bar or from the tray icon)"/>
-                                                <Setter Property="Background" Value="#26E11D48"/>
+                                                <Setter Property="Background" Value="#33E11D48"/>
+                                                <Setter Property="Foreground" Value="#FDA4AF"/>
                                                 <Setter Property="Content">
                                                     <Setter.Value>
                                                         <StackPanel Orientation="Horizontal">
-                                                            <Ellipse Width="8" Height="8" VerticalAlignment="Center">
+                                                            <Ellipse Width="8" Height="8" Margin="0,0,7,0" VerticalAlignment="Center">
                                                                 <Ellipse.Style>
                                                                     <Style TargetType="Ellipse">
                                                                         <Setter Property="Fill" Value="#FB7185"/>
@@ -339,7 +393,8 @@
                                                                     </Style>
                                                                 </Ellipse.Style>
                                                             </Ellipse>
-                                                            <TextBlock Text="{Binding Record.ElapsedText}" FontFamily="Consolas" FontSize="12" FontWeight="SemiBold" Foreground="#FB7185" Margin="6,0,0,0" VerticalAlignment="Center"/>
+                                                            <TextBlock Text="{Binding Record.ElapsedText}" FontFamily="Consolas" VerticalAlignment="Center"/>
+                                                            <TextBlock Text="  Stop" VerticalAlignment="Center"/>
                                                         </StackPanel>
                                                     </Setter.Value>
                                                 </Setter>
@@ -348,7 +403,14 @@
                                     </Style>
                                 </Button.Style>
                             </Button>
-                            <Border Width="1" Height="16" Background="{StaticResource Border}" Margin="6,0" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
+                <!-- footer: the network's state; pause sharing -->
+                <Border Grid.Row="5" BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="16,8,10,8">
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                             <Button Style="{StaticResource BtnIcon}" Command="{Binding TogglePauseCommand}" Width="28" Height="28" FontSize="13">
                                 <Button.Content>
                                     <TextBlock>
