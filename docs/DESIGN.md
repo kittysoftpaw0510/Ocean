@@ -385,8 +385,8 @@ with the PC's sound or without. View only (nothing typed or clicked at the viewe
   second key picture): the first picture is there about a second after opening.
 - **Seen by the user:** a red bar "Sharing ... with ..., N watching, Stop sharing" on top of everything and on every
   virtual desktop while a session runs; it is excluded from capture (`WDA_EXCLUDEFROMCAPTURE`) and can't be closed.
-- **The sound** (`ScreenSoundSender`, `ScreenSoundPlayer`). What the PC plays: a WASAPI loopback of the default
-  output (followed when it changes), cut into 20 ms frames on the capture's own time line and encoded with Opus
+- **The sound** (`ScreenSoundSender`, `ScreenSoundPlayer`). What every program on the PC plays, on every output
+  device (`SoundCapture`, see below), cut into 20 ms frames on the capture's own time line and encoded with Opus
   (Concentus, in the app: 96 kbps constrained VBR, about 3 % of one core), each frame stamped with the moment its
   first sample was played (the performance counter Windows stamps every block with) and how long after that it was
   sent. Only while the sound is on and somebody watches (`Wanted && Sound`). `POST /api/screen/sound {on}` switches
@@ -409,11 +409,19 @@ with the PC's sound or without. View only (nothing typed or clicked at the viewe
     played at 15 pictures a second (target 221), 130.3 ms at 30 (target 131), spread 0.1 ms, no gaps; with 15 % of
     the packets lost every tick still on time, 2 % of the frames concealed; with all packets lost the same over the
     direct connection.
-  - No echo: while Ocean plays a shared screen's sound, the capture leaves Ocean's own sound out (process
-    loopback, `PROCESS_LOOPBACK_MODE_EXCLUDE_TARGET_PROCESS_TREE`, Windows 10 21H1 and later), so two PCs sharing
-    their sound with each other don't send it back and forth. Otherwise Ocean's own sound (a video in its player)
-    is shared like any other.
-  - Viewer: the speaker button (or M) turns it off here; it keeps running silent, so it comes back in step.
+  - The capture is a process loopback (`AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK`, Windows 10 21H1 and later),
+    not a loopback of the default device: that one hears only the default device, so a program that went on
+    playing on the old device after the default changed (headphones or a Bluetooth headset plugged in or out), or
+    that has its own device in the Windows sound settings, was pure silence for the viewers. The process loopback
+    hears every program on every device and is not touched by a device change at all (tested: the default switched
+    and back, the default device disabled and enabled, a program playing on a device that isn't the default).
+    Windows leaves one process tree out of it: the System process (pid 4, plays nothing, so nothing is left out),
+    or Ocean itself while Ocean plays a shared screen's sound, so two PCs sharing their sound with each other don't
+    send it back and forth. Where process loopback isn't there: a loopback of the default device, reopened within
+    about a second when the default changes.
+  - Viewer: the speaker button (or M) turns it off here; it keeps running silent, so it comes back in step. It
+    plays on the default output device and follows it when Windows says it changed (device notifications; also a
+    check every 2 s): measured 0.2 to 0.3 s for a switch and for the device being unplugged.
 - Local API: `/api/screen` (GET, `/start`, `/invite`, `/stop`, `/sound`, `/feed/{id}`, `/feed/{id}/sound`),
   `/api/screen/ask/{peer}`, `/api/screen/prompts[/{id}]`, `/api/screen/muted`, `/api/screen/view` (GET, `/leave`,
   `/stream`, `/sound`), `/api/peers/{peer}/screen/{id}/join`. Events: `myScreen`, `screenPrompt`, `screenRequest`,

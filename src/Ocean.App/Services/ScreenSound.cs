@@ -15,10 +15,16 @@ namespace Ocean.App.Services;
 
 /// <summary>
 /// What the PC plays, as 48 kHz stereo blocks, each stamped with the moment it was played (the performance
-/// counter, µs; Windows stamps every block). Normally a loopback of the default output device (followed when it
-/// changes). With <see cref="ExcludeOcean"/>: everything except Ocean's own sound (process loopback, Windows 10
-/// 21H1 and later). That is used while Ocean plays a shared screen's sound, which must not be sent back: two PCs
-/// sharing their sound with each other would echo forever. Where process loopback isn't there, it stays the device.
+/// counter, µs; Windows stamps every block).
+/// What every program plays, on every output device (a process loopback, Windows 10 21H1 and later): not only the
+/// default device. A program that went on playing on another device after the default changed (headphones plugged
+/// in or out, a Bluetooth headset), or that has its own device in the Windows sound settings, is heard too; a
+/// device change doesn't touch the capture at all. Windows can only leave one program out of such a capture: the
+/// System process, which never plays anything (so nothing is left out), or, with <see cref="ExcludeOcean"/>, Ocean
+/// itself. That is used while Ocean plays a shared screen's sound, which must not be sent back: two PCs sharing
+/// their sound with each other would echo forever.
+/// Where process loopback isn't there (older Windows): a loopback of the default output device, followed within
+/// about a second when it changes.
 /// </summary>
 public sealed class SoundCapture : IDisposable
 {
@@ -44,7 +50,7 @@ public sealed class SoundCapture : IDisposable
 
     /// <summary>Why nothing can be captured (null while it works). Set on the capture thread.</summary>
     public string? Problem { get; private set; }
-    /// <summary>"device" or "all but Ocean" (for the log and for checks).</summary>
+    /// <summary>"every program", "all but Ocean" or "device" (for the log and for checks).</summary>
     public string Mode { get; private set; } = "";
     public long Blocks { get; private set; }
 
@@ -102,28 +108,31 @@ public sealed class SoundCapture : IDisposable
         Close();
     }
 
+    /// <summary>The System process: it never plays sound, so leaving it out leaves nothing out.</summary>
+    private const int SystemProcessId = 4;
+
     private bool Open()
     {
-        if (_excludeOcean && !_noProcessLoopback)
+        if (!_noProcessLoopback)
         {
             try
             {
-                var client = ProcessLoopback.Activate(Environment.ProcessId, include: false);
+                var client = ProcessLoopback.Activate(_excludeOcean ? Environment.ProcessId : SystemProcessId, include: false);
                 _format = WaveFormat.CreateIeeeFloatWaveFormat(Rate, Channels);
                 _float = true;
                 client.Initialize(AudioClientShareMode.Shared, AudioClientStreamFlags.Loopback | AudioClientStreamFlags.AutoConvertPcm | AudioClientStreamFlags.SrcDefaultQuality, 2_000_000, 0, _format, Guid.Empty);
                 _client = client;
                 _capture = client.AudioCaptureClient;
                 _resampler = null; _device = null; _deviceId = null;
-                Mode = "all but Ocean";
+                Mode = _excludeOcean ? "all but Ocean" : "every program";
                 Problem = null;
                 return true;
             }
             catch (Exception ex)
             {
-                // older Windows: the whole output (an echo is possible only when two PCs share sound with each other)
+                // older Windows: the default device's whole output (an echo is possible only when two PCs share sound with each other)
                 _noProcessLoopback = true;
-                AppLog.Warn("Screen", "sound: process loopback isn't available here; capturing the whole output (" + ex.Message + ")");
+                AppLog.Warn("Screen", "sound: process loopback isn't available here; capturing the default output device (" + ex.Message + ")");
                 Close();
             }
         }
@@ -481,7 +490,7 @@ public sealed class ScreenSoundSender : IDisposable
 /// Small differences (the two sound cards never run at exactly the same speed) are evened out by playing up to
 /// 0.5 % faster or slower, which nobody hears; a large one (after a stall) is a clean jump. A frame that hasn't
 /// come by the time it is due is concealed (Opus fills the gap from the sound before it), and silence after 60 ms.
-/// Follows the default output device when it changes.
+/// Follows the default output device when it changes (Windows tells it at once; it checks every 2 s too).
 /// </summary>
 public sealed class ScreenSoundPlayer : IDisposable
 {
@@ -512,6 +521,9 @@ public sealed class ScreenSoundPlayer : IDisposable
     private WasapiOut? _out;
     private string? _outDevice;
     private Timer? _deviceCheck;
+    private readonly object _deviceGate = new();
+    private MMDeviceEnumerator? _notifyFrom;
+    private DeviceNotify? _notify;
     private bool _disposed;
     // play-out (under _lock)
     private long _offsetUs = long.MinValue;  // local µs − host µs (sent) for the quickest arrival
@@ -562,6 +574,21 @@ public sealed class ScreenSoundPlayer : IDisposable
         _reader.Start();
         OpenOutput();
         _deviceCheck = new Timer(_ => CheckDevice(), null, 2000, 2000);
+        try { _notifyFrom = new MMDeviceEnumerator(); _notify = new DeviceNotify(this); _notifyFrom.RegisterEndpointNotificationCallback(_notify); }
+        catch (Exception ex) { AppLog.Info("Screen", "sound: no device notifications (" + ex.Message + "); checking every 2 s"); }
+    }
+
+    /// <summary>Windows says a device came, went or became the default: the output follows at once (off Windows' thread).</summary>
+    private sealed class DeviceNotify : NAudio.CoreAudioApi.Interfaces.IMMNotificationClient
+    {
+        private readonly ScreenSoundPlayer _p;
+        public DeviceNotify(ScreenSoundPlayer p) => _p = p;
+        private void Soon() => ThreadPool.QueueUserWorkItem(_ => { Thread.Sleep(150); _p.CheckDevice(); });
+        public void OnDeviceStateChanged(string deviceId, DeviceState newState) => Soon();
+        public void OnDeviceAdded(string deviceId) { }
+        public void OnDeviceRemoved(string deviceId) => Soon();
+        public void OnDefaultDeviceChanged(DataFlow flow, Role role, string defaultDeviceId) { if (flow == DataFlow.Render && role == Role.Multimedia) Soon(); }
+        public void OnPropertyValueChanged(string deviceId, PropertyKey key) { }
     }
 
     // ------------------------------------------------------------------ in
@@ -621,9 +648,11 @@ public sealed class ScreenSoundPlayer : IDisposable
             o.Init(new SampleToWaveProvider(new Source(this)));
             o.PlaybackStopped += (_, e) =>
             {
-                if (_disposed) return;
+                // (an output closed on purpose, for another device, is not the current one any more)
+                if (_disposed || !ReferenceEquals(_out, o)) return;
                 if (e.Exception is not null) AppLog.Info("Screen", "sound: the output stopped (" + e.Exception.Message + "); opening it again");
-                _outDevice = null; // the check opens the (new) default device
+                _outDevice = null;
+                ThreadPool.QueueUserWorkItem(_ => CheckDevice());
             };
             lock (_lock) { _writtenFrames = 0; _running = false; }
             o.Play();
@@ -640,7 +669,7 @@ public sealed class ScreenSoundPlayer : IDisposable
 
     private void CheckDevice()
     {
-        if (_disposed) return;
+        if (_disposed || !Monitor.TryEnter(_deviceGate)) return; // (one at a time; another is on it)
         try
         {
             using var devices = new MMDeviceEnumerator();
@@ -649,9 +678,12 @@ public sealed class ScreenSoundPlayer : IDisposable
             if (id == _outDevice && _out is { PlaybackState: PlaybackState.Playing }) return;
             var old = _out; _out = null;
             try { old?.Dispose(); } catch { }
+            if (_disposed) return;
             OpenOutput();
+            if (_outDevice is not null) AppLog.Info("Screen", "sound: playing on " + devices.GetDevice(_outDevice).FriendlyName);
         }
         catch (Exception ex) { AppLog.Info("Screen", "sound: output check: " + ex.Message); }
+        finally { Monitor.Exit(_deviceGate); }
     }
 
     /// <summary>The device asks for samples: the ones due when these will be heard.</summary>
@@ -828,7 +860,11 @@ public sealed class ScreenSoundPlayer : IDisposable
         _disposed = true;
         _cts.Cancel();
         _deviceCheck?.Dispose();
-        try { _out?.Dispose(); } catch { }
-        _out = null;
+        try { if (_notify is not null) _notifyFrom?.UnregisterEndpointNotificationCallback(_notify); _notifyFrom?.Dispose(); } catch { }
+        lock (_deviceGate)
+        {
+            try { _out?.Dispose(); } catch { }
+            _out = null;
+        }
     }
 }
