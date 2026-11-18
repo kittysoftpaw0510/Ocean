@@ -21,6 +21,9 @@ namespace Ocean.Service.Screen;
 ///   all. It is dropped again as soon as the packets keep up, so the delay stays at its lowest and nothing is ever
 ///   missing in the picture.
 /// One screen at a time.
+/// Every stream over the direct connection has a watchdog: a connection that goes quiet (the PC in between was
+/// switched off or left the network, which closes nothing: it just goes silent) is dropped after a few seconds and
+/// opened again, through another PC in between when there is one; an answer that doesn't begin is given up too.
 /// The sound, when the host shares it, comes as its own packets (each with the frame before it) and goes to the
 /// app as it arrives (<c>/api/screen/view/sound</c>), where it is put in order and played on time; frames still
 /// missing then are concealed, not waited for. Without packets it comes over the direct connection.
@@ -28,6 +31,37 @@ namespace Ocean.Service.Screen;
 public sealed class ScreenViewer : IDisposable
 {
     private static readonly TimeSpan BeatEvery = TimeSpan.FromSeconds(5);
+    /// <summary>How long an answer may take to begin (the host waits for a key picture at most a few seconds).</summary>
+    private static readonly TimeSpan AnswerWithin = TimeSpan.FromSeconds(12);
+    /// <summary>The picture and the sound keep coming while a session runs (a still screen too): this long without a byte, the connection is dead.</summary>
+    private static readonly TimeSpan QuietPicture = TimeSpan.FromSeconds(8), QuietSound = TimeSpan.FromSeconds(8);
+    /// <summary>The board's stream has a keep-alive every 5 s.</summary>
+    private static readonly TimeSpan QuietBoard = TimeSpan.FromSeconds(15);
+
+    /// <summary>Sends a request for a stream: the answer must begin within <see cref="AnswerWithin"/> (its body is read without that limit).</summary>
+    private async Task<HttpResponseMessage> OpenStreamAsync(Peer peer, string path, CancellationToken ct)
+    {
+        using var head = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        head.CancelAfter(AnswerWithin);
+        try { return await _client.SendAsync(_client.Build(peer, HttpMethod.Get, path), HttpCompletionOption.ResponseHeadersRead, head.Token); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _client.Stalled(peer, path);
+            throw new TimeoutException($"no answer within {AnswerWithin.TotalSeconds:0} s");
+        }
+    }
+
+    /// <summary>A stream went quiet: the PC in between (if any) is skipped next time.</summary>
+    private void Quiet(View v, string path) { if (_registry.TryGet(v.PeerId, out var peer)) _client.Stalled(peer, path); }
+
+    /// <summary>One read, or a <see cref="TimeoutException"/> when nothing comes for <paramref name="quiet"/>.</summary>
+    private static async Task<T> Within<T>(Func<CancellationToken, Task<T>> read, TimeSpan quiet, CancellationToken ct)
+    {
+        using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        idle.CancelAfter(quiet);
+        try { return await read(idle.Token); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new TimeoutException($"nothing came for {quiet.TotalSeconds:0} s"); }
+    }
     /// <summary>For tests: this share (percent) of the data and parity packets is thrown away on arrival (OCEAN_TEST_SCREEN_DROP).</summary>
     private static readonly int TestDrop = int.TryParse(Environment.GetEnvironmentVariable("OCEAN_TEST_SCREEN_DROP"), out var d) ? Math.Clamp(d, 0, 100) : 0;
 
@@ -381,8 +415,7 @@ public sealed class ScreenViewer : IDisposable
         try
         {
             if (!_registry.TryGetOnline(v.PeerId, out var peer)) return "error";
-            var req = _client.Build(peer, HttpMethod.Get, $"/p/screen/{v.Sid}/stream?from={from}");
-            using var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+            using var resp = await OpenStreamAsync(peer, $"/p/screen/{v.Sid}/stream?from={from}", ct);
             if (resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Forbidden) return "ended";
             if (resp.StatusCode == HttpStatusCode.Gone) return "gone";
             if (!resp.IsSuccessStatusCode) return "error";
@@ -392,13 +425,14 @@ public sealed class ScreenViewer : IDisposable
             var buffer = new byte[64 * 1024];
             while (true)
             {
-                var n = await stream.ReadAsync(buffer, ct);
+                var n = await Within(t => stream.ReadAsync(buffer, t).AsTask(), QuietPicture, ct);
                 if (n <= 0) return "eof";
                 Deliver(v, offset, buffer.AsSpan(0, n), udp: false);
                 offset += n;
             }
         }
         catch (OperationCanceledException) { return "cancelled"; }
+        catch (TimeoutException ex) { Quiet(v, $"/p/screen/{v.Sid}/stream"); _log.LogInformation("screen: the picture's connection to {Host} went quiet ({Msg}); opening it again", v.HostName, ex.Message); return "error"; }
         catch (Exception ex) { _log.LogDebug("screen: direct stream: {Msg}", ex.Message); return "error"; }
     }
 
@@ -489,14 +523,14 @@ public sealed class ScreenViewer : IDisposable
         try
         {
             if (!_registry.TryGetOnline(v.PeerId, out var peer)) return;
-            var req = _client.Build(peer, HttpMethod.Get, $"/p/screen/{v.Sid}/sound?after={after}");
-            using var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+            using var resp = await OpenStreamAsync(peer, $"/p/screen/{v.Sid}/sound?after={after}", ct);
             if (!resp.IsSuccessStatusCode) return; // (an older host has no sound)
             await using var stream = await resp.Content.ReadAsStreamAsync(ct);
             var header = new byte[ScreenSoundFrames.HeaderSize];
-            while (await ScreenSoundFrames.ReadAsync(stream, header, ct) is { } f) DeliverSound(v, f, udp: false);
+            while (await Within(t => ScreenSoundFrames.ReadAsync(stream, header, t), QuietSound, ct) is { } f) DeliverSound(v, f, udp: false);
         }
         catch (OperationCanceledException) { }
+        catch (TimeoutException ex) { Quiet(v, $"/p/screen/{v.Sid}/sound"); _log.LogDebug("screen: the sound's connection went quiet ({Msg}); opening it again", ex.Message); }
         catch (Exception ex) { _log.LogDebug("screen: direct sound: {Msg}", ex.Message); }
     }
 
@@ -514,7 +548,7 @@ public sealed class ScreenViewer : IDisposable
             try
             {
                 if (!_registry.TryGetOnline(v.PeerId, out var peer)) { await Task.Delay(2000, ct); continue; }
-                using (var resp = await _client.SendAsync(_client.Build(peer, HttpMethod.Get, $"/p/screen/{v.Sid}/board"), HttpCompletionOption.ResponseContentRead, ct))
+                using (var resp = await Within(t => _client.SendAsync(_client.Build(peer, HttpMethod.Get, $"/p/screen/{v.Sid}/board"), HttpCompletionOption.ResponseContentRead, t), AnswerWithin + AnswerWithin, ct))
                 {
                     if (resp.StatusCode == HttpStatusCode.NotFound) { await Task.Delay(3000, ct); continue; }
                     resp.EnsureSuccessStatusCode();
@@ -524,10 +558,10 @@ public sealed class ScreenViewer : IDisposable
                 }
                 long since;
                 lock (v.BoardGate) since = v.Board!.Rev;
-                using var stream = await _client.SendAsync(_client.Build(peer, HttpMethod.Get, $"/p/screen/{v.Sid}/board/stream?since={since}"), HttpCompletionOption.ResponseHeadersRead, ct);
+                using var stream = await OpenStreamAsync(peer, $"/p/screen/{v.Sid}/board/stream?since={since}", ct);
                 stream.EnsureSuccessStatusCode();
                 using var reader = new StreamReader(await stream.Content.ReadAsStreamAsync(ct));
-                while (await reader.ReadLineAsync(ct) is { } line)
+                while (await Within(t => reader.ReadLineAsync(t).AsTask(), QuietBoard, ct) is { } line)
                 {
                     if (line.Length == 0) continue; // (keep-alive)
                     var op = Json.Deserialize<BoardOpDto>(line);
@@ -538,6 +572,7 @@ public sealed class ScreenViewer : IDisposable
                 }
             }
             catch (OperationCanceledException) { return; }
+            catch (TimeoutException ex) { Quiet(v, $"/p/screen/{v.Sid}/board/stream"); _log.LogInformation("screen: the board's connection to {Host} went quiet ({Msg}); opening it again", v.HostName, ex.Message); }
             catch (Exception ex) { _log.LogDebug("screen: board: {Msg}", ex.Message); }
             try { await Task.Delay(1000, ct); } catch (OperationCanceledException) { return; }
         }

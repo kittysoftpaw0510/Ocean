@@ -219,7 +219,8 @@ public sealed class MeshService : BackgroundService
 public sealed class ViaForwarder
 {
     private static readonly string[] RequestHeaders = { "Range", "If-Range", "If-None-Match", "If-Modified-Since" };
-    private static readonly string[] ResponseHeaders = { "Content-Type", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified", "Retry-After", "Cache-Control" };
+    private static readonly string[] ResponseHeaders = { "Content-Type", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified", "Retry-After", "Cache-Control",
+        "X-Ocean-Offset" /* where a shared screen's stream starts */ };
 
     private readonly PeerRegistry _registry;
     private readonly PeerClient _client;
@@ -322,6 +323,14 @@ public sealed class ViaForwarder
     private async Task PassThroughAsync(HttpContext ctx, Peer target, string inner, int hops, UploadKind? pace)
     {
         var res = ctx.Response;
+        if (Via.IsLive(inner))
+        {
+            // a live stream (a shared screen's picture, sound, board) may be quiet for a while: not cut for being slow, and
+            // every piece goes on at once
+            if (ctx.Features.Get<Microsoft.AspNetCore.Server.Kestrel.Core.Features.IHttpMinResponseDataRateFeature>() is { } rate) rate.MinDataRate = null;
+            if (ctx.Features.Get<Microsoft.AspNetCore.Server.Kestrel.Core.Features.IHttpMinRequestBodyDataRateFeature>() is { } inRate) inRate.MinDataRate = null;
+            ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>()?.DisableBuffering();
+        }
         var req = _client.Build(target, new HttpMethod(ctx.Request.Method), inner);
         foreach (var (k, v) in ctx.Request.Headers)
         {
@@ -360,6 +369,18 @@ public sealed class ViaForwarder
             try
             {
                 await using var body = await resp.Content.ReadAsStreamAsync(ctx.RequestAborted);
+                if (Via.IsLive(inner))
+                {
+                    // piece by piece as it comes, each sent on at once (a picture, a sound frame, a board change)
+                    var buffer = new byte[64 * 1024];
+                    int n;
+                    while ((n = await body.ReadAsync(buffer, ctx.RequestAborted)) > 0)
+                    {
+                        await res.Body.WriteAsync(buffer.AsMemory(0, n), ctx.RequestAborted);
+                        await res.Body.FlushAsync(ctx.RequestAborted);
+                    }
+                    return;
+                }
                 Stream dest = pace is { } kind ? new PacedStream(res.Body, _uploads, kind) : res.Body;
                 await body.CopyToAsync(dest, 1 << 17, ctx.RequestAborted);
             }

@@ -346,8 +346,9 @@ with the PC's sound or without. View only (nothing typed or clicked at the viewe
   accepted; the app starts and stops ffmpeg by it, so a share with everyone costs nothing until someone opens it.
 - **Never without the app.** ffmpeg is in a job object that ends with the app (also a crash). The service ends a
   session after 8 s without any app connected (`EventHub.SubscriberCount`), and a session for invited PCs once no
-  invited PC watches, is coming or may still answer. An app that starts and finds a session it has no capture for
-  stops it.
+  invited PC watches, is coming or may still answer. A viewer that leaves says so; one that just goes silent counts
+  as gone after 45 s (long enough for its path to come back: a PC in between restarting, Wi-Fi roaming). An app
+  that starts and finds a session it has no capture for stops it.
 - **The stream** is a byte stream with offsets counted from the session's first byte. `ScreenRing` keeps the last
   8 MB and notes where key pictures start (an SPS unit after a start code): a viewer always starts at the latest
   one, from a run of the encoder that is still going (`MinStart`).
@@ -366,6 +367,19 @@ with the PC's sound or without. View only (nothing typed or clicked at the viewe
   median from "picture handed to the encoder" to "picture decoded at the viewer" at 15 pictures a second (two
   picture intervals); with 3 % of the packets thrown away the same, worst case 224 ms; with 10 % and with all
   packets thrown away every picture still decodes without an error.
+- **Across networks** (two PCs that reach each other only through a third, `Via`). All of screen sharing passes a
+  bridge: the questions and answers, the picture, the sound, the board and pointing (`/p/screen/` is in
+  `Via.IsRelayable`; a bridge on an older Ocean refuses it, and the asker is told to update that PC). No packet gets
+  across, so everything comes over the direct streams. The bridge passes the stream's start (`X-Ocean-Offset`) on,
+  sends every piece on at once and never cuts a live stream for being slow (`Via.IsLive`). A bridge that goes away
+  without closing anything (switched off, off the network: its connections just go silent): every stream has a
+  watchdog (picture and sound 8 s without a byte, the board 15 s with a keep-alive every 5 s, an answer that
+  doesn't begin 12 s), and the bridge that went quiet is skipped for that PC for 30 s (`PeerClient.Stalled`), so
+  the stream opens again through another one at once. Measured with three and four test nodes on one PC (two
+  that can't hear each other): through the bridge, 60 pictures in 4.6 s, all sound frames, the board both ways
+  within 20 ms; the bridge in use frozen (a PC gone): the picture went on through the other bridge after at most
+  9.2 s, the board and the sound too; no bridge at all for 15 s: the picture back 0.6 s after the bridges, the
+  sharing still running.
 - **Asking** (`ScreenAsks`). "Show me your screen" (`kind: show`): the asked PC's user allows or declines; on allow
   they pick what to share (or the asker is let into what they share already), and the answer names the session.
   "May I show you my screen?" (`kind: offer`, the mirror): watch or decline; on yes the asker's user picks what to

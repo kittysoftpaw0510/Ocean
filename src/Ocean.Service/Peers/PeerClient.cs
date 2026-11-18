@@ -230,6 +230,20 @@ public sealed class PeerClient : IDisposable
         throw lastError ?? new HttpRequestException($"{peer.Name} can't be reached right now: no PC in between is available", null, HttpStatusCode.ServiceUnavailable);
     }
 
+    /// <summary>
+    /// A stream to <paramref name="peer"/> through a bridge went quiet, or its answer never began: that bridge is
+    /// probably gone (switched off, off the network: nothing is closed, it just goes silent, and it may be heard for
+    /// a while yet). It is skipped for that PC for 30 s, so the stream opens again through another one at once.
+    /// </summary>
+    public void Stalled(Peer peer, string path)
+    {
+        if (!peer.Bridged) return;
+        var q = path.IndexOf('?');
+        if (!_sticky.TryRemove(peer.Id + "|" + (q < 0 ? path : path[..q]), out var s)) return;
+        _avoid[(peer.Id, s.Bridge)] = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
+        _log.LogInformation("{Peer}: the PC in between went quiet ({Path}); trying another one", peer.Name, q < 0 ? path : path[..q]);
+    }
+
     /// <summary>The kind of request ("/p/cast", "/p/stream", …): a bridge may support some kinds and not others.</summary>
     private static string Kind(string path)
     {

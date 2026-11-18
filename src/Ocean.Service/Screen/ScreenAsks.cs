@@ -209,7 +209,9 @@ public sealed class ScreenAsks : IDisposable
             {
                 var err = resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed ? null : await resp.Content.ReadFromJsonAsync<ErrorDto>(Json.Options, cts.Token);
                 dto.State = resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed ? "old" : err?.Error is "away" or "muted" or "busy" ? err.Error : "unreachable";
-                dto.Message = Explain(dto.State, name);
+                dto.Message = err?.Error == "unsupported" && peer.Bridged
+                    ? $"{name} is on another network and reached only through another PC, whose Ocean is too old to pass screen sharing on. Update Ocean on that PC (it is the one shown under {name}'s name)."
+                    : Explain(dto.State, name);
                 return dto;
             }
         }

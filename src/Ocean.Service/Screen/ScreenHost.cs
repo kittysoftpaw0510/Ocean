@@ -29,7 +29,12 @@ namespace Ocean.Service.Screen;
 /// </summary>
 public sealed class ScreenHost : IDisposable
 {
-    private static readonly TimeSpan ViewerTimeout = TimeSpan.FromSeconds(15);
+    /// <summary>
+    /// A viewer that goes silent (no report, no stream) counts as gone after this long; one that leaves says so at
+    /// once. Long enough for its path to come back (a PC in between restarting, Wi-Fi roaming) without ending the
+    /// sharing; the viewer itself gives up after 40 s.
+    /// </summary>
+    private static readonly TimeSpan ViewerTimeout = TimeSpan.FromSeconds(45);
     /// <summary>An invitation waits this long for an answer.</summary>
     public static readonly TimeSpan AskTimeout = TimeSpan.FromSeconds(45);
 
@@ -701,8 +706,8 @@ public sealed class ScreenHost : IDisposable
                     since = ops[^1].Rev;
                     continue;
                 }
-                await Task.WhenAny(wait, Task.Delay(15_000, linked.Token));
-                if (!wait.IsCompleted) await write(Array.Empty<BoardOpDto>()); // (a keep-alive: an empty line)
+                await Task.WhenAny(wait, Task.Delay(5_000, linked.Token));
+                if (!wait.IsCompleted) await write(Array.Empty<BoardOpDto>()); // (a keep-alive every 5 s: an empty line; the viewer counts on it)
             }
         }
         catch (OperationCanceledException) { }

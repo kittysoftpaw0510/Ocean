@@ -206,7 +206,7 @@ public static class PeerApi
         g.MapPost("/cast/{sessionId}/leave", (HttpContext ctx, string sessionId, CastHost cast) => { cast.Leave(sessionId, PeerContext.Get(ctx).ClientId); return Results.Ok(); });
         g.MapGet("/cast/{sessionId}/state", (string sessionId, CastHost cast) => Results.Json(cast.State(sessionId), Json.Options));
 
-        // ---- screen sharing (see ScreenHost, ScreenAsks). Writes are POSTs, so they pass bridges and reverse links. ----
+        // ---- screen sharing (see ScreenHost, ScreenAsks). All of it passes bridges (Via.IsRelayable) and reverse links. ----
         g.MapPost("/screen/ask", async (HttpContext ctx, ScreenAsks asks) =>
         {
             var ask = await ctx.Request.ReadFromJsonAsync<ScreenAskDto>(Json.Options, ctx.RequestAborted);

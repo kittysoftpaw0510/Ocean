@@ -35,12 +35,20 @@ public static class Via
     /// <summary>Clock difference tolerated between the origin and the destination.</summary>
     private static readonly TimeSpan MaxSkew = TimeSpan.FromDays(1);
 
-    /// <summary>Paths that may be relayed: the read-only and access parts of the peer API.</summary>
+    /// <summary>
+    /// Paths that may be relayed: the read-only and access parts of the peer API, and screen sharing (its questions,
+    /// answers, the picture, the sound, the board and pointing: between PCs on two networks all of it goes this way,
+    /// as no packet gets across). A bridge on an older Ocean refuses what isn't on its own list ("unsupported").
+    /// </summary>
     public static bool IsRelayable(string path)
         => path.StartsWith("/p/catalog", StringComparison.Ordinal) || path.StartsWith("/p/stream/", StringComparison.Ordinal)
            || path.StartsWith("/p/thumb/", StringComparison.Ordinal) || path.StartsWith("/p/access", StringComparison.Ordinal)
            || path.StartsWith("/p/ping", StringComparison.Ordinal) || path.StartsWith("/p/light/", StringComparison.Ordinal)
-           || path.StartsWith("/p/cast/", StringComparison.Ordinal) || path.StartsWith("/p/rate/", StringComparison.Ordinal);
+           || path.StartsWith("/p/cast/", StringComparison.Ordinal) || path.StartsWith("/p/rate/", StringComparison.Ordinal)
+           || path.StartsWith("/p/screen/", StringComparison.Ordinal);
+
+    /// <summary>Live streams that may be quiet for a long while (screen sharing's picture, sound and board): never cut for being slow.</summary>
+    public static bool IsLive(string path) => path.StartsWith("/p/screen/", StringComparison.Ordinal);
 
     /// <summary>Splits "/p/via/{target}/p/…" into the target node id and the path meant for it.</summary>
     public static bool TryParse(string rawTarget, out string targetId, out string inner)
