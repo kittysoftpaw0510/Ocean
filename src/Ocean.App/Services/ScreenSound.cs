@@ -34,7 +34,6 @@ public sealed class SoundCapture : IDisposable
     private readonly BlockHandler _onBlock;
     private Thread? _thread;
     private volatile bool _stop, _excludeOcean, _reopen;
-    private static bool _noProcessLoopback;
     /// <summary>For checks: nothing is captured (the check hands its own sound to the sender).</summary>
     private static bool _testQuiet = false;
 
@@ -44,6 +43,7 @@ public sealed class SoundCapture : IDisposable
     private AudioCaptureClient? _capture;
     private WaveFormat _format = WaveFormat.CreateIeeeFloatWaveFormat(Rate, Channels);
     private bool _float;
+    private bool _everything; // a process loopback (its stamps come late: ProcessLoopback.StampLagHns)
     private WdlResampler? _resampler;
     private float[] _stereo = new float[4096];
     private float[] _resampled = new float[4096];
@@ -108,39 +108,25 @@ public sealed class SoundCapture : IDisposable
         Close();
     }
 
-    /// <summary>The System process: it never plays sound, so leaving it out leaves nothing out.</summary>
-    private const int SystemProcessId = 4;
-
     private bool Open()
     {
-        if (!_noProcessLoopback)
+        // (older Windows: the default device's whole output; an echo is possible only when two PCs share sound with each other)
+        if (ProcessLoopback.Open(_excludeOcean ? Environment.ProcessId : ProcessLoopback.SystemProcessId, "Screen") is { } client)
         {
-            try
-            {
-                var client = ProcessLoopback.Activate(_excludeOcean ? Environment.ProcessId : SystemProcessId, include: false);
-                _format = WaveFormat.CreateIeeeFloatWaveFormat(Rate, Channels);
-                _float = true;
-                client.Initialize(AudioClientShareMode.Shared, AudioClientStreamFlags.Loopback | AudioClientStreamFlags.AutoConvertPcm | AudioClientStreamFlags.SrcDefaultQuality, 2_000_000, 0, _format, Guid.Empty);
-                _client = client;
-                _capture = client.AudioCaptureClient;
-                _resampler = null; _device = null; _deviceId = null;
-                Mode = _excludeOcean ? "all but Ocean" : "every program";
-                Problem = null;
-                return true;
-            }
-            catch (Exception ex)
-            {
-                // older Windows: the default device's whole output (an echo is possible only when two PCs share sound with each other)
-                _noProcessLoopback = true;
-                AppLog.Warn("Screen", "sound: process loopback isn't available here; capturing the default output device (" + ex.Message + ")");
-                Close();
-            }
+            _format = ProcessLoopback.Format;
+            _float = true;
+            _client = client;
+            _capture = client.AudioCaptureClient;
+            _resampler = null; _device = null; _deviceId = null; _everything = true;
+            Mode = _excludeOcean ? "all but Ocean" : "every program";
+            Problem = null;
+            return true;
         }
         try
         {
             using var devices = new MMDeviceEnumerator();
             _device = devices.GetDefaultAudioEndpoint(DataFlow.Render, Role.Console);
-            _deviceId = _device.ID;
+            _deviceId = _device.ID; _everything = false;
             _client = _device.AudioClient;
             _format = _client.MixFormat;
             _float = _format.Encoding == WaveFormatEncoding.IeeeFloat
@@ -193,7 +179,7 @@ public sealed class SoundCapture : IDisposable
                     data = _resampled;
                 }
                 Blocks++;
-                if (outFrames > 0) _onBlock((long)(qpc / 10), data, outFrames);
+                if (outFrames > 0) _onBlock(((long)qpc - (_everything ? ProcessLoopback.StampLagHns : 0)) / 10, data, outFrames);
             }
             finally { cap.ReleaseBuffer(frames); }
         }
@@ -235,56 +221,95 @@ public sealed class SoundCapture : IDisposable
         _stop = true;
         if (_thread is { } t && t != Thread.CurrentThread) t.Join(1000);
     }
+}
 
-    /// <summary>A capture of what processes play, with or without one process tree (AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK).</summary>
-    private static class ProcessLoopback
+/// <summary>
+/// A capture of what processes play, with or without one process tree (AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK,
+/// Windows 10 21H1 and later). Unlike a loopback of one device it hears every program on every output device, and a
+/// change of the default device doesn't touch it. Used for screen sharing's sound and for recordings' speaker sound.
+/// </summary>
+internal static class ProcessLoopback
+{
+    /// <summary>The System process: it never plays sound, so leaving it out leaves nothing out.</summary>
+    public const int SystemProcessId = 4;
+    /// <summary>What it delivers: 48 kHz stereo float (Windows converts).</summary>
+    public static WaveFormat Format => WaveFormat.CreateIeeeFloatWaveFormat(48000, 2);
+    /// <summary>
+    /// Its time stamps come later than a device loopback's for the same sound: measured 17.1 to 18.0 ms (on average
+    /// over a few seconds; a single block's can be 5 ms either way), the same on two different devices. Taken off,
+    /// so a sound's time is what it was with the device loopback that sync was measured and set with.
+    /// </summary>
+    public const long StampLagHns = 175_000;
+    private static volatile bool _unavailable;
+
+    /// <summary>
+    /// Everything played on this PC except <paramref name="excludeProcessId"/>'s process tree, initialized (not
+    /// started). Null where Windows has no process loopback (said once in the log): the caller takes the default device.
+    /// </summary>
+    public static AudioClient? Open(int excludeProcessId, string logArea)
     {
-        [DllImport("Mmdevapi.dll", ExactSpelling = true, PreserveSig = false)]
-        private static extern void ActivateAudioInterfaceAsync([MarshalAs(UnmanagedType.LPWStr)] string path, [MarshalAs(UnmanagedType.LPStruct)] Guid riid, IntPtr activationParams, ICompletionHandler handler, out IAsyncOperation op);
-
-        [ComImport, Guid("41D949AB-9862-444A-80F6-C261334DA5EB"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        private interface ICompletionHandler { void ActivateCompleted(IAsyncOperation op); }
-        [ComImport, Guid("72A22D78-CDE4-431D-B8CC-843A71199B6D"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        private interface IAsyncOperation { void GetActivateResult(out int hr, [MarshalAs(UnmanagedType.IUnknown)] out object iface); }
-        /// <summary>The handler is called on another thread: it says it may be (IAgileObject).</summary>
-        [ComImport, Guid("94ea2b94-e9cc-49e0-c0ff-ee64ca8f5b90"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        private interface IAgileObject { }
-
-        private sealed class Handler : ICompletionHandler, IAgileObject
+        if (_unavailable) return null;
+        AudioClient? client = null;
+        try
         {
-            public readonly TaskCompletionSource<object> Done = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            public void ActivateCompleted(IAsyncOperation op)
-            {
-                try
-                {
-                    op.GetActivateResult(out var hr, out var iface);
-                    if (hr != 0) Done.TrySetException(Marshal.GetExceptionForHR(hr) ?? new COMException("activation failed", hr));
-                    else Done.TrySetResult(iface);
-                }
-                catch (Exception ex) { Done.TrySetException(ex); }
-            }
+            client = Activate(excludeProcessId, include: false);
+            client.Initialize(AudioClientShareMode.Shared, AudioClientStreamFlags.Loopback | AudioClientStreamFlags.AutoConvertPcm | AudioClientStreamFlags.SrcDefaultQuality, 2_000_000, 0, Format, Guid.Empty);
+            return client;
         }
-
-        public static AudioClient Activate(int processId, bool include)
+        catch (Exception ex)
         {
-            // AUDIOCLIENT_ACTIVATION_PARAMS { ActivationType = PROCESS_LOOPBACK, TargetProcessId, ProcessLoopbackMode }
-            var ap = Marshal.AllocHGlobal(12);
-            // PROPVARIANT { vt = VT_BLOB, blob = { cbSize, pBlobData } }
-            var pv = Marshal.AllocHGlobal(24);
+            _unavailable = true;
+            try { client?.Dispose(); } catch { }
+            AppLog.Warn(logArea, "process loopback isn't available here; the default output device is captured instead (" + ex.Message + ")");
+            return null;
+        }
+    }
+
+    [DllImport("Mmdevapi.dll", ExactSpelling = true, PreserveSig = false)]
+    private static extern void ActivateAudioInterfaceAsync([MarshalAs(UnmanagedType.LPWStr)] string path, [MarshalAs(UnmanagedType.LPStruct)] Guid riid, IntPtr activationParams, ICompletionHandler handler, out IAsyncOperation op);
+
+    [ComImport, Guid("41D949AB-9862-444A-80F6-C261334DA5EB"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface ICompletionHandler { void ActivateCompleted(IAsyncOperation op); }
+    [ComImport, Guid("72A22D78-CDE4-431D-B8CC-843A71199B6D"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IAsyncOperation { void GetActivateResult(out int hr, [MarshalAs(UnmanagedType.IUnknown)] out object iface); }
+    /// <summary>The handler is called on another thread: it says it may be (IAgileObject).</summary>
+    [ComImport, Guid("94ea2b94-e9cc-49e0-c0ff-ee64ca8f5b90"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IAgileObject { }
+
+    private sealed class Handler : ICompletionHandler, IAgileObject
+    {
+        public readonly TaskCompletionSource<object> Done = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public void ActivateCompleted(IAsyncOperation op)
+        {
             try
             {
-                Marshal.WriteInt32(ap, 0, 1); Marshal.WriteInt32(ap, 4, processId); Marshal.WriteInt32(ap, 8, include ? 0 : 1);
-                for (var i = 0; i < 24; i += 4) Marshal.WriteInt32(pv, i, 0);
-                Marshal.WriteInt16(pv, 0, 65); Marshal.WriteInt32(pv, 8, 12); Marshal.WriteIntPtr(pv, 16, ap);
-                var h = new Handler();
-                ActivateAudioInterfaceAsync("VAD\\Process_Loopback", typeof(IAudioClient).GUID, pv, h, out var op);
-                if (!h.Done.Task.Wait(TimeSpan.FromSeconds(5))) throw new TimeoutException("the process loopback didn't open");
-                GC.KeepAlive(op);
-                return h.Done.Task.Result is IAudioClient c ? new AudioClient(c) : throw new InvalidOperationException("no audio client");
+                op.GetActivateResult(out var hr, out var iface);
+                if (hr != 0) Done.TrySetException(Marshal.GetExceptionForHR(hr) ?? new COMException("activation failed", hr));
+                else Done.TrySetResult(iface);
             }
-            catch (AggregateException ex) when (ex.InnerException is { } inner) { throw inner; }
-            finally { Marshal.FreeHGlobal(pv); Marshal.FreeHGlobal(ap); }
+            catch (Exception ex) { Done.TrySetException(ex); }
         }
+    }
+
+    private static AudioClient Activate(int processId, bool include)
+    {
+        // AUDIOCLIENT_ACTIVATION_PARAMS { ActivationType = PROCESS_LOOPBACK, TargetProcessId, ProcessLoopbackMode }
+        var ap = Marshal.AllocHGlobal(12);
+        // PROPVARIANT { vt = VT_BLOB, blob = { cbSize, pBlobData } }
+        var pv = Marshal.AllocHGlobal(24);
+        try
+        {
+            Marshal.WriteInt32(ap, 0, 1); Marshal.WriteInt32(ap, 4, processId); Marshal.WriteInt32(ap, 8, include ? 0 : 1);
+            for (var i = 0; i < 24; i += 4) Marshal.WriteInt32(pv, i, 0);
+            Marshal.WriteInt16(pv, 0, 65); Marshal.WriteInt32(pv, 8, 12); Marshal.WriteIntPtr(pv, 16, ap);
+            var h = new Handler();
+            ActivateAudioInterfaceAsync("VAD\\Process_Loopback", typeof(IAudioClient).GUID, pv, h, out var op);
+            if (!h.Done.Task.Wait(TimeSpan.FromSeconds(5))) throw new TimeoutException("the process loopback didn't open");
+            GC.KeepAlive(op);
+            return h.Done.Task.Result is IAudioClient c ? new AudioClient(c) : throw new InvalidOperationException("no audio client");
+        }
+        catch (AggregateException ex) when (ex.InnerException is { } inner) { throw inner; }
+        finally { Marshal.FreeHGlobal(pv); Marshal.FreeHGlobal(ap); }
     }
 }
 
@@ -317,6 +342,9 @@ public sealed class ScreenSoundSender : IDisposable
     /// <summary>The sound can't be captured: why (shown to the user once). Raised on a worker thread.</summary>
     public event Action<string>? Problem;
     public long FramesSent { get; private set; }
+    /// <summary>For the log and checks: how often the time line started again (a jump of the capture's stamps), and the largest small jump.</summary>
+    public long Runs { get; private set; }
+    public long LargestSkewUs { get; private set; }
     public string? Mode => _capture?.Mode;
     /// <summary>For checks: every frame as it is sent (host time µs, the PCM before encoding).</summary>
     public Action<long, float[]>? OnFrame { get; set; }
@@ -382,9 +410,13 @@ public sealed class ScreenSoundSender : IDisposable
             var expected = _runUs + _runPos * 1_000_000 / Rate;
             var skew = hostUs - expected;
             if (Math.Abs(skew) > 15_000) { FlushPartial(); _runUs = long.MinValue; }
-            else if (Math.Abs(skew) > 1_000) _runUs += skew / 32; // the device's clock against the PC's: followed slowly, without a jump
+            else
+            {
+                if (Math.Abs(skew) > LargestSkewUs) LargestSkewUs = Math.Abs(skew);
+                if (Math.Abs(skew) > 1_000) _runUs += skew / 32; // the device's clock against the PC's: followed slowly, without a jump
+            }
         }
-        if (_runUs == long.MinValue) { _runUs = hostUs; _runPos = 0; _fill = 0; }
+        if (_runUs == long.MinValue) { _runUs = hostUs; _runPos = 0; _fill = 0; Runs++; }
         var i = 0;
         while (i < frames)
         {

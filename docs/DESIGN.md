@@ -418,7 +418,10 @@ with the PC's sound or without. View only (nothing typed or clicked at the viewe
     Windows leaves one process tree out of it: the System process (pid 4, plays nothing, so nothing is left out),
     or Ocean itself while Ocean plays a shared screen's sound, so two PCs sharing their sound with each other don't
     send it back and forth. Where process loopback isn't there: a loopback of the default device, reopened within
-    about a second when the default changes.
+    about a second when the default changes. Its time stamps come 17.1 to 18.0 ms later than a device loopback's for
+    the same sound (measured on two devices; a single block's 5 ms either way): `ProcessLoopback.StampLagHns`
+    (17.5 ms) is taken off, so the timing stays what it was measured and set with (checked side by side with
+    clicks: within 3 ms of the device loopback, one continuous time line, no restarts).
   - Viewer: the speaker button (or M) turns it off here; it keeps running silent, so it comes back in step. It
     plays on the default output device and follows it when Windows says it changed (device notifications; also a
     check every 2 s): measured 0.2 to 0.3 s for a switch and for the device being unplugged.
@@ -481,13 +484,20 @@ Entirely in the app (the service isn't involved). Settings per Windows user in `
   smaller again but needs a paid extension on many PCs (and in Ocean's player), so it isn't used. Colour conversion
   stays on the processor (this ffmpeg can't create the textures for `scale_d3d11` here); at 60 fps the fast
   converter (12 instead of 14 ms per full-HD picture).
-- **Sound** (`RecordingAudio`). WASAPI loopback of the default output and the default microphone, read every 5 ms.
+- **Sound** (`RecordingAudio`). What the PC plays (a process loopback of every program on every output device, as
+  for screen sharing: a program playing on a device that isn't the default is in the recording too, and a change of
+  the default device doesn't touch it; on older Windows the default output, followed when it changes) and the
+  default microphone (followed at once when it changes: a headset plugged in mid-recording is used from then on;
+  device notifications, and a check every 2 s), read every 5 ms. Tested: the default output switched away and back,
+  then disabled and enabled mid-recording: the sound was in 187 to 188 of 190 tenths of a second; the microphone
+  disabled and enabled: back by itself.
   Every block carries Windows' capture time stamp (QPC) and is put on the timeline at that moment; time 0 is the
   first picture (reported by `showinfo` on the capture's first frame, minus 12 ms for the report's own delay, plus
   half a picture's time: a change on screen shows in the next picture, on average half an interval later). The mix
   goes to the encoder 250 ms behind real time, so late blocks still land in place. Jitter of the stamps within 15 ms
   is smoothed (blocks stay continuous); larger gaps stay gaps; a device that goes away is opened again (the new
-  default) within a second. Soft limiter on the sum. The microphone can be muted while recording.
+  default) within a second. Soft limiter on the sum. The process loopback's late stamps are corrected
+  (`StampLagHns`); a click lands within 3 ms of where the device loopback put it. The microphone can be muted while recording.
   Measured with flashes and beeps (sound vs picture): High within ±15 ms, Balanced within ±30 ms, Small file within
   ±55 ms (at 15 pictures a second the picture itself is up to 67 ms late); no drift over 2 and 3 minutes; before the
   time stamps, the sound was 150–200 ms late (Windows hands sound over in chunks).

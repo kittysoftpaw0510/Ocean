@@ -6,15 +6,18 @@ using NAudio.Wave;
 namespace Ocean.App.Services;
 
 /// <summary>
-/// The sound of a screen recording: what the speakers play (WASAPI loopback of the default output) and the
-/// microphone (the default input), mixed into one 48 kHz stereo stream for the encoder.
+/// The sound of a screen recording: what the PC plays (every program on every output device: a process loopback,
+/// so a program playing on a device that isn't the default is in it too, and a change of the default device
+/// doesn't touch it; on older Windows a loopback of the default output, followed when it changes) and the
+/// microphone (the default input, followed when it changes: a headset plugged in mid-recording is taken at once),
+/// mixed into one 48 kHz stereo stream for the encoder.
 ///
 /// Sync is by time stamps, not by arrival: Windows stamps every block of sound with the moment it was captured
 /// (QPC), and every block is put on the recording's timeline at exactly that moment, where 0 is the first picture
 /// (<see cref="Start"/>). The mix is handed to the encoder a quarter of a second behind real time, so blocks that
 /// come late (Bluetooth, a busy PC) still land in their place. A source that is silent delivers nothing or
 /// "silent" blocks; the timeline stays silent there. Small jitter in the stamps is smoothed; a real gap (the device
-/// was busy) stays a gap; a device that disappears (headphones unplugged, another default device) is opened again.
+/// was busy) stays a gap; a device that disappears (unplugged) or stops being the default is replaced at once.
 /// </summary>
 public sealed class RecordingAudio : IDisposable
 {
@@ -40,6 +43,23 @@ public sealed class RecordingAudio : IDisposable
     private long _halfPictureHns;
 
     public volatile bool MicMuted;
+    /// <summary>Windows said a device came, went or became the default (how often, and when): each source looks at once.</summary>
+    private int _deviceChanges;
+    private DateTime _deviceChangedAt;
+    private MMDeviceEnumerator? _notifyFrom;
+    private DeviceNotify? _notify;
+
+    private sealed class DeviceNotify : NAudio.CoreAudioApi.Interfaces.IMMNotificationClient
+    {
+        private readonly RecordingAudio _a;
+        public DeviceNotify(RecordingAudio a) => _a = a;
+        private void Changed() { _a._deviceChangedAt = DateTime.UtcNow; Interlocked.Increment(ref _a._deviceChanges); }
+        public void OnDeviceStateChanged(string deviceId, DeviceState newState) => Changed();
+        public void OnDeviceAdded(string deviceId) { }
+        public void OnDeviceRemoved(string deviceId) => Changed();
+        public void OnDefaultDeviceChanged(DataFlow flow, Role role, string defaultDeviceId) => Changed();
+        public void OnPropertyValueChanged(string deviceId, NAudio.CoreAudioApi.PropertyKey key) { }
+    }
     public bool HasSpeaker => _sources.Any(s => s.Loopback);
     public bool HasMic => _sources.Any(s => !s.Loopback);
     public string? MicName => _sources.FirstOrDefault(s => !s.Loopback)?.DeviceName;
@@ -78,6 +98,8 @@ public sealed class RecordingAudio : IDisposable
     /// </summary>
     public void Start(Stream output, Task<long> firstPictureHns, int fps)
     {
+        try { _notifyFrom = new MMDeviceEnumerator(); _notify = new DeviceNotify(this); _notifyFrom.RegisterEndpointNotificationCallback(_notify); }
+        catch (Exception ex) { AppLog.Info("Record", "no device notifications (" + ex.Message + "); checking every 2 s"); }
         foreach (var s in _sources) s.Start();
         // A change on the screen shows in the next captured picture: on average half a picture's time after it
         // happened. The sound is put that much later, so what is seen and heard meet in the middle.
@@ -165,6 +187,8 @@ public sealed class RecordingAudio : IDisposable
         // the sources keep capturing until the last blocks are in
         _pump?.Join(MarginMs + 1500);
         foreach (var s in _sources) s.Dispose();
+        try { if (_notify is not null) _notifyFrom?.UnregisterEndpointNotificationCallback(_notify); _notifyFrom?.Dispose(); } catch { }
+        _notify = null; _notifyFrom = null;
     }
 
     public void Dispose() => Stop();
@@ -190,10 +214,13 @@ public sealed class RecordingAudio : IDisposable
         /// <summary>The device's clock against the system clock (frames) at the last block, and how often they were put together again.</summary>
         public long Skew; public int Jumps;
         private MMDevice? _device;
+        private string? _deviceId;
+        private int _seenChanges;
         private AudioClient? _client;
         private AudioCaptureClient? _capture;
         private WaveFormat _format = WaveFormat.CreateIeeeFloatWaveFormat(Rate, Channels);
         private bool _float;
+        private bool _everything; // a process loopback (its stamps come late: ProcessLoopback.StampLagHns)
         private WdlResampler? _resampler;
         private Thread? _thread;
         private volatile bool _stop;
@@ -205,15 +232,34 @@ public sealed class RecordingAudio : IDisposable
 
         private string What => Loopback ? "the speaker sound" : "the microphone";
 
+        /// <summary>The device this source should be on now (the default one), or null when there is none.</summary>
+        private string? DefaultId()
+        {
+            using var devices = new MMDeviceEnumerator();
+            if (Loopback) return devices.HasDefaultAudioEndpoint(DataFlow.Render, Role.Console) ? devices.GetDefaultAudioEndpoint(DataFlow.Render, Role.Console).ID : null;
+            var role = devices.HasDefaultAudioEndpoint(DataFlow.Capture, Role.Communications) ? Role.Communications : Role.Console;
+            return devices.HasDefaultAudioEndpoint(DataFlow.Capture, role) ? devices.GetDefaultAudioEndpoint(DataFlow.Capture, role).ID : null;
+        }
+
         public bool Open(out string why)
         {
             why = "";
+            if (Loopback && ProcessLoopback.Open(ProcessLoopback.SystemProcessId, "Record") is { } everything)
+            {
+                // every program on every device: no device to follow
+                DeviceName = "every program";
+                _client = everything;
+                _format = ProcessLoopback.Format;
+                _float = true;
+                _capture = _client.AudioCaptureClient;
+                _resampler = null; _device = null; _deviceId = null; _everything = true;
+                return true;
+            }
             try
             {
                 using var devices = new MMDeviceEnumerator();
-                _device = Loopback ? devices.GetDefaultAudioEndpoint(DataFlow.Render, Role.Console)
-                    : devices.HasDefaultAudioEndpoint(DataFlow.Capture, Role.Communications) ? devices.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications)
-                    : devices.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Console);
+                _device = devices.GetDevice(DefaultId() ?? throw new InvalidOperationException(Loopback ? "no speakers or headphones" : "no microphone"));
+                _deviceId = _device.ID; _everything = false;
                 DeviceName = _device.FriendlyName;
                 _client = _device.AudioClient;
                 _format = _client.MixFormat;
@@ -253,6 +299,7 @@ public sealed class RecordingAudio : IDisposable
         private void Run()
         {
             var failedAt = DateTime.MinValue;
+            var checkedAt = DateTime.UtcNow;
             while (!_stop)
             {
                 try
@@ -269,6 +316,14 @@ public sealed class RecordingAudio : IDisposable
                         continue;
                     }
                     Drain();
+                    // another default device (a headset plugged in or out): on from that one at once
+                    var changes = Volatile.Read(ref _owner._deviceChanges);
+                    var told = changes != _seenChanges && DateTime.UtcNow - _owner._deviceChangedAt > TimeSpan.FromMilliseconds(150);
+                    if (_deviceId is not null && (told || DateTime.UtcNow - checkedAt > TimeSpan.FromSeconds(2)))
+                    {
+                        checkedAt = DateTime.UtcNow; _seenChanges = changes;
+                        if (DefaultId() is { } now && now != _deviceId) { Close(); failedAt = DateTime.MinValue; continue; }
+                    }
                     Thread.Sleep(5);
                 }
                 catch (Exception ex) when (!_stop)
@@ -309,7 +364,7 @@ public sealed class RecordingAudio : IDisposable
                     lock (_owner._ring)
                     {
                         if (_owner._t0 == long.MinValue) { _next = long.MinValue; continue; }
-                        at = _owner.FrameAt(qpc);
+                        at = _owner.FrameAt((long)qpc - (_everything ? ProcessLoopback.StampLagHns : 0));
                     }
                     if (_next != long.MinValue)
                     {
@@ -349,10 +404,11 @@ public sealed class RecordingAudio : IDisposable
 
         private void Close()
         {
+            try { _client?.Stop(); } catch { }
             try { _capture?.Dispose(); } catch { }
             try { _client?.Dispose(); } catch { }
             try { _device?.Dispose(); } catch { }
-            _capture = null; _client = null; _device = null;
+            _capture = null; _client = null; _device = null; _deviceId = null;
         }
 
         public void Dispose()
