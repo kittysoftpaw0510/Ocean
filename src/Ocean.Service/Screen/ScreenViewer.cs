@@ -73,6 +73,9 @@ public sealed class ScreenViewer : IDisposable
         public Channel<ScreenSoundFrames.Frame>? SoundOut;
         public int SoundPump;
         public long SoundBytes;
+        // the board (a copy of the host's, kept up to date; under BoardGate)
+        public readonly object BoardGate = new();
+        public BoardDto? Board;
     }
 
     private readonly PeerService _peers;
@@ -144,6 +147,7 @@ public sealed class ScreenViewer : IDisposable
         foreach (var sock in new[] { v.Uni, v.Multi })
             if (sock is not null) new Thread(() => ReceiveLoop(v, sock), 512 * 1024) { IsBackground = true, Name = "ocean-screen-rx" }.Start();
         _ = Task.Run(() => BeatLoopAsync(v));
+        if (v.Join.Board) _ = Task.Run(() => BoardLoopAsync(v));
         _log.LogInformation("screen: watching {Title} from {Host} ({W}x{H}; packets {How})", v.Join.Title, v.HostName, v.Join.Width, v.Join.Height,
             v.Join.Group is not null ? "by multicast" : v.Join.Unicast ? "straight to this PC" : "not possible: direct connection only");
         Publish(v, force: true);
@@ -209,7 +213,7 @@ public sealed class ScreenViewer : IDisposable
         Active = !v.Ended, PeerId = v.PeerId, SessionId = v.Sid, Title = v.Join.Title, HostName = v.HostName,
         Width = v.Join.Width, Height = v.Join.Height, Fps = v.Join.Fps, Viewers = v.Viewers, Ended = v.Ended,
         Mode = v.Next < 0 ? "connecting" : v.DirectNow ? "direct" : "udp",
-        BytesUdp = v.BytesUdp, BytesDirect = v.BytesDirect, Lost = v.Lost, Recovered = v.Recovered, Sound = v.Sound,
+        BytesUdp = v.BytesUdp, BytesDirect = v.BytesDirect, Lost = v.Lost, Recovered = v.Recovered, Sound = v.Sound, Board = v.Join.Board,
     };
 
     /// <summary>Only when something the app shows changed (not the byte counters).</summary>
@@ -494,6 +498,102 @@ public sealed class ScreenViewer : IDisposable
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { _log.LogDebug("screen: direct sound: {Msg}", ex.Message); }
+    }
+
+    // ------------------------------------------------------------------ the board and pointing
+
+    /// <summary>
+    /// The host's board, followed: the whole board, then its changes as they come (each also to my app, event
+    /// "viewBoard"; "reset" when the whole board came again). Again after a broken connection.
+    /// </summary>
+    private async Task BoardLoopAsync(View v)
+    {
+        var ct = v.Cts.Token;
+        while (!ct.IsCancellationRequested && !v.Ended)
+        {
+            try
+            {
+                if (!_registry.TryGetOnline(v.PeerId, out var peer)) { await Task.Delay(2000, ct); continue; }
+                using (var resp = await _client.SendAsync(_client.Build(peer, HttpMethod.Get, $"/p/screen/{v.Sid}/board"), HttpCompletionOption.ResponseContentRead, ct))
+                {
+                    if (resp.StatusCode == HttpStatusCode.NotFound) { await Task.Delay(3000, ct); continue; }
+                    resp.EnsureSuccessStatusCode();
+                    var board = await resp.Content.ReadFromJsonAsync<BoardDto>(Json.Options, ct) ?? new BoardDto();
+                    lock (v.BoardGate) v.Board = board;
+                    _events.Publish("viewBoard", new BoardOpDto { Op = "reset", SessionId = v.Sid, Rev = board.Rev });
+                }
+                long since;
+                lock (v.BoardGate) since = v.Board!.Rev;
+                using var stream = await _client.SendAsync(_client.Build(peer, HttpMethod.Get, $"/p/screen/{v.Sid}/board/stream?since={since}"), HttpCompletionOption.ResponseHeadersRead, ct);
+                stream.EnsureSuccessStatusCode();
+                using var reader = new StreamReader(await stream.Content.ReadAsStreamAsync(ct));
+                while (await reader.ReadLineAsync(ct) is { } line)
+                {
+                    if (line.Length == 0) continue; // (keep-alive)
+                    var op = Json.Deserialize<BoardOpDto>(line);
+                    if (op is null) continue;
+                    if (op.Op == "reset") break; // too far behind: the whole board again
+                    lock (v.BoardGate) { if (v.Board is { } b && op.Rev > b.Rev) ApplyTo(b, op); else continue; }
+                    _events.Publish("viewBoard", op);
+                }
+            }
+            catch (OperationCanceledException) { return; }
+            catch (Exception ex) { _log.LogDebug("screen: board: {Msg}", ex.Message); }
+            try { await Task.Delay(1000, ct); } catch (OperationCanceledException) { return; }
+        }
+    }
+
+    private static void ApplyTo(BoardDto b, BoardOpDto op)
+    {
+        b.Rev = op.Rev;
+        switch (op.Op)
+        {
+            case BoardOpDto.Put when op.Item is { } it:
+                var i = b.Items.FindIndex(x => x.Id == it.Id);
+                if (i >= 0) b.Items[i] = it; else b.Items.Add(it);
+                break;
+            case BoardOpDto.Delete: b.Items.RemoveAll(x => x.Id == op.Id); break;
+            case BoardOpDto.Clear: b.Items.Clear(); break;
+        }
+    }
+
+    /// <summary>The board of the screen I watch, as far as it came (null: none, or not yet).</summary>
+    public BoardDto? BoardState()
+    {
+        View? v;
+        lock (_lock) v = _v;
+        if (v is null) return null;
+        lock (v.BoardGate) return v.Board is { } b ? new BoardDto { SessionId = b.SessionId, Rev = b.Rev, Items = b.Items.ToList() } : null;
+    }
+
+    /// <summary>A change by this PC's user, to the host (which hands it to everybody, this PC too).</summary>
+    public async Task<BoardOpDto> BoardSendAsync(BoardOpDto op, CancellationToken ct)
+    {
+        View? v;
+        lock (_lock) v = _v;
+        if (v is null || v.Ended) return new BoardOpDto { Op = op.Op, Error = "not watching" };
+        if (!_registry.TryGetOnline(v.PeerId, out var peer)) return new BoardOpDto { Op = op.Op, Error = $"{v.HostName} is offline" };
+        var req = _client.Build(peer, HttpMethod.Post, $"/p/screen/{v.Sid}/board");
+        req.Content = JsonContent.Create(op, options: Json.Options);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(15_000);
+        using var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseContentRead, cts.Token);
+        if (!resp.IsSuccessStatusCode) return new BoardOpDto { Op = op.Op, Error = resp.StatusCode == HttpStatusCode.NotFound ? "the sharing is over" : "the host didn't take it" };
+        return await resp.Content.ReadFromJsonAsync<BoardOpDto>(Json.Options, cts.Token) ?? new BoardOpDto { Op = op.Op, Error = "no answer" };
+    }
+
+    /// <summary>This PC's user points at the picture: to the host.</summary>
+    public async Task PointAsync(ScreenPointDto point, CancellationToken ct)
+    {
+        View? v;
+        lock (_lock) v = _v;
+        if (v is null || v.Ended || !_registry.TryGetOnline(v.PeerId, out var peer)) return;
+        var req = _client.Build(peer, HttpMethod.Post, $"/p/screen/{v.Sid}/point");
+        req.Content = JsonContent.Create(point, options: Json.Options);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(5000);
+        try { using var _ = await _client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token); }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { _log.LogDebug("screen: point: {Msg}", ex.Message); }
     }
 
     // ------------------------------------------------------------------ packets

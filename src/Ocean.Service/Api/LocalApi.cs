@@ -236,6 +236,14 @@ public static class LocalApi
             catch (InvalidOperationException) { return Results.NotFound(); }
             catch (IOException) { return Results.Ok(); } // the encoder stopped
         });
+        // the board of my session: all of it, and a change by me (changes arrive as "screenBoard" events)
+        g.MapGet("/screen/board", (Ocean.Service.Screen.ScreenHost screen) => screen.BoardState(null) is { } b ? Results.Json(b, Json.Options) : Results.NotFound());
+        g.MapPost("/screen/board", async (HttpContext ctx, Ocean.Service.Screen.ScreenHost screen, NodeIdentity me, ConfigStore config) =>
+        {
+            var op = await ctx.Request.ReadFromJsonAsync<BoardOpDto>(Json.Options, ctx.RequestAborted);
+            if (op is null) return Results.BadRequest();
+            return Results.Json(screen.BoardApply(null, op, me.NodeId, DisplayNames.Of(config.Current.UserName, config.Current.NodeName), host: true), Json.Options);
+        });
         // the computer's sound: on or off, and the app's Opus frames while it is on and somebody watches
         g.MapPost("/screen/sound", async (HttpContext ctx, Ocean.Service.Screen.ScreenHost screen) =>
         {
@@ -288,6 +296,22 @@ public static class LocalApi
                 await viewer.StreamAsync(async bytes => { await ctx.Response.Body.WriteAsync(bytes, ctx.RequestAborted); await ctx.Response.Body.FlushAsync(ctx.RequestAborted); }, ctx.RequestAborted);
             }
             catch (Exception ex) when (ex is IOException or OperationCanceledException) { }
+        });
+        // the board of the screen I watch (changes arrive as "viewBoard" events), a change by me, and pointing
+        g.MapGet("/screen/view/board", (Ocean.Service.Screen.ScreenViewer viewer) => viewer.BoardState() is { } b ? Results.Json(b, Json.Options) : Results.NotFound());
+        g.MapPost("/screen/view/board", async (HttpContext ctx, Ocean.Service.Screen.ScreenViewer viewer) =>
+        {
+            var op = await ctx.Request.ReadFromJsonAsync<BoardOpDto>(Json.Options, ctx.RequestAborted);
+            if (op is null) return Results.BadRequest();
+            try { return Results.Json(await viewer.BoardSendAsync(op, ctx.RequestAborted), Json.Options); }
+            catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException) { return Results.Json(new BoardOpDto { Op = op.Op, Error = "the host can't be reached" }, Json.Options); }
+        });
+        g.MapPost("/screen/view/point", async (HttpContext ctx, Ocean.Service.Screen.ScreenViewer viewer) =>
+        {
+            var point = await ctx.Request.ReadFromJsonAsync<ScreenPointDto>(Json.Options, ctx.RequestAborted);
+            if (point is null) return Results.BadRequest();
+            await viewer.PointAsync(point, ctx.RequestAborted);
+            return Results.Ok();
         });
         // the sound for the app's player: Opus frames as they arrive (see ScreenSoundFrames)
         g.MapGet("/screen/view/sound", async (HttpContext ctx, Ocean.Service.Screen.ScreenViewer viewer) =>

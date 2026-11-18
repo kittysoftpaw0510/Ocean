@@ -12,8 +12,29 @@
                 <TextBlock Text="{Binding SharingTitle}" FontWeight="SemiBold" Foreground="White" TextTrimming="CharacterEllipsis"/>
                 <TextBlock Text="{Binding SharingDetail}" FontSize="12" Foreground="#FBCFD6" TextTrimming="CharacterEllipsis"/>
             </StackPanel>
+            <!-- the board: shown or hidden here (a dot with how many new things while hidden) -->
+            <Grid Margin="14,0,0,0">
+                <Button Width="34" Height="30" FontSize="14" Command="{Binding ToggleBoardCommand}" Cursor="Hand" AutomationProperties.Name="The board"
+                        ToolTip="Board: draw, type and paste together with everybody watching (only you see it here; it isn't in the picture)">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource BtnIcon}">
+                            <Setter Property="Content" Value="&#xE70F;"/>
+                            <Setter Property="Foreground" Value="White"/>
+                            <Style.Triggers><DataTrigger Binding="{Binding HostBoard.Visible}" Value="True"><Setter Property="Foreground" Value="#5EEAD4"/></DataTrigger></Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-4,0" MinWidth="15" Height="15" CornerRadius="7.5" Background="#FB7185" Padding="3,0" IsHitTestVisible="False">
+                    <Border.Style>
+                        <Style TargetType="Border">
+                            <Style.Triggers><DataTrigger Binding="{Binding HostBoard.Unseen}" Value="0"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers>
+                        </Style>
+                    </Border.Style>
+                    <TextBlock Text="{Binding HostBoard.UnseenText}" FontSize="9.5" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="{StaticResource UiFont}"/>
+                </Border>
+            </Grid>
             <!-- the PC's sound: shared or not (a click switches it at once, for everyone watching) -->
-            <Button Width="34" Height="30" Margin="14,0,0,0" FontSize="14" Command="{Binding ToggleSoundCommand}" ToolTip="{Binding SoundTip}" Cursor="Hand" AutomationProperties.Name="Share the sound">
+            <Button Width="34" Height="30" Margin="4,0,0,0" FontSize="14" Command="{Binding ToggleSoundCommand}" ToolTip="{Binding SoundTip}" Cursor="Hand" AutomationProperties.Name="Share the sound">
                 <Button.Style>
                     <Style TargetType="Button" BasedOn="{StaticResource BtnIcon}">
                         <Setter Property="Content" Value="&#xE767;"/>

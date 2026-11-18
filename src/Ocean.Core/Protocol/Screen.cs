@@ -180,6 +180,8 @@ public sealed class ScreenJoinDto
     public bool Unicast { get; set; }
     /// <summary>The host shares its sound right now (older hosts: never).</summary>
     public bool Sound { get; set; }
+    /// <summary>The host has a board and takes pointing (older hosts: no).</summary>
+    public bool Board { get; set; }
 }
 
 public sealed class ScreenBeatDto
@@ -221,6 +223,8 @@ public sealed class ScreenViewDto
     public int Recovered { get; set; }
     /// <summary>The host shares its sound right now: the app plays <c>/api/screen/view/sound</c>.</summary>
     public bool Sound { get; set; }
+    /// <summary>The host has a board (<c>/api/screen/view/board</c>) and takes pointing.</summary>
+    public bool Board { get; set; }
 }
 
 /// <summary>
@@ -280,4 +284,84 @@ public static class ScreenSoundFrames
         }
         return true;
     }
+}
+
+// ---------------------------------------------------------------- the board and pointing (during a screen sharing)
+
+/// <summary>
+/// One thing on a sharing session's board: an ink stroke, a text or a pasted picture. Positions are in board units:
+/// the board is <see cref="BoardLimits.Width"/> wide on every PC (each panel scales it to its own width) and grows
+/// downwards. The author is set by the session's host, never taken from the sender.
+/// </summary>
+public sealed class BoardItemDto
+{
+    public string Id { get; set; } = "";
+    /// <summary>ink, text, image.</summary>
+    public string Kind { get; set; } = "ink";
+    public string AuthorId { get; set; } = "";
+    public string AuthorName { get; set; } = "";
+    public double X { get; set; }
+    public double Y { get; set; }
+    /// <summary>Text and picture: the box (a text's width; its height follows the text).</summary>
+    public double W { get; set; }
+    public double H { get; set; }
+    /// <summary>Ink: x, y, x, y, … in board units.</summary>
+    public List<double>? Points { get; set; }
+    /// <summary>Ink: the pen's width; text: the font size (board units).</summary>
+    public double Size { get; set; }
+    /// <summary>#RRGGBB.</summary>
+    public string? Color { get; set; }
+    public string? Text { get; set; }
+    /// <summary>A picture: PNG or JPEG, base64.</summary>
+    public string? Image { get; set; }
+}
+
+/// <summary>A change to the board: put (add or replace an item), delete (an item), clear (everything; the sharer only).</summary>
+public sealed class BoardOpDto
+{
+    public const string Put = "put", Delete = "delete", Clear = "clear";
+    public string Op { get; set; } = Put;
+    public BoardItemDto? Item { get; set; }
+    public string? Id { get; set; }
+    /// <summary>Set by the host: the board's version after this change.</summary>
+    public long Rev { get; set; }
+    public string SessionId { get; set; } = "";
+    /// <summary>Set by the host: who made the change (its node id and name).</summary>
+    public string ById { get; set; } = "";
+    public string ByName { get; set; } = "";
+    /// <summary>The answer to a change that was refused: why.</summary>
+    public string? Error { get; set; }
+}
+
+public sealed class BoardDto
+{
+    public string SessionId { get; set; } = "";
+    public long Rev { get; set; }
+    public List<BoardItemDto> Items { get; set; } = new();
+}
+
+public static class BoardLimits
+{
+    public const double Width = 600;
+    public const int MaxItems = 3000;
+    public const int MaxPoints = 20000;
+    public const int MaxText = 20000;
+    /// <summary>A pasted picture, base64 (pictures are made smaller before they are sent).</summary>
+    public const int MaxImage = 3_000_000;
+    public const long MaxBytes = 40_000_000;
+}
+
+/// <summary>
+/// A viewer points at the shared picture: x and y are where, as parts of the picture's width and height (0 to 1).
+/// click: a short ripple at that spot on the sharing PC's screen; move: a pointer that follows (the mouse button is
+/// held); up: the pointer goes. The host fills in who.
+/// </summary>
+public sealed class ScreenPointDto
+{
+    public const string Click = "click", Move = "move", Up = "up";
+    public double X { get; set; }
+    public double Y { get; set; }
+    public string Kind { get; set; } = Click;
+    public string PeerId { get; set; } = "";
+    public string PeerName { get; set; } = "";
 }

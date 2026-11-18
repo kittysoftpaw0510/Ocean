@@ -432,10 +432,32 @@ with the PC's sound or without. View only (nothing typed or clicked at the viewe
   - Viewer: the speaker button (or M) turns it off here; it keeps running silent, so it comes back in step. It
     plays on the default output device and follows it when Windows says it changed (device notifications; also a
     check every 2 s): measured 0.2 to 0.3 s for a switch and for the device being unplugged.
-- Local API: `/api/screen` (GET, `/start`, `/invite`, `/stop`, `/sound`, `/feed/{id}`, `/feed/{id}/sound`),
+- **The board** (`ScreenBoard` at the host; app: `BoardVm`, `BoardView`, `BoardWindow`). Every session has one, kept by
+  its host and gone with it: ink strokes, texts and pictures (PNG/JPEG, base64, at most 1600 px), positioned in
+  board units (600 wide, growing downwards; every panel scales it to its own width, so it looks the same
+  everywhere). Changes: `put`, `delete`, `clear`, each numbered by the host. The host sets the author (never taken
+  from the sender); only the author changes an item, anybody wipes one away (the eraser), only the host clears it;
+  limits in `BoardLimits`. Viewers: `GET /p/screen/{id}/board`, then `GET /p/screen/{id}/board/stream?since=` (a line
+  of JSON per change, an empty line as keep-alive, `reset` when the change is no longer kept), and
+  `POST /p/screen/{id}/board` for their own; their service keeps a copy and tells the app (`viewBoard`). The host's
+  app: `/api/screen/board`, events `screenBoard`. The app applies a change only if it is newer than what it has of
+  that item (and than the last clear), so the answer to my change and somebody else's event may come in any order.
+  Measured between two test nodes: a change at the other side within 10 ms. In the viewer it lies over the
+  picture's right side (its left edge resizes it; the width is remembered); at the host it floats on the desktop,
+  kept out of the capture. How see-through: a small slider on its bar (remembered), and a little more while the
+  mouse is elsewhere; what is on it always shows in full. Hidden, a badge counts others' new things; the first
+  thing somebody else puts on it opens it once by itself.
+- **Pointing.** A click on the picture in the viewer sends where (parts of the picture's width and height:
+  `POST /p/screen/{id}/point`, event `screenPoint` at the host: 21 ms between two test nodes); holding the button
+  sends the pointer as it moves (30 a second at most) and `up`. The host's app maps it to what it shares (a screen,
+  a part of one, a window where it is now; a window resized since the start sits in the picture with bars, which
+  are taken off) and shows a ripple with the viewer's name in their colour, or a dot that follows, in a
+  click-through window on top (`PointerOverlay`). That window is in the capture, so everybody watching sees it too
+  (a window's own capture doesn't take other windows: there only the host sees it).
+- Local API: `/api/screen` (GET, `/start`, `/invite`, `/stop`, `/sound`, `/feed/{id}`, `/feed/{id}/sound`, `/board`),
   `/api/screen/ask/{peer}`, `/api/screen/prompts[/{id}]`, `/api/screen/muted`, `/api/screen/view` (GET, `/leave`,
-  `/stream`, `/sound`), `/api/peers/{peer}/screen/{id}/join`. Events: `myScreen`, `screenPrompt`, `screenRequest`,
-  `screenInvite`, `screenView`, `peerScreen`.
+  `/stream`, `/sound`, `/board`, `/point`), `/api/peers/{peer}/screen/{id}/join`. Events: `myScreen`, `screenPrompt`,
+  `screenRequest`, `screenInvite`, `screenView`, `peerScreen`, `screenBoard`, `viewBoard`, `screenPoint`.
 
 ## Screen recording (app: `ScreenRecorder`, `RecordingAudio`, `RecordViewModel`)
 

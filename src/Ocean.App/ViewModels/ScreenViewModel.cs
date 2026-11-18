@@ -18,6 +18,12 @@ public interface IScreenUi
     /// <summary>My request, waiting for the answer: stays (Ocean's main window can't be used meanwhile) until <see cref="CloseWaiting"/> or Cancel.</summary>
     void ShowWaiting(ScreenWaitVm wait);
     void CloseWaiting(string askId);
+    /// <summary>My session's board, floating on my desktop (kept out of the capture); it follows <see cref="BoardVm.Visible"/>.</summary>
+    void ShowHostBoard(BoardVm board);
+    void CloseHostBoard();
+    /// <summary>A viewer points at my shared picture: a ripple (or a pointer that follows) at that spot of what I share.</summary>
+    void ShowPoint(ScreenPointDto point, ScreenPick pick);
+    void ClosePoints();
     void ShowViewer(ScreenViewVm view);
     void CloseViewer();
     /// <summary>The "you are sharing your screen" bar, kept on top of everything while a session runs.</summary>
@@ -117,6 +123,12 @@ public sealed partial class ScreenViewVm : ObservableObject
     partial void OnViewersChanged(int value) => OnPropertyChanged(nameof(ViewersText));
     private void Refresh() { OnPropertyChanged(nameof(StatusText)); OnPropertyChanged(nameof(StatusTip)); OnPropertyChanged(nameof(Hearing)); }
     public void Apply(ScreenViewDto dto) { Mode = dto.Mode; Viewers = dto.Viewers; Sound = dto.Sound; }
+    /// <summary>The session's board (null: the host's Ocean has none).</summary>
+    public BoardVm? Board { get; set; }
+    /// <summary>A click on the picture shows the host where (its Ocean takes pointing).</summary>
+    public bool CanPoint => Board is not null;
+    [RelayCommand]
+    private void ToggleBoard() { if (Board is { } b) b.Visible = !b.Visible; }
 
     [RelayCommand]
     private void ToggleMute() { if (Sound) Muted = !Muted; }
@@ -136,6 +148,8 @@ public sealed partial class ScreenViewModel : ObservableObject
     private readonly DispatcherTimer _promptClock = new() { Interval = TimeSpan.FromSeconds(1) };
     private ScreenEncoder? _encoder;
     private ScreenSoundSender? _sound;
+    /// <summary>What I share (for pointing: where on my screen a viewer's spot is).</summary>
+    private ScreenPick? _pick;
     private bool _stopping;
     /// <summary>Between asking the service to start and having the capture ready: the service's own word about the new session arrives in between.</summary>
     private bool _starting;
@@ -181,6 +195,41 @@ public sealed partial class ScreenViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(IsSharing)); OnPropertyChanged(nameof(SharingTitle)); OnPropertyChanged(nameof(SharingDetail)); OnPropertyChanged(nameof(SharingPeopleTip));
         OnPropertyChanged(nameof(SoundOn)); OnPropertyChanged(nameof(SoundTip));
+    }
+
+    /// <summary>My session's board (null: not sharing).</summary>
+    [ObservableProperty] private BoardVm? _hostBoard;
+
+    [RelayCommand]
+    private void ToggleBoard() { if (HostBoard is { } b) b.Visible = !b.Visible; }
+
+    private BoardVm NewBoard(bool host, string title, string send, string load) => new(
+        _main.Status?.NodeId ?? "", string.IsNullOrEmpty(_main.MyName) ? "Me" : _main.MyName, host, title,
+        op => _api.PostAsync<BoardOpDto>(send, op),
+        async () => { try { return await _api.GetAsync<BoardDto>(load); } catch (ApiException) { return null; } });
+
+    /// <summary>A change to my session's board (event "screenBoard").</summary>
+    public void ApplyBoard(BoardOpDto op) => HostBoard?.Apply(op);
+
+    /// <summary>A change to the board of the screen I watch (event "viewBoard"; "reset": all of it again).</summary>
+    public void ApplyViewBoard(BoardOpDto op)
+    {
+        if (View?.Board is not { } b || op.SessionId != View.SessionId) return;
+        if (op.Op == "reset") _ = b.LoadAsync(); else b.Apply(op);
+    }
+
+    /// <summary>A viewer points at what I share (event "screenPoint").</summary>
+    public void ApplyPoint(ScreenPointDto point) { if (Mine is not null && _pick is { } pick) Ui.ShowPoint(point, pick); }
+
+    /// <summary>I point at the screen I watch: x and y as parts of the picture (0 to 1).</summary>
+    public void SendPoint(double x, double y, string kind)
+    {
+        if (View is not { CanPoint: true, Ended: false }) return;
+        _ = Task.Run(async () =>
+        {
+            try { await _api.PostAsync("/api/screen/view/point", new ScreenPointDto { X = x, Y = y, Kind = kind }); }
+            catch (Exception ex) { AppLog.Info("Screen", "point: " + ex.Message); }
+        });
     }
 
     [RelayCommand]
@@ -305,6 +354,12 @@ public sealed partial class ScreenViewModel : ObservableObject
             });
             _sound = snd;
             SoundLoopCheck();
+            _pick = pick;
+            var board = NewBoard(host: true, $"The board of your sharing “{pick.Title}”: everybody watching sees it", "/api/screen/board", "/api/screen/board");
+            board.Wanted += () => board.Visible = true;
+            board.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(BoardVm.Visible) && ReferenceEquals(HostBoard, board)) { if (board.Visible) Ui.ShowHostBoard(board); else Ui.CloseHostBoard(); } };
+            HostBoard = board;
+            _ = board.LoadAsync();
             AppLog.Info("Screen", $"sharing {pick.Kind} “{pick.Title}” {w}x{h} at {pick.Fps} fps{(pick.Sound ? " with sound" : "")} with {(everyone ? "everyone" : "invited PCs")}");
             _starting = false;
             // the newest word from the service (somebody may be watching already)
@@ -346,6 +401,8 @@ public sealed partial class ScreenViewModel : ObservableObject
         var was = Mine;
         _encoder?.Dispose(); _encoder = null;
         _sound?.Dispose(); _sound = null;
+        if (HostBoard is not null) { HostBoard = null; Ui.CloseHostBoard(); Ui.ClosePoints(); }
+        _pick = null;
         Mine = null;
         Ui.HideBar();
         if (was is not null && !_stopping && st.Ended is { } why && why != "stopped")
@@ -528,8 +585,15 @@ public sealed partial class ScreenViewModel : ObservableObject
             if (View is not null) { Ui.CloseViewer(); View = null; }
             var dto = await _api.PostAsync<ScreenViewDto>($"/api/peers/{peerId}/screen/{sessionId}/join", null);
             if (dto is null || !dto.Active) { _main.Toast("Can't watch", "That screen is no longer shared.", "warn"); return; }
-            View = new ScreenViewVm(dto);
-            AppLog.Info("Screen", $"watching {dto.HostName}'s screen ({dto.Width}x{dto.Height})");
+            var view = new ScreenViewVm(dto);
+            if (dto.Board)
+            {
+                view.Board = NewBoard(host: false, $"The board of {dto.HostName}'s sharing: everybody in it sees it", "/api/screen/view/board", "/api/screen/view/board");
+                view.Board.Wanted += () => view.Board.Visible = true;
+                _ = view.Board.LoadAsync();
+            }
+            View = view;
+            AppLog.Info("Screen", $"watching {dto.HostName}'s screen ({dto.Width}x{dto.Height}{(dto.Board ? ", with a board" : "")})");
             Ui.ShowViewer(View);
         }
         catch (ApiException ex) { _main.Toast("Can't watch", ex.Message, "warn"); }

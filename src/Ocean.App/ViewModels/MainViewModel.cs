@@ -575,6 +575,15 @@ public partial class MainViewModel : ObservableObject
                 case "screenView":
                     if (Json.Deserialize<ScreenViewDto>(data) is { } watching) Screen.ApplyView(watching);
                     break;
+                case "screenBoard":
+                    if (Json.Deserialize<BoardOpDto>(data) is { } boardOp) Screen.ApplyBoard(boardOp);
+                    break;
+                case "viewBoard":
+                    if (Json.Deserialize<BoardOpDto>(data) is { } viewOp) Screen.ApplyViewBoard(viewOp);
+                    break;
+                case "screenPoint":
+                    if (Json.Deserialize<ScreenPointDto>(data) is { } point) Screen.ApplyPoint(point);
+                    break;
                 case "screenInvite":
                 {
                     using var doc = JsonDocument.Parse(data);

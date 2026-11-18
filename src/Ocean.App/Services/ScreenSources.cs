@@ -13,6 +13,10 @@ public sealed class ScreenShareSettings
 {
     /// <summary>Share the PC's sound with the picture.</summary>
     public bool Sound { get; set; } = true;
+    /// <summary>The board panel's background: how solid (0.25 to 1).</summary>
+    public double BoardOpacity { get; set; } = 0.82;
+    /// <summary>The board's width in the viewer window (device-independent pixels).</summary>
+    public double BoardWidth { get; set; } = 380;
 
     private static string FilePath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Ocean", "screen.json");
 

@@ -290,6 +290,52 @@ public static class PeerApi
                 ctx.RequestAborted);
             if (!ok && !began) ctx.Response.StatusCode = 410; // those bytes are gone (too far behind), or no picture came: start again
         });
+        // the board: all of it, its changes as they come (a line of JSON each), and a change from a viewer
+        g.MapGet("/screen/{sessionId}/board", (HttpContext ctx, string sessionId, ScreenHost screen) =>
+        {
+            var pc = PeerContext.Get(ctx);
+            if (screen.Allowed(sessionId, pc.ClientId) != true) return Results.NotFound();
+            return screen.BoardState(sessionId) is { } b ? Results.Json(b, Json.Options) : Results.NotFound();
+        });
+        g.MapGet("/screen/{sessionId}/board/stream", async (HttpContext ctx, string sessionId, long? since, ScreenHost screen) =>
+        {
+            var pc = PeerContext.Get(ctx);
+            if (screen.Allowed(sessionId, pc.ClientId) != true) { ctx.Response.StatusCode = 404; return; }
+            ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>()?.DisableBuffering();
+            if (ctx.Features.Get<Microsoft.AspNetCore.Server.Kestrel.Core.Features.IHttpMinResponseDataRateFeature>() is { } rate) rate.MinDataRate = null;
+            ctx.Response.ContentType = "application/x-ndjson";
+            ctx.Response.Headers.CacheControl = "no-store";
+            try
+            {
+                await ctx.Response.StartAsync(ctx.RequestAborted);
+                var ok = await screen.StreamBoardAsync(sessionId, pc.ClientId, since ?? 0, async ops =>
+                {
+                    var sb = new System.Text.StringBuilder();
+                    foreach (var op in ops) sb.Append(Json.Serialize(op)).Append('\n');
+                    if (ops.Count == 0) sb.Append('\n');
+                    await ctx.Response.WriteAsync(sb.ToString(), ctx.RequestAborted);
+                    await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
+                }, ctx.RequestAborted);
+                if (!ok) await ctx.Response.WriteAsync("{\"op\":\"reset\"}\n", ctx.RequestAborted); // (too far behind: from the whole board again)
+            }
+            catch (Exception ex) when (ex is IOException or OperationCanceledException) { }
+        });
+        g.MapPost("/screen/{sessionId}/board", async (HttpContext ctx, string sessionId, ScreenHost screen) =>
+        {
+            var pc = PeerContext.Get(ctx);
+            if (screen.Allowed(sessionId, pc.ClientId) != true) return Results.NotFound();
+            var op = await ctx.Request.ReadFromJsonAsync<BoardOpDto>(Json.Options, ctx.RequestAborted);
+            if (op is null) return Results.BadRequest();
+            return Results.Json(screen.BoardApply(sessionId, op, pc.ClientId, DisplayNames.Of(pc.User, pc.Name), host: false), Json.Options);
+        });
+        // a viewer points at the picture
+        g.MapPost("/screen/{sessionId}/point", async (HttpContext ctx, string sessionId, ScreenHost screen) =>
+        {
+            var pc = PeerContext.Get(ctx);
+            var point = await ctx.Request.ReadFromJsonAsync<ScreenPointDto>(Json.Options, ctx.RequestAborted);
+            if (point is null) return Results.BadRequest();
+            return screen.Point(sessionId, pc.ClientId, DisplayNames.Of(pc.User, pc.Name), point) ? Results.Ok() : Results.NotFound();
+        });
         // the sound, for a viewer that gets no packets: Opus frames after the one it has (see ScreenSoundFrames)
         g.MapGet("/screen/{sessionId}/sound", async (HttpContext ctx, string sessionId, long? after, ScreenHost screen) =>
         {

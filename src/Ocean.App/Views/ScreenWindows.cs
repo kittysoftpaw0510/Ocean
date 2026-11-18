@@ -7,6 +7,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using Ocean.App.Services;
 using Ocean.App.ViewModels;
+using Ocean.Core.Protocol;
 
 namespace Ocean.App.Views;
 
@@ -19,6 +20,8 @@ public sealed class ScreenUi : IScreenUi
     private readonly ScreenViewModel _vm;
     private readonly Dictionary<string, ScreenPromptWindow> _prompts = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ScreenWaitWindow> _waits = new(StringComparer.Ordinal);
+    private BoardWindow? _board;
+    private PointerOverlay? _points;
     private ScreenViewWindow? _viewer;
     private ScreenBarWindow? _bar;
     private RecordBarWindow? _recordBar;
@@ -56,6 +59,20 @@ public sealed class ScreenUi : IScreenUi
     }
 
     public void CloseWaiting(string askId) { if (_waits.TryGetValue(askId, out var w)) w.CloseForGood(); }
+
+    public void ShowHostBoard(BoardVm board)
+    {
+        if (_board is { } open && ReferenceEquals(open.Board, board)) { open.Show(); return; }
+        _board?.CloseForGood();
+        _board = new BoardWindow(board);
+        _board.Show();
+    }
+
+    public void CloseHostBoard() { var b = _board; _board = null; b?.CloseForGood(); }
+
+    public void ShowPoint(ScreenPointDto point, ScreenPick pick) => (_points ??= new PointerOverlay()).Show(point, pick);
+
+    public void ClosePoints() { _points?.Dispose(); _points = null; }
 
     /// <summary>Bottom right of the main screen's work area, the oldest lowest.</summary>
     private void Stack()
@@ -398,6 +415,10 @@ public partial class ScreenViewWindow : Window
     private readonly ScreenDecoder _decoder;
     private ScreenSoundPlayer? _player;
     private readonly DispatcherTimer _watch = new() { Interval = TimeSpan.FromSeconds(1) };
+    // pointing: the button is down on the picture; whether it moved (a pointer that follows) and when it was last sent
+    private bool _pointing, _pointMoved;
+    private Point _pointFrom;
+    private DateTime _pointSent;
     private WindowState _stateBefore;
     private bool _full;
 
@@ -431,7 +452,81 @@ public partial class ScreenViewWindow : Window
         };
         _watch.Start();
         KeyDown += OnKey;
-        Picture.MouseLeftButtonDown += (_, e) => { if (e.ClickCount == 2) ToggleFull(); };
+        Picture.MouseLeftButtonDown += OnPictureDown;
+        Picture.MouseMove += OnPictureMove;
+        Picture.MouseLeftButtonUp += OnPictureUp;
+        if (view.Board is { } board)
+        {
+            Picture.Cursor = Cursors.Hand;
+            Board.Attach(board);
+            BoardDock.Width = ScreenShareSettings.Load().BoardWidth;
+            board.PropertyChanged += OnBoardChanged;
+            BoardDock.Visibility = board.Visible ? Visibility.Visible : Visibility.Collapsed;
+            BoardResize.DragDelta += (_, e) => BoardDock.Width = Math.Clamp(BoardDock.Width - e.HorizontalChange, 240, Math.Max(260, ActualWidth * 0.75));
+            BoardResize.DragCompleted += (_, _) => { var p = ScreenShareSettings.Load(); p.BoardWidth = BoardDock.Width; p.Save(); };
+        }
+    }
+
+    private void OnBoardChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(BoardVm.Visible) && View.Board is { } b) BoardDock.Visibility = b.Visible ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // ------------------------------------------------------------------ pointing at the picture
+
+    /// <summary>Where on the picture (parts of its width and height), or null outside it.</summary>
+    private (double X, double Y)? OnPicture(MouseEventArgs e)
+    {
+        var p = e.GetPosition(Picture);
+        if (Picture.ActualWidth <= 0 || Picture.ActualHeight <= 0) return null;
+        double x = p.X / Picture.ActualWidth, y = p.Y / Picture.ActualHeight;
+        return x is >= 0 and <= 1 && y is >= 0 and <= 1 ? (x, y) : null;
+    }
+
+    private void OnPictureDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ClickCount == 2) { _pointing = false; ToggleFull(); return; }
+        if (!View.CanPoint || View.Ended || OnPicture(e) is not { } at) return;
+        _vm.SendPoint(at.X, at.Y, ScreenPointDto.Click);
+        Ring(e.GetPosition(Points));
+        _pointing = true; _pointMoved = false; _pointFrom = e.GetPosition(Picture);
+        Picture.CaptureMouse();
+    }
+
+    private void OnPictureMove(object sender, MouseEventArgs e)
+    {
+        if (!_pointing || e.LeftButton != MouseButtonState.Pressed) return;
+        var p = e.GetPosition(Picture);
+        if (!_pointMoved && (p - _pointFrom).Length < 6) return; // (a click, not yet a held pointer)
+        if (DateTime.UtcNow - _pointSent < TimeSpan.FromMilliseconds(33)) return; // 30 a second at most
+        if (OnPicture(e) is not { } at) return;
+        _pointMoved = true; _pointSent = DateTime.UtcNow;
+        _vm.SendPoint(at.X, at.Y, ScreenPointDto.Move);
+    }
+
+    private void OnPictureUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_pointing) return;
+        _pointing = false;
+        Picture.ReleaseMouseCapture();
+        if (_pointMoved) _vm.SendPoint(0, 0, ScreenPointDto.Up);
+    }
+
+    /// <summary>A quick ring where I clicked: it went out (the host sees it on their screen).</summary>
+    private void Ring(Point at)
+    {
+        var color = Controls.InitialsBrushConverter.ColorOf(View.Board?.MyId);
+        var ring = new System.Windows.Shapes.Ellipse { Stroke = new SolidColorBrush(color), StrokeThickness = 2.5, Width = 36, Height = 36, RenderTransformOrigin = new Point(0.5, 0.5), IsHitTestVisible = false };
+        var scale = new ScaleTransform(0.3, 0.3);
+        ring.RenderTransform = scale;
+        Canvas.SetLeft(ring, at.X - 18); Canvas.SetTop(ring, at.Y - 18);
+        Points.Children.Add(ring);
+        var grow = new DoubleAnimation(0.3, 1, TimeSpan.FromMilliseconds(420)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } };
+        scale.BeginAnimation(ScaleTransform.ScaleXProperty, grow);
+        scale.BeginAnimation(ScaleTransform.ScaleYProperty, grow);
+        var fade = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(420));
+        fade.Completed += (_, _) => Points.Children.Remove(ring);
+        ring.BeginAnimation(OpacityProperty, fade);
     }
 
     private void OnViewChanged(object? sender, PropertyChangedEventArgs e)
@@ -453,7 +548,9 @@ public partial class ScreenViewWindow : Window
 
     private void OnKey(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.F11 || e.Key == Key.F) { ToggleFull(); e.Handled = true; }
+        if (Board.IsKeyboardFocusWithin) return; // (typing on the board: its own keys)
+        if (e.Key == Key.B && View.Board is { } b) { b.Visible = !b.Visible; e.Handled = true; }
+        else if (e.Key == Key.F11 || e.Key == Key.F) { ToggleFull(); e.Handled = true; }
         else if (e.Key == Key.M && View.Sound) { View.Muted = !View.Muted; e.Handled = true; }
         else if (e.Key == Key.Escape && _full) { ToggleFull(); e.Handled = true; }
     }
@@ -486,6 +583,8 @@ public partial class ScreenViewWindow : Window
     {
         _watch.Stop();
         View.PropertyChanged -= OnViewChanged;
+        if (View.Board is { } board) board.PropertyChanged -= OnBoardChanged;
+        Board.Detach();
         _decoder.Dispose();
         _player?.Dispose(); _player = null;
         _ = _vm.LeaveAsync(View);

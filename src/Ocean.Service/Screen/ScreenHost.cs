@@ -62,6 +62,7 @@ public sealed class ScreenHost : IDisposable
         public DateTimeOffset StartedAt;
         public readonly ScreenRing Ring = new();
         public readonly ScreenSoundRing SoundRing = new();
+        public ScreenBoard Board = null!;
         public ScreenSoundFrames.Frame? LastSound; // (under SendLock)
         public long SoundSent;
         public readonly ConcurrentDictionary<string, Viewer> Viewers = new(StringComparer.Ordinal);
@@ -132,6 +133,7 @@ public sealed class ScreenHost : IDisposable
                 Everyone = req.Everyone, Sound = req.Sound, StartedAt = DateTimeOffset.UtcNow,
             };
             s.Aes = new AesGcm(s.Key, 16);
+            s.Board = new ScreenBoard(s.Sid);
             _s = s;
         }
         _log.LogInformation("screen sharing started: {Title} ({W}x{H}, {Fps} fps{Sound}) for {Who}", s.Title, s.Width, s.Height, s.Fps, s.Sound ? ", with sound" : "", s.Everyone ? "everyone" : "invited PCs");
@@ -248,6 +250,7 @@ public sealed class ScreenHost : IDisposable
         for (var i = 0; i < 3; i++) SendControl(s);
         s.Ring.Close();
         s.SoundRing.Close();
+        s.Board.Close();
         s.Cts.Cancel();
         // PCs still being asked: the question goes away
         foreach (var (peerId, person) in s.People)
@@ -549,7 +552,7 @@ public sealed class ScreenHost : IDisposable
         return new ScreenJoinDto
         {
             SessionId = s.Sid, Title = s.Title, Width = s.Width, Height = s.Height, Fps = s.Fps, Key = Convert.ToBase64String(s.Key),
-            Group = s.Everyone ? CastWire.GroupAddress.ToString() : null, Port = ScreenWire.Port, Unicast = v.Udp is not null, Sound = s.Sound,
+            Group = s.Everyone ? CastWire.GroupAddress.ToString() : null, Port = ScreenWire.Port, Unicast = v.Udp is not null, Sound = s.Sound, Board = true,
         };
     }
 
@@ -651,6 +654,70 @@ public sealed class ScreenHost : IDisposable
             }
         }
         catch (OperationCanceledException) { }
+        return true;
+    }
+
+    // ------------------------------------------------------------------ the board and pointing
+
+    /// <summary>The board of my session (<paramref name="sessionId"/> null: whatever runs now). Null: no such session.</summary>
+    public BoardDto? BoardState(string? sessionId)
+    {
+        Session? s;
+        lock (_lock) s = _s;
+        return s is null || s.Ended || (sessionId is not null && s.Sid != sessionId) ? null : s.Board.State();
+    }
+
+    /// <summary>A change to my session's board, by me (host) or by a viewer. Everybody hears of it (my app at once, viewers on their stream).</summary>
+    public BoardOpDto BoardApply(string? sessionId, BoardOpDto op, string byId, string byName, bool host)
+    {
+        Session? s;
+        lock (_lock) s = _s;
+        if (s is null || s.Ended || (sessionId is not null && s.Sid != sessionId)) return new BoardOpDto { Op = op.Op, Error = "the sharing is over" };
+        var done = s.Board.Apply(op, byId, byName, host);
+        if (done.Error is null) _events.Publish("screenBoard", done);
+        else _log.LogDebug("screen board: refused from {Name}: {Why}", byName, done.Error);
+        return done;
+    }
+
+    /// <summary>
+    /// The board's changes after version <paramref name="since"/>, live, until the caller goes or the session ends.
+    /// False when those changes are no longer kept (the viewer starts over from the whole board).
+    /// </summary>
+    public async Task<bool> StreamBoardAsync(string sessionId, string clientId, long since, Func<IReadOnlyList<BoardOpDto>, Task> write, CancellationToken ct)
+    {
+        var s = Find(sessionId);
+        if (s is null) return true;
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, s.Cts.Token);
+        try
+        {
+            while (!linked.IsCancellationRequested && !s.Board.Closed)
+            {
+                var wait = s.Board.More();
+                var ops = s.Board.Since(since);
+                if (ops is null) return false;
+                if (ops.Count > 0)
+                {
+                    await write(ops);
+                    since = ops[^1].Rev;
+                    continue;
+                }
+                await Task.WhenAny(wait, Task.Delay(15_000, linked.Token));
+                if (!wait.IsCompleted) await write(Array.Empty<BoardOpDto>()); // (a keep-alive: an empty line)
+            }
+        }
+        catch (OperationCanceledException) { }
+        return true;
+    }
+
+    /// <summary>A viewer points at my shared picture: my app shows it on my screen.</summary>
+    public bool Point(string sessionId, string clientId, string clientName, ScreenPointDto point)
+    {
+        var s = Find(sessionId);
+        if (s is null || !s.Viewers.ContainsKey(clientId)) return false;
+        point.PeerId = clientId; point.PeerName = clientName;
+        point.X = Math.Clamp(point.X, 0, 1); point.Y = Math.Clamp(point.Y, 0, 1);
+        if (point.Kind is not (ScreenPointDto.Click or ScreenPointDto.Move or ScreenPointDto.Up)) point.Kind = ScreenPointDto.Click;
+        _events.Publish("screenPoint", point);
         return true;
     }
 

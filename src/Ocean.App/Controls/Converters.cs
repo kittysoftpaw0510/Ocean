@@ -85,11 +85,16 @@ public sealed class InitialsBrushConverter : IValueConverter
         Color.FromRgb(0xFB, 0xBF, 0x24), Color.FromRgb(0xA7, 0x8B, 0xFA), Color.FromRgb(0x34, 0xD3, 0x99),
         Color.FromRgb(0xFB, 0x92, 0x3C), Color.FromRgb(0x38, 0xBD, 0xF8),
     };
+    /// <summary>A node's own colour (its avatar, its ink and its pointer on a shared screen): the same on every PC.</summary>
+    public static Color ColorOf(string? id)
+    {
+        var h = 0; foreach (var ch in id ?? "") h = unchecked(h * 31 + ch);
+        return Palette[Math.Abs(h) % Palette.Length];
+    }
+
     public object Convert(object? value, Type t, object? p, CultureInfo c)
     {
-        var s = value?.ToString() ?? "";
-        var h = 0; foreach (var ch in s) h = unchecked(h * 31 + ch);
-        var brush = new SolidColorBrush(Palette[Math.Abs(h) % Palette.Length]);
+        var brush = new SolidColorBrush(ColorOf(value?.ToString()));
         brush.Freeze();
         return brush;
     }

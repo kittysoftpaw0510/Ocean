@@ -1,6 +1,7 @@
 <Window x:Class="Ocean.App.Views.ScreenViewWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Ocean.App.Views"
         Title="Screen" Width="960" Height="620" MinWidth="360" MinHeight="260" WindowStartupLocation="CenterScreen"
         Background="Black" Foreground="{StaticResource Text}" FontFamily="{StaticResource UiFont}">
     <!-- A shared screen (DataContext: ScreenViewVm). View only: nothing typed or clicked here reaches the other PC. -->
@@ -8,6 +9,27 @@
         <Border x:Name="StatusBar" DockPanel.Dock="Bottom" Background="{StaticResource Bg1}" BorderBrush="{StaticResource Border}" BorderThickness="0,1,0,0" Padding="12,6,8,6">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <!-- the board: shown or hidden here (a dot with how many new things while hidden) -->
+                    <Grid Visibility="{Binding CanPoint, Converter={StaticResource BoolToVis}}" Margin="0,0,2,0">
+                        <Button Width="30" Height="28" FontSize="13" Command="{Binding ToggleBoardCommand}" AutomationProperties.Name="The board"
+                                ToolTip="Board (B): draw, type and paste together with everybody in this sharing">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource BtnIcon}">
+                                    <Setter Property="Content" Value="&#xE70F;"/>
+                                    <Setter Property="Foreground" Value="{StaticResource Text}"/>
+                                    <Style.Triggers><DataTrigger Binding="{Binding Board.Visible}" Value="True"><Setter Property="Foreground" Value="#5EEAD4"/></DataTrigger></Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-3,-4,0" MinWidth="15" Height="15" CornerRadius="7.5" Background="#FB7185" Padding="3,0" IsHitTestVisible="False">
+                            <Border.Style>
+                                <Style TargetType="Border">
+                                    <Style.Triggers><DataTrigger Binding="{Binding Board.Unseen}" Value="0"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                            <TextBlock Text="{Binding Board.UnseenText}" FontSize="9.5" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="{StaticResource UiFont}"/>
+                                </Border>
+                    </Grid>
                     <!-- the host's sound here: on, off (M), or not shared at all -->
                     <Button Width="30" Height="28" FontSize="13" Command="{Binding ToggleMuteCommand}" ToolTip="{Binding SoundTip}" AutomationProperties.Name="Sound on or off">
                         <Button.Style>
@@ -47,6 +69,13 @@
         </Border>
         <Grid>
             <Image x:Name="Picture" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True"/>
+            <!-- where I pointed: a quick ring (the host sees it on their screen) -->
+            <Canvas x:Name="Points" IsHitTestVisible="False"/>
+            <!-- the board, over the picture's right side; its left edge resizes it -->
+            <Grid x:Name="BoardDock" HorizontalAlignment="Right" Margin="0,10,10,10" Visibility="Collapsed" Width="380">
+                <local:BoardView x:Name="Board"/>
+                <Thumb x:Name="BoardResize" HorizontalAlignment="Left" Width="8" Margin="-4,0,0,0" Cursor="SizeWE" Opacity="0" ToolTip="Drag to make the board wider or narrower"/>
+            </Grid>
             <!-- before the first picture -->
             <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding HasPicture, Converter={StaticResource InvBoolToVis}}">
                 <TextBlock Text="&#xE7F4;" Style="{StaticResource Icon}" FontSize="40" Foreground="{StaticResource TextDim}" HorizontalAlignment="Center"/>
