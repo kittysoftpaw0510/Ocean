@@ -18,13 +18,23 @@ namespace Ocean.Service.Screen;
 ///   sender picks what to share and then tells this PC which session to watch (<c>/p/screen/ready</c>);
 /// - "look at my screen" (kind watch, sent by <see cref="ScreenHost"/> for every invited PC): the user watches or
 ///   declines.
-/// A question needs the app (someone to ask): without it the answer is "away". It waits 45 s (2 min while the
-/// user picks what to share), one at a time per PC, and a PC can be muted (kept in screen-muted.json).
+/// A question needs the app (someone to ask): without it the answer is "away". "Show" and "offer" stay until the
+/// user answers (at most 10 min; the asker sees a waiting window with Cancel until then), and go at once when the
+/// asker takes them back, its Ocean is closed or its PC goes offline. "Watch" waits 45 s. One at a time per PC and
+/// kind; a PC can be muted (kept in screen-muted.json). When a "show" is allowed, the asker hears so at once
+/// (<c>/p/screen/progress</c>, "picking"), not only when the screen is shared after the picking.
 /// </summary>
 public sealed class ScreenAsks : IDisposable
 {
     private static readonly TimeSpan PickTime = TimeSpan.FromMinutes(2);
-    private static readonly TimeSpan RequestTimeout = TimeSpan.FromMinutes(3);
+    /// <summary>A "show" or "offer" question stays until it is answered: this long at most.</summary>
+    private static readonly TimeSpan PromptTimeout = TimeSpan.FromMinutes(10);
+    /// <summary>My own question: the other PC answers "timeout" first; this only covers a PC that never answers.</summary>
+    private static readonly TimeSpan RequestTimeout = PromptTimeout + TimeSpan.FromSeconds(30);
+    /// <summary>The other PC counted as offline this long: the question between us is over (the registry has waited already).</summary>
+    private static readonly TimeSpan GoneAfter = TimeSpan.FromSeconds(2);
+    /// <summary>My app gone this long (closed, crashed): my open questions are taken back.</summary>
+    private static readonly TimeSpan NoAppAfter = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan AskAgainAfter = TimeSpan.FromSeconds(10);
 
     private readonly ScreenHost _host;
@@ -41,6 +51,9 @@ public sealed class ScreenAsks : IDisposable
     /// <summary>My offers the other PC said yes to: waiting for this PC's user to pick and share.</summary>
     private readonly ConcurrentDictionary<string, (string PeerId, string PeerName, DateTimeOffset At)> _offered = new(StringComparer.Ordinal);
     private readonly HashSet<string> _muted = new(StringComparer.Ordinal);
+    /// <summary>Questions to or from this PC whose other PC is offline: since when.</summary>
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _askerGone = new(StringComparer.Ordinal);
+    private DateTimeOffset? _noAppSince;
     private readonly string _mutedPath = Path.Combine(OceanDefaults.DataDir, "screen-muted.json");
     private readonly Timer _tick;
 
@@ -70,7 +83,7 @@ public sealed class ScreenAsks : IDisposable
         var prompt = new ScreenPromptDto
         {
             AskId = ask.AskId, Kind = kind, PeerId = peerId, PeerName = peerName, SessionId = ask.SessionId,
-            Title = ask.Title is { Length: > 120 } t ? t[..120] : ask.Title, At = now, ExpiresAt = now + ScreenHost.AskTimeout,
+            Title = ask.Title is { Length: > 120 } t ? t[..120] : ask.Title, At = now, ExpiresAt = now + (kind == ScreenAskDto.Watch ? ScreenHost.AskTimeout : PromptTimeout),
         };
         _prompts[ask.AskId] = prompt;
         _log.LogInformation("screen sharing: {Name} asks {What}", peerName, kind == ScreenAskDto.Show ? "to see this PC's screen" : kind == ScreenAskDto.Offer ? "whether they may show their screen" : "this PC to look at their screen");
@@ -140,9 +153,10 @@ public sealed class ScreenAsks : IDisposable
             Send(p.PeerId, "/p/screen/answer", new ScreenAnswerDto { AskId = askId, Allow = true });
             return "ok";
         }
-        // kind show: into what I share already, or the user picks now
+        // kind show: into what I share already, or the user picks now (the asker hears at once that it is allowed)
         if (_host.Active) return Granted(askId) ? "ok" : "gone";
         p.ExpiresAt = DateTimeOffset.UtcNow + PickTime;
+        Send(p.PeerId, "/p/screen/progress", new ScreenAnswerDto { AskId = askId, Allow = true, Reason = "picking" });
         return "pick";
     }
 
@@ -242,6 +256,18 @@ public sealed class ScreenAsks : IDisposable
         return sid;
     }
 
+    /// <summary>
+    /// Word on my "show me your screen" question before its answer: allowed, they pick what to show now ("picking").
+    /// The question stays open (the answer with the session follows); the app closes its waiting window.
+    /// </summary>
+    public void Progress(string peerId, ScreenAnswerDto progress)
+    {
+        if (progress.Reason != "picking" || !_requests.TryGetValue(progress.AskId, out var r) || r.Dto.PeerId != peerId) return;
+        _requests[progress.AskId] = (r.Dto, DateTimeOffset.UtcNow); // (the picking may take a while)
+        _log.LogInformation("screen sharing: {Name} allowed and picks what to show", r.Dto.PeerName);
+        _events.Publish("screenRequest", new ScreenRequestDto { AskId = r.Dto.AskId, Kind = r.Dto.Kind, PeerId = peerId, PeerName = r.Dto.PeerName, State = "picking" });
+    }
+
     /// <summary>An answer from another PC: to my own question, or to an invitation of my session.</summary>
     public void Answered(string peerId, ScreenAnswerDto answer)
     {
@@ -277,6 +303,33 @@ public sealed class ScreenAsks : IDisposable
             if (_events.SubscriberCount == 0)
                 foreach (var p in _prompts.Values)
                     if (_prompts.TryRemove(p.AskId, out _)) Send(p.PeerId, "/p/screen/answer", new ScreenAnswerDto { AskId = p.AskId, Allow = false, Reason = "away" });
+            // a question whose asker is out of reach (switched off, left the network): nobody waits for the answer
+            foreach (var p in _prompts.Values)
+            {
+                if (_registry.TryGetOnline(p.PeerId, out _)) { _askerGone.TryRemove(p.AskId, out _); continue; }
+                var since = _askerGone.GetOrAdd(p.AskId, now);
+                if (now - since > GoneAfter && _prompts.TryRemove(p.AskId, out _)) { _askerGone.TryRemove(p.AskId, out _); Gone(p, "offline"); }
+            }
+            // my own question to a PC that went offline: nobody will answer it
+            foreach (var (id, r) in _requests)
+            {
+                if (_registry.TryGetOnline(r.Dto.PeerId, out _)) { _askerGone.TryRemove(id, out _); continue; }
+                var since = _askerGone.GetOrAdd(id, now);
+                if (now - since <= GoneAfter || !_requests.TryRemove(id, out _)) continue;
+                _askerGone.TryRemove(id, out _);
+                r.Dto.State = "unreachable"; r.Dto.Message = $"{r.Dto.PeerName} went offline.";
+                _log.LogInformation("screen sharing: {Name} went offline; the request is over", r.Dto.PeerName);
+                _events.Publish("screenRequest", r.Dto);
+            }
+            foreach (var id in _askerGone.Keys) if (!_prompts.ContainsKey(id) && !_requests.ContainsKey(id)) _askerGone.TryRemove(id, out _);
+            // my app went away (closed, crashed): my open questions are taken back, so nobody is left looking at them
+            if (_events.SubscriberCount > 0) _noAppSince = null;
+            else if (_noAppSince is null) _noAppSince = now;
+            else if (now - _noAppSince > NoAppAfter && (!_requests.IsEmpty || !_offered.IsEmpty))
+            {
+                _log.LogInformation("screen sharing: Ocean was closed; open requests taken back");
+                foreach (var id in _requests.Keys.Concat(_offered.Keys).ToList()) CancelRequest(id);
+            }
             // an offer said yes to, but its sender never shared (the picker left open, the app gone): over for both
             foreach (var (id, w) in _awaiting)
                 if (now - w.At > PickTime + TimeSpan.FromSeconds(30) && _awaiting.TryRemove(id, out _))

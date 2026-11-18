@@ -372,8 +372,15 @@ with the PC's sound or without. View only (nothing typed or clicked at the viewe
   share, and `POST /p/screen/ready {askId, sessionId}` tells the other PC where to watch (or `/cancel` when nothing
   was picked; either side gives up after 2 min). "Look at my screen" (`kind: watch`, sent by the host for every PC
   invited into a running session): watch or decline. A question needs
-  the app (`away` without one), waits 45 s (2 min while the user picks), one per PC and kind, not again within 10 s
-  of a decline, and a PC can be muted (`screen-muted.json`). Answers the asker may get: allowed, declined, timeout,
+  the app (`away` without one), one per PC and kind (asking again gives the same question), not again within 10 s
+  of a decline, and a PC can be muted (`screen-muted.json`). "Show" and "offer" stay until they are answered (10 min
+  at most; "watch" 45 s): the asker sees a waiting window (`ScreenWaitWindow`: over Ocean's main window, which
+  can't be used meanwhile; Ocean's bars and other windows can) with Cancel; the asked PC a card that stays. Either
+  goes as soon as the other side acts: an answer (an allowed "show" tells the asker at once with
+  `POST /p/screen/progress {reason: picking}`, before the picking), Cancel (`/p/screen/cancel`), the asker's Ocean
+  closed (its service takes its questions back after 8 s), either PC offline (2 s after the registry counts it as
+  offline). Measured between two test nodes: answer, cancel and decline 0.1 s; app closed 9 s; PC shut down 3 s;
+  switched off without a goodbye 20 s; the asked PC shut down: the asker's request over in 2.5 s. Answers the asker may get: allowed, declined, timeout,
   away, busy, muted, old (a 404: an Ocean without screen sharing).
 - **With everyone:** the session is in the catalog (`CatalogDto.Screen`, also in partial updates) and `PeerDto.Screen`;
   `peerScreen` tells the apps (LIVE mark, Home card, toast). It counts with the multicasts towards "at most 30 % of

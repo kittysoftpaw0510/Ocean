@@ -229,6 +229,14 @@ public static class PeerApi
             asks.Ready(PeerContext.Get(ctx).ClientId, ready);
             return Results.Ok();
         });
+        // word on my question before its answer ("picking": allowed, they pick what to show)
+        g.MapPost("/screen/progress", async (HttpContext ctx, ScreenAsks asks) =>
+        {
+            var progress = await ctx.Request.ReadFromJsonAsync<ScreenAnswerDto>(Json.Options, ctx.RequestAborted);
+            if (progress is null) return Results.BadRequest();
+            asks.Progress(PeerContext.Get(ctx).ClientId, progress);
+            return Results.Ok();
+        });
         g.MapPost("/screen/cancel", async (HttpContext ctx, ScreenAsks asks) =>
         {
             var answer = await ctx.Request.ReadFromJsonAsync<ScreenAnswerDto>(Json.Options, ctx.RequestAborted);

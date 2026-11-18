@@ -116,7 +116,7 @@ public sealed class ScreenPromptDto
     public string? Title { get; set; }
     public DateTimeOffset At { get; set; }
     public DateTimeOffset ExpiresAt { get; set; }
-    /// <summary>Set on the event when the request is over without the user (taken back, timed out).</summary>
+    /// <summary>Set on the event when the request is over without the user (withdrawn, timeout, offline).</summary>
     public string? Gone { get; set; }
 }
 
@@ -136,7 +136,10 @@ public sealed class ScreenRequestDto
     public string Kind { get; set; } = ScreenAskDto.Show;
     public string PeerId { get; set; } = "";
     public string PeerName { get; set; } = "";
-    /// <summary>waiting, allowed, declined, timeout, away, busy, muted, old (its Ocean has no screen sharing), unreachable.</summary>
+    /// <summary>
+    /// waiting, picking (allowed: they pick what to show; the answer with the session follows), allowed, declined,
+    /// timeout, away, busy, muted, old (its Ocean has no screen sharing), unreachable.
+    /// </summary>
     public string State { get; set; } = "waiting";
     public string? SessionId { get; set; }
     public string? Message { get; set; }

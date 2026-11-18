@@ -15,6 +15,9 @@ public interface IScreenUi
     Task<ScreenPick?> PickAsync(string heading, string detail);
     void ShowPrompt(ScreenPromptVm prompt);
     void ClosePrompt(string askId);
+    /// <summary>My request, waiting for the answer: stays (Ocean's main window can't be used meanwhile) until <see cref="CloseWaiting"/> or Cancel.</summary>
+    void ShowWaiting(ScreenWaitVm wait);
+    void CloseWaiting(string askId);
     void ShowViewer(ScreenViewVm view);
     void CloseViewer();
     /// <summary>The "you are sharing your screen" bar, kept on top of everything while a session runs.</summary>
@@ -55,6 +58,25 @@ public sealed partial class ScreenPromptVm : ObservableObject
         var s = (int)Math.Max(0, (Dto.ExpiresAt - DateTimeOffset.UtcNow).TotalSeconds);
         TimeLeft = s > 60 ? "" : $"{s} s";
     }
+}
+
+/// <summary>My screen request to another PC, waiting for its answer.</summary>
+public sealed partial class ScreenWaitVm : ObservableObject
+{
+    private readonly DateTime _since = DateTime.UtcNow;
+    public ScreenWaitVm(ScreenRequestDto r) { AskId = r.AskId; PeerId = r.PeerId; PeerName = r.PeerName; Kind = r.Kind; Tick(); }
+    public string AskId { get; }
+    public string PeerId { get; }
+    public string PeerName { get; }
+    public string Kind { get; }
+    public bool IsOffer => Kind == ScreenAskDto.Offer;
+    public string Headline => $"Waiting for {PeerName}";
+    public string What => IsOffer ? "You asked whether they want to see your screen" : "You asked to see their screen";
+    public string Detail => IsOffer
+        ? $"{PeerName} sees your request now. Once they say yes, you pick what they see; nothing is shared before that."
+        : $"{PeerName} sees your request now. If they allow it, they pick what you see, and it opens here by itself.";
+    [ObservableProperty] private string _elapsed = "0:00";
+    public void Tick() { var s = (int)(DateTime.UtcNow - _since).TotalSeconds; Elapsed = $"{s / 60}:{s % 60:00}"; }
 }
 
 /// <summary>The screen being watched (one at a time).</summary>
@@ -215,12 +237,12 @@ public sealed partial class ScreenViewModel : ObservableObject
         if (peer is null || !CanCapture()) return;
         if (!peer.Online) { _main.Toast("Offline", $"{peer.Label} is offline right now.", "warn"); return; }
         if (Mine is { Everyone: true }) { _main.Toast("Already shared with everyone", $"{peer.Label} can watch your screen from their Ocean (it shows LIVE next to your name).", "info"); return; }
+        if (WaitingFor(peer.Id)) return;
         try
         {
             var r = await _api.PostAsync<ScreenRequestDto>($"/api/screen/ask/{peer.Id}?kind={ScreenAskDto.Offer}", null);
             if (r is null) return;
-            if (r.State == "waiting")
-                _main.Toast("Asked", $"{peer.Label} is asked whether they want to see your screen. Once they say yes, you pick what they see.", "info");
+            if (r.State == "waiting") Wait(r);
             else _main.Toast("Couldn't ask", r.Message ?? $"{peer.Label} can't be asked right now.", "warn");
         }
         catch (Exception ex) { _main.Toast("Couldn't ask", ex.Message, "error"); }
@@ -349,7 +371,33 @@ public sealed partial class ScreenViewModel : ObservableObject
 
     // ------------------------------------------------------------------ asking to see someone's screen
 
-    private readonly HashSet<string> _waiting = new(StringComparer.Ordinal);
+    /// <summary>My requests waiting for an answer (each with its waiting window).</summary>
+    private readonly Dictionary<string, ScreenWaitVm> _asking = new(StringComparer.Ordinal);
+
+    /// <summary>A request to this PC is waiting already: its window comes to the front instead of a second request.</summary>
+    private bool WaitingFor(string peerId)
+    {
+        if (_asking.Values.FirstOrDefault(w => w.PeerId == peerId) is not { } open) return false;
+        Ui.ShowWaiting(open);
+        return true;
+    }
+
+    private void Wait(ScreenRequestDto r)
+    {
+        if (!_asking.TryGetValue(r.AskId, out var w)) { w = new ScreenWaitVm(r); _asking[r.AskId] = w; }
+        AppLog.Info("Screen", $"waiting for {r.PeerName}'s answer ({(r.Kind == ScreenAskDto.Offer ? "may I show you my screen" : "show me your screen")})");
+        Ui.ShowWaiting(w);
+    }
+
+    /// <summary>Cancel in the waiting window: the request is taken back (it disappears from their screen at once).</summary>
+    public async Task CancelWaitAsync(ScreenWaitVm w)
+    {
+        if (!_asking.Remove(w.AskId)) return;
+        Ui.CloseWaiting(w.AskId);
+        AppLog.Info("Screen", $"request to {w.PeerName} taken back");
+        try { await _api.DeleteAsync("/api/screen/ask/" + w.AskId); }
+        catch (Exception ex) { AppLog.Warn("Screen", "cancel request", ex); }
+    }
 
     [RelayCommand]
     private async Task Ask(PeerVm? peer)
@@ -358,15 +406,12 @@ public sealed partial class ScreenViewModel : ObservableObject
         if (peer.Screen is { } live) { await WatchAsync(peer.Id, live.SessionId); return; }
         if (!peer.Online) { _main.Toast("Offline", $"{peer.Label} is offline right now.", "warn"); return; }
         if (ScreenTools.Ffmpeg is null) { CanCapture(); return; }
+        if (WaitingFor(peer.Id)) return;
         try
         {
             var r = await _api.PostAsync<ScreenRequestDto>($"/api/screen/ask/{peer.Id}", null);
             if (r is null) return;
-            if (r.State == "waiting")
-            {
-                _waiting.Add(r.AskId);
-                _main.Toast("Asked", $"{peer.Label} is asked to show their screen. It opens here as soon as they allow it.", "info");
-            }
+            if (r.State == "waiting") Wait(r);
             else _main.Toast("Couldn't ask", r.Message ?? $"{peer.Label} can't be asked right now.", "warn");
         }
         catch (Exception ex) { _main.Toast("Couldn't ask", ex.Message, "error"); }
@@ -375,7 +420,14 @@ public sealed partial class ScreenViewModel : ObservableObject
     /// <summary>The answer to my question (event "screenRequest").</summary>
     public void ApplyRequest(ScreenRequestDto r)
     {
-        _waiting.Remove(r.AskId);
+        // answered (or allowed and being picked): the waiting window goes at once
+        if (_asking.Remove(r.AskId)) Ui.CloseWaiting(r.AskId);
+        if (r.State == "waiting") return;
+        if (r.State == "picking")
+        {
+            _main.Toast("Allowed", $"{r.PeerName} allowed it and is choosing what to show you. It opens here by itself.", "success");
+            return;
+        }
         if (r.Kind == ScreenAskDto.Offer)
         {
             if (r.State == "allowed") { AppLog.Info("Screen", $"{r.PeerName} wants to see this PC's screen"); _ = OfferAcceptedAsync(r); }
@@ -395,7 +447,7 @@ public sealed partial class ScreenViewModel : ObservableObject
         {
             if (!_prompts.Remove(dto.AskId)) return;
             Ui.ClosePrompt(dto.AskId);
-            _main.Toast(gone == "withdrawn" ? "Request taken back" : "Request timed out",
+            _main.Toast(gone == "withdrawn" ? "Request taken back" : gone == "offline" ? $"{dto.PeerName} went offline" : "Request timed out",
                 dto.Kind == ScreenAskDto.Show ? $"{dto.PeerName} no longer asks to see your screen." : $"{dto.PeerName}'s invitation to watch their screen is over.", "info");
             return;
         }
@@ -505,6 +557,13 @@ public sealed partial class ScreenViewModel : ObservableObject
 
     public async Task SyncAsync()
     {
+        // the service was restarted: my waiting requests are gone with it
+        foreach (var w in _asking.Values.ToList())
+        {
+            _asking.Remove(w.AskId);
+            Ui.CloseWaiting(w.AskId);
+            _main.Toast("Request interrupted", $"Ocean's service was restarted, so your request to {w.PeerName} is over. Ask again.", "warn");
+        }
         try
         {
             if (await _api.GetAsync<MyScreenDto>("/api/screen") is { } mine) ApplyMine(mine);

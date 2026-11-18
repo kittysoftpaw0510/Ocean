@@ -18,6 +18,7 @@ public sealed class ScreenUi : IScreenUi
 {
     private readonly ScreenViewModel _vm;
     private readonly Dictionary<string, ScreenPromptWindow> _prompts = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ScreenWaitWindow> _waits = new(StringComparer.Ordinal);
     private ScreenViewWindow? _viewer;
     private ScreenBarWindow? _bar;
     private RecordBarWindow? _recordBar;
@@ -44,6 +45,17 @@ public sealed class ScreenUi : IScreenUi
     }
 
     public void ClosePrompt(string askId) { if (_prompts.TryGetValue(askId, out var w)) w.Close(); }
+
+    public void ShowWaiting(ScreenWaitVm wait)
+    {
+        if (_waits.TryGetValue(wait.AskId, out var open)) { open.Activate(); open.Flash(); return; }
+        var w = new ScreenWaitWindow(wait, _vm);
+        _waits[wait.AskId] = w;
+        w.Closed += (_, _) => _waits.Remove(wait.AskId);
+        w.Open();
+    }
+
+    public void CloseWaiting(string askId) { if (_waits.TryGetValue(askId, out var w)) w.CloseForGood(); }
 
     /// <summary>Bottom right of the main screen's work area, the oldest lowest.</summary>
     private void Stack()
@@ -248,6 +260,95 @@ public partial class ScreenPromptWindow : Window
     private void Allow_Click(object sender, RoutedEventArgs e) => _ = _vm.AnswerAsync(_prompt, allow: true);
     private void Decline_Click(object sender, RoutedEventArgs e) => _ = _vm.AnswerAsync(_prompt, allow: false);
     private void Mute_Click(object sender, RoutedEventArgs e) => _ = _vm.AnswerAsync(_prompt, allow: false, mute: true);
+}
+
+/// <summary>
+/// My request, waiting for the other PC's answer: over Ocean's main window, which can't be used meanwhile (so no
+/// second request goes out). Ocean's other windows (the sharing and recording bars, other PCs' requests, a screen
+/// being watched) stay usable: not a ShowDialog, which would block them all. Closes as soon as the answer comes,
+/// or with Cancel (or Esc), which takes the request back. With the main window closed to the tray: on its own,
+/// on top, in the middle of the screen.
+/// </summary>
+public partial class ScreenWaitWindow : Window
+{
+    private readonly ScreenWaitVm _wait;
+    private readonly ScreenViewModel _vm;
+    private readonly DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(1) };
+    private Window? _locked;
+    private bool _closing;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool EnableWindow(IntPtr hWnd, bool enable);
+
+    public ScreenWaitWindow(ScreenWaitVm wait, ScreenViewModel vm)
+    {
+        _wait = wait; _vm = vm;
+        InitializeComponent();
+        DataContext = wait;
+        _clock.Tick += (_, _) => wait.Tick();
+        MouseLeftButtonDown += (_, e) => { if (e.ButtonState == MouseButtonState.Pressed) { try { DragMove(); } catch (InvalidOperationException) { } } };
+        // the dots breathe one after another
+        var dots = new[] { Dot1, Dot2, Dot3 };
+        for (var i = 0; i < dots.Length; i++)
+        {
+            var pulse = new DoubleAnimation(1, 0.25, TimeSpan.FromMilliseconds(600))
+            { AutoReverse = true, RepeatBehavior = RepeatBehavior.Forever, BeginTime = TimeSpan.FromMilliseconds(200 * i), EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut } };
+            Timeline.SetDesiredFrameRate(pulse, 20); // (a gentle pulse needs no more)
+            dots[i].BeginAnimation(OpacityProperty, pulse);
+        }
+    }
+
+    public void Open()
+    {
+        var main = Application.Current.MainWindow;
+        if (main is { IsVisible: true } && !ReferenceEquals(main, this))
+        {
+            Owner = main;
+            if (main.WindowState == WindowState.Minimized) main.WindowState = WindowState.Normal;
+            // the main window can't be clicked meanwhile (as under a dialog), the rest of Ocean can
+            var hwnd = new System.Windows.Interop.WindowInteropHelper(main).Handle;
+            if (hwnd != IntPtr.Zero) { EnableWindow(hwnd, false); _locked = main; }
+        }
+        else { WindowStartupLocation = WindowStartupLocation.CenterScreen; Topmost = true; }
+        _clock.Start();
+        Show();
+        Activate();
+    }
+
+    /// <summary>Asked again while waiting: a short nudge.</summary>
+    public void Flash()
+    {
+        var t = new TranslateTransform();
+        RenderTransform = t;
+        t.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimationUsingKeyFrames
+        {
+            KeyFrames = { new LinearDoubleKeyFrame(-6, KeyTime.FromPercent(0.2)), new LinearDoubleKeyFrame(6, KeyTime.FromPercent(0.5)), new LinearDoubleKeyFrame(-3, KeyTime.FromPercent(0.8)), new LinearDoubleKeyFrame(0, KeyTime.FromPercent(1)) },
+            Duration = TimeSpan.FromMilliseconds(280),
+        });
+    }
+
+    private void Cancel_Click(object sender, RoutedEventArgs e) => _ = _vm.CancelWaitAsync(_wait);
+
+    /// <summary>The answer came (or the request was taken back): it goes.</summary>
+    public void CloseForGood() { _closing = true; Close(); }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        // Alt+F4 takes the request back like Cancel (never a waiting request without its window)
+        if (!_closing) { e.Cancel = true; _ = _vm.CancelWaitAsync(_wait); return; }
+        base.OnClosing(e);
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _clock.Stop();
+        if (_locked is { } main)
+        {
+            var hwnd = new System.Windows.Interop.WindowInteropHelper(main).Handle;
+            if (hwnd != IntPtr.Zero) EnableWindow(hwnd, true);
+            main.Activate();
+        }
+        base.OnClosed(e);
+    }
 }
 
 /// <summary>
