@@ -148,6 +148,7 @@ public sealed class Updater : BackgroundService
         _stopping = ct;
         try { Directory.CreateDirectory(_dir); } catch { }
         Restore();
+        Tidy(); // (what an update left: its installer, once it has finished)
         await StartupChecksAsync("the service started", ct);
         while (!ct.IsCancellationRequested)
         {
@@ -247,6 +248,8 @@ public sealed class Updater : BackgroundService
             _log.LogInformation("update check ({Via}): latest {Latest}, this PC {Current}{Note}", via, rel.Version, Current, newer ? " - newer version available" : "");
             Announce(rel, newer);
             if (!newer) { Cleanup(null); return true; }
+            // installers of older versions (installed already, or passed over) go; the newest one's stays
+            Tidy();
             // Already downloaded and complete: ready, whatever the mode. Otherwise only auto-update fetches it now.
             if (InstallerOnDisk(rel) is { } path) Set(s => { s.Ready = true; s.InstallerPath = path; s.InstallerSize = rel.AssetSize; });
             else if (ModeOf(_config.Current) == UpdateModes.AutoUpdate) await DownloadAsync(rel, ct, quiet: !userAsked);
@@ -484,15 +487,44 @@ public sealed class Updater : BackgroundService
         return string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>Removes older downloads (and any leftover .part).</summary>
+    /// <summary>
+    /// Removes every download but <paramref name="keep"/> (and, while it is still coming, its ".part"). Each file on its
+    /// own: one that can't go yet (the installer that just updated Ocean is still running when the service starts
+    /// again, and a running program can't be deleted) doesn't keep the others, and is tried again every minute for
+    /// half an hour; after that the next check or start takes it.
+    /// </summary>
     private void Cleanup(string? keep)
     {
+        var left = new List<string>();
         try
         {
             foreach (var f in Directory.EnumerateFiles(_dir))
-                if (!string.Equals(f, keep, StringComparison.OrdinalIgnoreCase)) File.Delete(f);
+            {
+                if (keep is not null && (string.Equals(f, keep, StringComparison.OrdinalIgnoreCase) || string.Equals(f, keep + ".part", StringComparison.OrdinalIgnoreCase))) continue;
+                try { File.Delete(f); _log.LogInformation("update: removed {File}", Path.GetFileName(f)); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { left.Add(Path.GetFileName(f)); }
+            }
         }
-        catch { }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _log.LogDebug("update folder not readable: {Msg}", ex.Message); }
+        if (left.Count == 0) { _cleanupTries = 0; return; }
+        if (Interlocked.Exchange(ref _cleanupWaiting, 1) == 1) return; // (a try again is already on its way)
+        if (_cleanupTries++ < 30)
+        {
+            if (_cleanupTries == 1) _log.LogInformation("update: {Files} can't be removed yet (in use); trying again every minute", string.Join(", ", left));
+            _ = Task.Delay(TimeSpan.FromMinutes(1), _stopping).ContinueWith(t => { Interlocked.Exchange(ref _cleanupWaiting, 0); if (!t.IsCanceled) Tidy(); }, TaskScheduler.Default);
+        }
+        else { Interlocked.Exchange(ref _cleanupWaiting, 0); _cleanupTries = 0; _log.LogInformation("update: {Files} still in use; left for the next check", string.Join(", ", left)); }
+    }
+    private int _cleanupTries, _cleanupWaiting;
+
+    /// <summary>
+    /// What is downloaded that is no longer of use: every installer but the newest release's when that is newer than
+    /// this PC (it may be installed yet); everything when this PC is up to date.
+    /// </summary>
+    private void Tidy()
+    {
+        var keep = _found is { } rel && IsNewer(rel.Version, Current) ? Path.Combine(_dir, rel.AssetName) : null;
+        Cleanup(keep);
     }
 
     private void Set(Action<UpdateStatusDto> change)

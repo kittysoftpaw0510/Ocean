@@ -645,8 +645,11 @@ nor repeat checks, and a known newer version is announced right after a restart.
 address, shared by every PC behind one router) it reads `github.com/.../releases/latest`, which redirects to the tag,
 and takes the installer from its fixed address under `releases/download/vX.Y.Z/` (size from the download's headers).
 Every check is one line in the log. A newer `vX.Y.Z` with `Ocean-Setup-X.Y.Z.exe` is downloaded to `<data>\updates\`
-(`.part` then renamed; size must match, SHA-256 checked when the release has a `.sha256` asset; older files
-removed). The status (`GET /api/update`, `POST /api/update/check`, event `update`) drives the home-page banner
+(`.part` then renamed; size must match, SHA-256 checked when the release has a `.sha256` asset). Only the newest
+release's installer is kept, and only while it is newer than this PC: at every start and every check the others go
+(also while a newer version is only announced), each file on its own. The installer that just updated Ocean is
+still running when the new service starts, and a running program can't be deleted: it is tried again every minute
+for half an hour (measured: gone within a minute of the installer finishing). The status (`GET /api/update`, `POST /api/update/check`, event `update`) drives the home-page banner
 and *Settings > About*. The app runs the installer itself (`/SILENT /NORESTART /SUPPRESSMSGBOXES`, Windows asks
 for elevation); the installer stops the service and apps, installs and relaunches Ocean as the signed-in user
 (`postinstall runasoriginaluser`, no longer `skipifsilent`). `OCEAN_UPDATE_FROM=1.0.0` makes a dev node pretend
