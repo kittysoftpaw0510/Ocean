@@ -289,25 +289,27 @@ public static class ScreenSoundFrames
 // ---------------------------------------------------------------- the board and pointing (during a screen sharing)
 
 /// <summary>
-/// One thing on a sharing session's board: an ink stroke, a text or a pasted picture. Positions are in board units:
-/// the board is <see cref="BoardLimits.Width"/> wide on every PC (each panel scales it to its own width) and grows
-/// downwards. The author is set by the session's host, never taken from the sender.
+/// One thing on a sharing session's drawing: an ink stroke, a shape, a text or a pasted picture. Positions are in
+/// board units: the board is <see cref="BoardLimits.Width"/> wide on every PC (each panel scales it to its own
+/// width) and grows downwards. The author is set by the session's host, never taken from the sender.
 /// </summary>
 public sealed class BoardItemDto
 {
     public string Id { get; set; } = "";
-    /// <summary>ink, text, image.</summary>
+    /// <summary>ink, shape, text, image.</summary>
     public string Kind { get; set; } = "ink";
+    /// <summary>A shape: rect, ellipse, line, arrow (<see cref="BoardLimits.Shapes"/>).</summary>
+    public string? Shape { get; set; }
     public string AuthorId { get; set; } = "";
     public string AuthorName { get; set; } = "";
     public double X { get; set; }
     public double Y { get; set; }
-    /// <summary>Text and picture: the box (a text's width; its height follows the text).</summary>
+    /// <summary>Text and picture: the box (a text's width; its height follows the text). Ink and shape: their bounds.</summary>
     public double W { get; set; }
     public double H { get; set; }
-    /// <summary>Ink: x, y, x, y, … in board units.</summary>
+    /// <summary>Ink: x, y, x, y, … in board units. A shape: where it was drawn from and to (x1, y1, x2, y2; a rectangle's or an ellipse's corners).</summary>
     public List<double>? Points { get; set; }
-    /// <summary>Ink: the pen's width; text: the font size (board units).</summary>
+    /// <summary>Ink and shape: the pen's width; text: the font size (board units).</summary>
     public double Size { get; set; }
     /// <summary>#RRGGBB.</summary>
     public string? Color { get; set; }
@@ -316,13 +318,35 @@ public sealed class BoardItemDto
     public string? Image { get; set; }
 }
 
-/// <summary>A change to the board: put (add or replace an item), delete (an item), clear (everything; the sharer only).</summary>
+/// <summary>
+/// A change to the board.
+/// The drawing: put (add or replace an item), delete (an item, or several: <see cref="Ids"/>), clear (the whole
+/// drawing; anybody), restore (bring back items deleted or cleared: undo; they come back as they were, by their
+/// author). A delete of several, a clear and a restore answer with what they did (<see cref="Ids"/>,
+/// <see cref="Items"/>); everybody else gets one put or delete per item.
+/// The text page: text (an edit, <see cref="Edit"/>, made on version <see cref="Base"/> of the text; it comes
+/// back, and to everybody, as it was applied, with the text's new version <see cref="TextRev"/>), caret (where
+/// somebody's caret is, at version <see cref="Base"/>; nothing changes).
+/// </summary>
 public sealed class BoardOpDto
 {
-    public const string Put = "put", Delete = "delete", Clear = "clear";
+    public const string Put = "put", Delete = "delete", Clear = "clear", Restore = "restore", Text = "text", Caret = "caret";
     public string Op { get; set; } = Put;
     public BoardItemDto? Item { get; set; }
+    /// <summary>An item (delete); the sender's own name for an edit of the text (it knows its edit when it comes back).</summary>
     public string? Id { get; set; }
+    /// <summary>Several items: to delete, to restore; in an answer, the ones deleted, cleared.</summary>
+    public List<string>? Ids { get; set; }
+    /// <summary>An answer to restore: the items brought back.</summary>
+    public List<BoardItemDto>? Items { get; set; }
+    /// <summary>An edit of the text (<see cref="TextOp"/> on the wire).</summary>
+    public List<string>? Edit { get; set; }
+    /// <summary>The version of the text the edit or the caret is for.</summary>
+    public long Base { get; set; }
+    /// <summary>Set by the host: the text's version after the edit (with a caret: the version it is for now).</summary>
+    public long TextRev { get; set; }
+    /// <summary>The author's caret, after the edit.</summary>
+    public int? CaretAt { get; set; }
     /// <summary>Set by the host: the board's version after this change.</summary>
     public long Rev { get; set; }
     public string SessionId { get; set; } = "";
@@ -338,6 +362,9 @@ public sealed class BoardDto
     public string SessionId { get; set; } = "";
     public long Rev { get; set; }
     public List<BoardItemDto> Items { get; set; } = new();
+    /// <summary>The text page (null: the host's Ocean is older and has none).</summary>
+    public string? Text { get; set; }
+    public long TextRev { get; set; }
 }
 
 public static class BoardLimits
@@ -346,6 +373,9 @@ public static class BoardLimits
     public const int MaxItems = 3000;
     public const int MaxPoints = 20000;
     public const int MaxText = 20000;
+    /// <summary>The text page.</summary>
+    public const int MaxPage = 100_000;
+    public static readonly string[] Shapes = { "rect", "ellipse", "line", "arrow" };
     /// <summary>A pasted picture, base64 (pictures are made smaller before they are sent).</summary>
     public const int MaxImage = 3_000_000;
     public const long MaxBytes = 40_000_000;

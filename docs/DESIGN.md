@@ -446,12 +446,36 @@ with the PC's sound or without. View only (nothing typed or clicked at the viewe
   - Viewer: the speaker button (or M) turns it off here; it keeps running silent, so it comes back in step. It
     plays on the default output device and follows it when Windows says it changed (device notifications; also a
     check every 2 s): measured 0.2 to 0.3 s for a switch and for the device being unplugged.
-- **The board** (`ScreenBoard` at the host; app: `BoardVm`, `BoardView`, `BoardWindow`). Every session has one, kept by
-  its host and gone with it: ink strokes, texts and pictures (PNG/JPEG, base64, at most 1600 px), positioned in
-  board units (600 wide, growing downwards; every panel scales it to its own width, so it looks the same
-  everywhere). Changes: `put`, `delete`, `clear`, each numbered by the host. The host sets the author (never taken
-  from the sender); only the author changes an item, anybody wipes one away (the eraser), only the host clears it;
-  limits in `BoardLimits`. Viewers: `GET /p/screen/{id}/board`, then `GET /p/screen/{id}/board/stream?since=` (a line
+- **The board** (`ScreenBoard` at the host; app: `BoardVm`, `BoardTextVm`, `BoardView`, `BoardWindow`). Every session
+  has one, kept by its host and gone with it, with two pages (tabs on its bar: Draw, Text; a dot on a tab that
+  others changed while the other page was shown).
+  - **Draw:** ink strokes, shapes (rectangle, ellipse, line, arrow: kept as the two points they were drawn
+    between and drawn as strokes, so they look like ink and the eraser takes them like ink; Shift makes a square,
+    a circle, a line at 45°), texts and pictures (PNG/JPEG, base64, at most 1600 px), positioned in board units
+    (600 wide, growing downwards; every panel scales it to its own width, so it looks the same everywhere). A text
+    goes out as it is typed (a quarter second after the last key), so the others watch it being written. Changes:
+    `put`, `delete` (one or several), `clear`, `restore`, each numbered by the host. The host sets the author (never
+    taken from the sender); only the author changes an item; anybody wipes one away (the eraser) and anybody
+    clears; what goes is kept a while (the last 3000 items, 60 MB), and `restore` brings it back as it was, by its
+    author. That is undo: each person's own steps only (a stroke, a shape, a text typed or changed, a sweep of the
+    eraser, a paste, a clear; Ctrl+Z, Ctrl+Y and the two buttons), a step that no longer applies (somebody wiped my
+    stroke away) passed over. Clearing asks nothing: a line at the bottom says "Drawing cleared for everybody" with
+    *Undo*, and the others "Gabe cleared the drawing". Limits in `BoardLimits`.
+  - **Text:** one text everybody types in at once (at most 100 000 characters), with operational transformation
+    (`TextOp`, as ot.js): an edit is a walk over the whole text (keep, insert, delete), sent with the version it was
+    made on; the host transforms it past the edits that came in between (theirs first where both typed at the same
+    place), applies it, numbers it and sends it to everybody. An app has one edit on its way at a time (what is
+    typed meanwhile is joined into the next one) and transforms edits from others past its own, so nothing typed is
+    lost and the text ends up the same everywhere; edits from the host are applied strictly in their order (one
+    that comes early waits; one missing for 5 s: the text is loaded again). Each edit carries its author's caret,
+    and a caret moved without typing goes too (`caret`, at most 4 a second): the others' carets show in their
+    colour, with their name for a moment after they type, and "Gabe is typing…" on the bar. Undo and redo take back
+    my own typing only, also after others typed (my steps are transformed past their edits); typing in one go is
+    one step (a new line, a pause of a second or 5 s of typing starts another). Clear and Copy on its bar. Checked
+    with 300 random runs of three people typing, undoing and redoing at once with changes arriving in any order
+    (the host's own code, the app's own code): the same text everywhere every time, and between two test nodes.
+  - An older host has no text page and no shapes: the page says so, and a shape gets "the Ocean of the one sharing
+    is older: update it there". Viewers: `GET /p/screen/{id}/board`, then `GET /p/screen/{id}/board/stream?since=` (a line
   of JSON per change, an empty line as keep-alive, `reset` when the change is no longer kept), and
   `POST /p/screen/{id}/board` for their own; their service keeps a copy and tells the app (`viewBoard`). The host's
   app: `/api/screen/board`, events `screenBoard`. The app applies a change only if it is newer than what it has of
@@ -460,7 +484,8 @@ with the PC's sound or without. View only (nothing typed or clicked at the viewe
   picture's right side (its left edge resizes it; the width is remembered); at the host it floats on the desktop,
   kept out of the capture. How see-through: a small slider on its bar (remembered), and a little more while the
   mouse is elsewhere; what is on it always shows in full. Hidden, a badge counts others' new things; the first
-  thing somebody else puts on it opens it once by itself.
+  thing somebody else puts on it (or types) opens it once by itself, on that page. The close button (×) only hides
+  it here; the board goes on. A floating board, its shapes' choice and the bars open on the monitor shared.
 - **Pointing.** A click on the picture in the viewer sends where (parts of the picture's width and height:
   `POST /p/screen/{id}/point`, event `screenPoint` at the host: 21 ms between two test nodes); holding the button
   sends the pointer as it moves (30 a second at most) and `up`. The host's app maps it to what it shares (a screen,

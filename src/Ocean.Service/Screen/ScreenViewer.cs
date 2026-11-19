@@ -587,8 +587,12 @@ public sealed class ScreenViewer : IDisposable
                 var i = b.Items.FindIndex(x => x.Id == it.Id);
                 if (i >= 0) b.Items[i] = it; else b.Items.Add(it);
                 break;
-            case BoardOpDto.Delete: b.Items.RemoveAll(x => x.Id == op.Id); break;
+            case BoardOpDto.Delete: b.Items.RemoveAll(x => x.Id == op.Id || (op.Ids?.Contains(x.Id) ?? false)); break;
             case BoardOpDto.Clear: b.Items.Clear(); break;
+            case BoardOpDto.Text when b.Text is not null && op.TextRev == b.TextRev + 1 && TextOp.FromWire(op.Edit) is { } edit:
+                try { b.Text = edit.Apply(b.Text); b.TextRev = op.TextRev; }
+                catch (InvalidOperationException) { } // (can't be: the host applied it to the same text)
+                break;
         }
     }
 
@@ -598,7 +602,7 @@ public sealed class ScreenViewer : IDisposable
         View? v;
         lock (_lock) v = _v;
         if (v is null) return null;
-        lock (v.BoardGate) return v.Board is { } b ? new BoardDto { SessionId = b.SessionId, Rev = b.Rev, Items = b.Items.ToList() } : null;
+        lock (v.BoardGate) return v.Board is { } b ? new BoardDto { SessionId = b.SessionId, Rev = b.Rev, Items = b.Items.ToList(), Text = b.Text, TextRev = b.TextRev } : null;
     }
 
     /// <summary>A change by this PC's user, to the host (which hands it to everybody, this PC too).</summary>

@@ -223,9 +223,15 @@ public static class ScreenSources
     /// </summary>
     public static bool HideFromCapture(Window window)
     {
+        try { return HideFromCapture(new WindowInteropHelper(window).EnsureHandle()); }
+        catch { return false; }
+    }
+
+    /// <summary>The same for a window of ours that isn't a Window (a popup's).</summary>
+    public static bool HideFromCapture(IntPtr h)
+    {
         try
         {
-            var h = new WindowInteropHelper(window).EnsureHandle();
             if (SetWindowDisplayAffinity(h, 0x11 /* WDA_EXCLUDEFROMCAPTURE */)) return true;
             SetWindowDisplayAffinity(h, 0);
         }

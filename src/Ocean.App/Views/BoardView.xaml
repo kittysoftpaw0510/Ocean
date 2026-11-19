@@ -2,10 +2,12 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              FontFamily="{StaticResource UiFont}" Foreground="{StaticResource Text}" Focusable="True" FocusVisualStyle="{x:Null}">
-    <!-- A sharing session's board (DataContext: BoardVm): draw, type, paste; everybody in the session sees it.
+    <!-- A sharing session's board (DataContext: BoardVm): two pages, Draw (pen, shapes, text, eraser, pictures)
+         and Text (one text everybody types in at once). Everybody in the session sees both as they change.
          The background is as see-through as the slider says (and a little more while the mouse is elsewhere);
          what is on the board always shows in full. -->
     <UserControl.Resources>
+        <!-- a tool: an icon (a glyph, or a small drawing) that stays lit while chosen -->
         <Style x:Key="Tool" TargetType="RadioButton">
             <Setter Property="Width" Value="28"/>
             <Setter Property="Height" Value="26"/>
@@ -16,7 +18,7 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
                         <Border x:Name="Bd" Background="Transparent" CornerRadius="6">
-                            <TextBlock Text="{TemplateBinding Content}" FontFamily="Segoe MDL2 Assets" FontSize="14" Foreground="{TemplateBinding Foreground}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.FontFamily="Segoe MDL2 Assets" TextElement.FontSize="14"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="#1FFFFFFF"/></Trigger>
@@ -32,50 +34,179 @@
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="Foreground" Value="#C8D2E0"/>
         </Style>
+        <!-- a page's tab: Draw, Text; a dot when others changed it while the other page was shown -->
+        <Style x:Key="Tab" TargetType="RadioButton">
+            <Setter Property="Height" Value="22"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Foreground" Value="#93A3B8"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Bd" Background="Transparent" CornerRadius="5" Padding="9,0">
+                            <ContentPresenter VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="#1AFFFFFF"/><Setter Property="Foreground" Value="#E8EEF8"/></Trigger>
+                            <Trigger Property="IsChecked" Value="True"><Setter TargetName="Bd" Property="Background" Value="#402DD4BF"/><Setter Property="Foreground" Value="#5EEAD4"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- the shapes' icons (16 × 16), drawn in the tool's colour -->
+        <Style x:Key="Icon" TargetType="Path">
+            <Setter Property="Width" Value="16"/>
+            <Setter Property="Height" Value="16"/>
+            <Setter Property="StrokeThickness" Value="1.5"/>
+            <Setter Property="StrokeLineJoin" Value="Round"/>
+            <Setter Property="StrokeStartLineCap" Value="Round"/>
+            <Setter Property="StrokeEndLineCap" Value="Round"/>
+            <Setter Property="Stroke" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Control}}"/>
+        </Style>
+        <Geometry x:Key="ShapeRect">M2.5,3.5 H13.5 V12.5 H2.5 Z</Geometry>
+        <Geometry x:Key="ShapeEllipse">M2,8 A6,5 0 1 1 14,8 A6,5 0 1 1 2,8 Z</Geometry>
+        <Geometry x:Key="ShapeLine">M3,13 L13,3</Geometry>
+        <Geometry x:Key="ShapeArrow">M3,13 L13,3 M7.5,3 H13 V8.5</Geometry>
+        <!-- the text page: no frame of its own -->
+        <Style x:Key="Page" TargetType="TextBox">
+            <Setter Property="Foreground" Value="#E8EEF8"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="SelectionBrush" Value="{StaticResource AccentDim}"/>
+            <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="AcceptsReturn" Value="True"/>
+            <Setter Property="AcceptsTab" Value="True"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="IsUndoEnabled" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <ScrollViewer x:Name="PART_ContentHost" Padding="{TemplateBinding Padding}" Focusable="False"/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </UserControl.Resources>
     <Border x:Name="Frame" CornerRadius="10" BorderThickness="1" BorderBrush="#33FFFFFF" ClipToBounds="True">
         <Border.Background><SolidColorBrush x:Name="Back" Color="#0E1522"/></Border.Background>
         <DockPanel>
-            <!-- the bar: drag it (floating), the tools, how see-through, hide -->
-            <Border DockPanel.Dock="Top" x:Name="Bar" Background="#2A000000" Padding="6,3,4,3" CornerRadius="9,9,0,0">
-                <DockPanel>
-                    <Button DockPanel.Dock="Right" Style="{StaticResource Act}" Content="&#xE921;" Click="Hide_Click" ToolTip="Hide the board (it goes on; the Board button brings it back)" AutomationProperties.Name="Hide the board"/>
-                    <!-- how see-through: a small slider; the icon shows it too -->
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="4,0,2,0" ToolTip="How see-through the board is (only here; what is on it always shows in full)">
-                        <TextBlock Text="&#xE706;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="#93A3B8" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                        <Slider x:Name="See" Width="58" Minimum="0.25" Maximum="1" Value="{Binding Opacity, Mode=TwoWay}" VerticalAlignment="Center" IsMoveToPointEnabled="True"
-                                SmallChange="0.05" LargeChange="0.15" AutomationProperties.Name="How see-through the board is"/>
-                    </StackPanel>
-                    <StackPanel Orientation="Horizontal">
-                        <Border x:Name="Grip" Background="Transparent" Padding="2,0,8,0" Cursor="SizeAll" VerticalAlignment="Stretch" ToolTip="{Binding Title}">
-                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                <Ellipse Width="8" Height="8" Margin="2,0,6,0" VerticalAlignment="Center" x:Name="MyDot" ToolTip="Your colour"/>
-                                <TextBlock Text="Board" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center"/>
+            <Border DockPanel.Dock="Top" x:Name="Bar" Background="#2A000000" Padding="6,4,4,3" CornerRadius="9,9,0,0">
+                <StackPanel>
+                    <!-- the pages, how see-through, close; the rest of the row moves a floating board -->
+                    <DockPanel Height="26">
+                        <Button DockPanel.Dock="Right" Style="{StaticResource Act}" Content="&#xE8BB;" FontSize="10" Click="Close_Click"
+                                ToolTip="Close the board (it goes on; the Board button opens it again)" AutomationProperties.Name="Close the board"/>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="4,0,4,0" Background="Transparent" ToolTip="How see-through the board is (only here; what is on it always shows in full)">
+                            <TextBlock Text="&#xE706;" FontFamily="Segoe MDL2 Assets" FontSize="12" Foreground="#93A3B8" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                            <Slider x:Name="See" Width="52" Minimum="0.25" Maximum="1" Value="{Binding Opacity, Mode=TwoWay}" VerticalAlignment="Center" IsMoveToPointEnabled="True"
+                                    SmallChange="0.05" LargeChange="0.15" AutomationProperties.Name="How see-through the board is"/>
+                        </StackPanel>
+                        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+                            <Ellipse Width="8" Height="8" Margin="2,0,7,0" VerticalAlignment="Center" x:Name="MyDot" ToolTip="Your colour"/>
+                            <Border Background="#26000000" CornerRadius="7" Padding="2" VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal">
+                                    <RadioButton x:Name="DrawTab" Style="{StaticResource Tab}" GroupName="BoardPage" IsChecked="True" Checked="Page_Checked"
+                                                 ToolTip="Draw: pen, shapes, text and pictures" AutomationProperties.Name="Draw">
+                                        <Grid>
+                                            <TextBlock Text="Draw"/>
+                                            <Ellipse Width="6" Height="6" Fill="#F97316" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-1,-6,0"
+                                                     Visibility="{Binding DrawUnseen, Converter={StaticResource BoolToVis}}"/>
+                                        </Grid>
+                                    </RadioButton>
+                                    <RadioButton x:Name="TextTab" Style="{StaticResource Tab}" GroupName="BoardPage" Checked="Page_Checked"
+                                                 ToolTip="Text: one page everybody types in; each sees the others' typing as it happens" AutomationProperties.Name="Text">
+                                        <Grid>
+                                            <TextBlock Text="Text"/>
+                                            <Ellipse Width="6" Height="6" Fill="#F97316" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-1,-6,0"
+                                                     Visibility="{Binding TextUnseen, Converter={StaticResource BoolToVis}}"/>
+                                        </Grid>
+                                    </RadioButton>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                        <Border x:Name="Grip" Background="Transparent" Cursor="SizeAll" ToolTip="{Binding Title}"/>
+                    </DockPanel>
+                    <!-- the page's tools -->
+                    <Grid Margin="0,3,0,0">
+                        <StackPanel x:Name="DrawTools" Orientation="Horizontal">
+                            <RadioButton x:Name="PenTool" Style="{StaticResource Tool}" GroupName="BoardTool" Content="&#xE70F;" ToolTip="Pen (P)" Checked="Tool_Checked" IsChecked="True" AutomationProperties.Name="Pen"/>
+                            <RadioButton x:Name="ShapeTool" Style="{StaticResource Tool}" GroupName="BoardTool" Width="34" Checked="Tool_Checked" Click="ShapeTool_Click"
+                                         ToolTip="Shapes: rectangle (R), ellipse (O), line (L), arrow (A); hold Shift for a square, a circle, a straight line" AutomationProperties.Name="Shapes">
+                                <StackPanel Orientation="Horizontal">
+                                    <Path x:Name="ShapeIcon" Style="{StaticResource Icon}" Data="{StaticResource ShapeRect}"/>
+                                    <Path Style="{StaticResource Icon}" Width="6" Height="16" StrokeThickness="1.2" Margin="1,0,0,0" Data="M0.5,9 L3,11.5 L5.5,9" Opacity="0.8"/>
+                                </StackPanel>
+                            </RadioButton>
+                            <RadioButton x:Name="TextTool" Style="{StaticResource Tool}" GroupName="BoardTool" Content="&#xE8D2;" ToolTip="Text (T): click where it goes; click your own text to change it" Checked="Tool_Checked" AutomationProperties.Name="Text"/>
+                            <RadioButton x:Name="EraserTool" Style="{StaticResource Tool}" GroupName="BoardTool" Content="&#xE75C;" ToolTip="Eraser (E): wipe away what you touch" Checked="Tool_Checked" AutomationProperties.Name="Eraser"/>
+                            <Border Width="1" Height="14" Background="#33FFFFFF" Margin="4,0" VerticalAlignment="Center"/>
+                            <Button Style="{StaticResource Act}" Content="&#xE7A7;" Click="Undo_Click" IsEnabled="{Binding CanUndo}" ToolTip="Undo what you did (Ctrl+Z)" AutomationProperties.Name="Undo"/>
+                            <Button Style="{StaticResource Act}" Content="&#xE7A6;" Click="Redo_Click" IsEnabled="{Binding CanRedo}" ToolTip="Redo (Ctrl+Y)" AutomationProperties.Name="Redo"/>
+                            <Border Width="1" Height="14" Background="#33FFFFFF" Margin="4,0" VerticalAlignment="Center"/>
+                            <Button Style="{StaticResource Act}" Content="&#xE77F;" Click="Paste_Click" ToolTip="Paste a picture or text (Ctrl+V)" AutomationProperties.Name="Paste"/>
+                            <Button Style="{StaticResource Act}" Content="&#xE74D;" Click="Clear_Click" ToolTip="Clear the drawing for everybody (Undo brings it back)" AutomationProperties.Name="Clear the drawing"/>
+                        </StackPanel>
+                        <DockPanel x:Name="TextTools" Visibility="Collapsed">
+                            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+                                <Button Style="{StaticResource Act}" Content="&#xE7A7;" Click="Undo_Click" IsEnabled="{Binding TextPage.CanUndo}" ToolTip="Undo your typing (Ctrl+Z)" AutomationProperties.Name="Undo"/>
+                                <Button Style="{StaticResource Act}" Content="&#xE7A6;" Click="Redo_Click" IsEnabled="{Binding TextPage.CanRedo}" ToolTip="Redo (Ctrl+Y)" AutomationProperties.Name="Redo"/>
+                                <Border Width="1" Height="14" Background="#33FFFFFF" Margin="4,0" VerticalAlignment="Center"/>
+                                <Button Style="{StaticResource Act}" Content="&#xE8C8;" Click="Copy_Click" ToolTip="Copy all of the text" AutomationProperties.Name="Copy all of the text"/>
+                                <Button Style="{StaticResource Act}" Content="&#xE74D;" Click="Clear_Click" ToolTip="Clear the text for everybody (Undo brings it back)" AutomationProperties.Name="Clear the text"/>
                             </StackPanel>
-                        </Border>
-                        <RadioButton x:Name="PenTool" Style="{StaticResource Tool}" GroupName="BoardTool" Content="&#xE70F;" ToolTip="Pen (P)" Checked="Tool_Checked" IsChecked="True" AutomationProperties.Name="Pen"/>
-                        <RadioButton x:Name="TextTool" Style="{StaticResource Tool}" GroupName="BoardTool" Content="&#xE8D2;" ToolTip="Text (T): click where it goes; click your own text to change it" Checked="Tool_Checked" AutomationProperties.Name="Text"/>
-                        <RadioButton x:Name="EraserTool" Style="{StaticResource Tool}" GroupName="BoardTool" Content="&#xE75C;" ToolTip="Eraser (E): wipe away what you touch" Checked="Tool_Checked" AutomationProperties.Name="Eraser"/>
-                        <Border Width="1" Height="14" Background="#33FFFFFF" Margin="4,0" VerticalAlignment="Center"/>
-                        <Button Style="{StaticResource Act}" Content="&#xE77F;" Click="Paste_Click" ToolTip="Paste a picture or text (Ctrl+V)" AutomationProperties.Name="Paste"/>
-                        <Button x:Name="ClearButton" Style="{StaticResource Act}" Content="&#xE74D;" Click="Clear_Click" ToolTip="Clear the board for everybody" AutomationProperties.Name="Clear the board"/>
-                    </StackPanel>
-                </DockPanel>
+                            <!-- who is typing, in their colour -->
+                            <TextBlock x:Name="Typing" Text="{Binding TextPage.Typing}" FontSize="11.5" FontStyle="Italic" VerticalAlignment="Center" Margin="8,0,4,0" TextTrimming="CharacterEllipsis"/>
+                        </DockPanel>
+                    </Grid>
+                </StackPanel>
             </Border>
             <!-- my last change didn't go through -->
             <Border DockPanel.Dock="Bottom" Background="#CC7F1D1D" Padding="8,4" x:Name="ProblemBar" Visibility="Collapsed">
                 <TextBlock x:Name="ProblemText" Foreground="White" FontSize="12" TextWrapping="Wrap"/>
             </Border>
+            <!-- a short word: who cleared, or "cleared · Undo" for my own -->
+            <Border DockPanel.Dock="Bottom" Background="#E6172033" BorderBrush="#26FFFFFF" BorderThickness="0,1,0,0" Padding="10,3,4,3"
+                    Visibility="{Binding Notice, Converter={StaticResource NullToVis}}">
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="Undo" Click="NoticeUndo_Click" Cursor="Hand" Padding="8,2" FontSize="12" FontWeight="SemiBold" Foreground="#5EEAD4"
+                            Visibility="{Binding NoticeUndo, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Undo">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="Bd" Background="Transparent" CornerRadius="5" Padding="{TemplateBinding Padding}"><ContentPresenter/></Border>
+                                <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="#1FFFFFFF"/></Trigger></ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                    <TextBlock Text="{Binding Notice}" FontSize="12" Foreground="#C8D2E0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                </DockPanel>
+            </Border>
             <Grid>
-                <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
-                    <Grid x:Name="Scaled" HorizontalAlignment="Left" VerticalAlignment="Top">
-                        <Grid.LayoutTransform><ScaleTransform x:Name="Zoom"/></Grid.LayoutTransform>
-                        <InkCanvas x:Name="Ink" Width="600" Height="800" Background="Transparent" Cursor="Pen"/>
-                    </Grid>
-                </ScrollViewer>
-                <!-- nothing on it yet -->
-                <TextBlock x:Name="Empty" Text="Draw, type or paste here (Ctrl+V). Everybody in this sharing sees it." Foreground="#8094A9" FontSize="12.5" TextWrapping="Wrap" TextAlignment="Center"
-                           HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24" IsHitTestVisible="False"/>
+                <!-- the drawing -->
+                <Grid x:Name="DrawPagePanel">
+                    <ScrollViewer x:Name="Scroller" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+                        <Grid x:Name="Scaled" HorizontalAlignment="Left" VerticalAlignment="Top">
+                            <Grid.LayoutTransform><ScaleTransform x:Name="Zoom"/></Grid.LayoutTransform>
+                            <InkCanvas x:Name="Ink" Width="600" Height="800" Background="Transparent" Cursor="Pen"/>
+                        </Grid>
+                    </ScrollViewer>
+                    <TextBlock x:Name="Empty" Text="Draw, add shapes, type or paste here (Ctrl+V). Everybody in this sharing sees it." Foreground="#8094A9" FontSize="12.5" TextWrapping="Wrap" TextAlignment="Center"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24" IsHitTestVisible="False"/>
+                </Grid>
+                <!-- the text page: everybody's carets in their colour -->
+                <Grid x:Name="TextPagePanel" Visibility="Collapsed">
+                    <TextBox x:Name="PageBox" Style="{StaticResource Page}" Padding="10,8,4,8" AutomationProperties.Name="The text everybody types in"/>
+                    <Canvas x:Name="CaretLayer" IsHitTestVisible="False" ClipToBounds="True"/>
+                    <TextBlock x:Name="PageEmpty" Text="Type here. Everybody in this sharing sees it as you type." Foreground="#8094A9" FontSize="12.5" TextWrapping="Wrap" TextAlignment="Center"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24" IsHitTestVisible="False"/>
+                    <Border x:Name="PageOld" Background="#E60E1522" Visibility="Collapsed">
+                        <TextBlock Text="The Ocean of the one sharing is older and has no text page. Update it there to type here together." Foreground="#93A3B8" FontSize="12.5"
+                                   TextWrapping="Wrap" TextAlignment="Center" VerticalAlignment="Center" Margin="24"/>
+                    </Border>
+                </Grid>
             </Grid>
         </DockPanel>
     </Border>
