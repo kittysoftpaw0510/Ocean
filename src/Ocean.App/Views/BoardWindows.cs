@@ -21,14 +21,16 @@ namespace Ocean.App.Views;
 /// </summary>
 public sealed class BoardWindow : Window
 {
-    private static Rect? _last;
+    /// <summary>Where it was last (pixels): it comes back there while that is on the monitor shared.</summary>
+    private static Int32Rect? _last;
     private readonly BoardView _view = new();
     private readonly AllDesktops _allDesktops;
     private bool _closing;
 
     public BoardVm Board { get; }
 
-    public BoardWindow(BoardVm board)
+    /// <param name="shared">What is shared: the board opens on its monitor (top right), not on the main one.</param>
+    public BoardWindow(BoardVm board, ScreenPick? shared)
     {
         Board = board;
         Title = "Ocean: board";
@@ -36,20 +38,25 @@ public sealed class BoardWindow : Window
         ResizeMode = ResizeMode.CanResizeWithGrip; Topmost = true; ShowInTaskbar = false;
         MinWidth = 260; MinHeight = 220;
         WindowStartupLocation = WindowStartupLocation.Manual;
-        var area = SystemParameters.WorkArea;
-        var r = _last ?? new Rect(area.Right - 440 - 24, area.Top + 90, 440, Math.Min(560, area.Height - 140));
-        Left = r.Left; Top = r.Top; Width = r.Width; Height = r.Height;
+        Left = -32000; Top = -32000; Width = 440; Height = 560; // (placed once it has a window, below)
         _view.Attach(board);
         Content = _view;
         _view.DragArea.MouseLeftButtonDown += (_, e) => { if (e.ButtonState == MouseButtonState.Pressed) { try { DragMove(); } catch (InvalidOperationException) { } } };
-        SourceInitialized += (_, _) => ScreenSources.HideFromCapture(this);
+        SourceInitialized += (_, _) =>
+        {
+            ScreenSources.HideFromCapture(this);
+            var area = ScreenSources.WorkAreaOf(shared);
+            ScreenSources.PlaceIn(this, area, (_, _, s) => _last is { } was && ScreenSources.Inside(was, area)
+                ? was
+                : new Int32Rect(area.X + area.Width - (int)((440 + 24) * s), area.Y + (int)(90 * s), (int)(440 * s), (int)Math.Min(560 * s, area.Height - 140 * s)));
+        };
         _allDesktops = new AllDesktops(this);
         _allDesktops.Set(true);
         LocationChanged += (_, _) => Remember();
         SizeChanged += (_, _) => Remember();
     }
 
-    private void Remember() { if (IsLoaded && WindowState == WindowState.Normal) _last = new Rect(Left, Top, Width, Height); }
+    private void Remember() { if (IsLoaded && WindowState == WindowState.Normal && ScreenSources.PixelBounds(this) is { } r) _last = r; }
 
     public void CloseForGood() { _closing = true; _view.Detach(); _allDesktops.Dispose(); Close(); }
 

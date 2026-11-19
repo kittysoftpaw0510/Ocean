@@ -64,7 +64,7 @@ public sealed class ScreenUi : IScreenUi
     {
         if (_board is { } open && ReferenceEquals(open.Board, board)) { open.Show(); return; }
         _board?.CloseForGood();
-        _board = new BoardWindow(board);
+        _board = new BoardWindow(board, _vm.Sharing);
         _board.Show();
     }
 
@@ -205,10 +205,10 @@ public partial class RecordBarWindow : Window
         _allDesktops.Set(true);
         Loaded += (_, _) =>
         {
-            // top middle of the main screen; under the sharing bar when both run
-            var area = SystemParameters.WorkArea;
-            Left = area.Left + (area.Width - ActualWidth) / 2;
-            Top = below is { IsVisible: true } ? below.Top + below.ActualHeight : area.Top + 8;
+            // top middle of the monitor recorded (a window: the one it is on); under the sharing bar when that is there too
+            var area = ScreenSources.WorkAreaOf(vm.Target);
+            var under = below is { IsVisible: true } && ScreenSources.PixelBounds(below) is { } b && ScreenSources.Inside(b, area) ? b.Y + b.Height : (int?)null;
+            ScreenSources.PlaceIn(this, area, (w, _, s) => new Int32Rect(area.X + (area.Width - w) / 2, under ?? area.Y + (int)(8 * s), 0, 0));
         };
         SizeChanged += (_, e) => { if (e.WidthChanged && IsLoaded && e.PreviousSize.Width > 0) Left -= (e.NewSize.Width - e.PreviousSize.Width) / 2; };
         MouseLeftButtonDown += (_, e) => { if (e.ButtonState == MouseButtonState.Pressed) { try { DragMove(); } catch (InvalidOperationException) { } } };
@@ -385,10 +385,11 @@ public partial class ScreenBarWindow : Window
         SourceInitialized += (_, _) => ScreenSources.HideFromCapture(this);
         _allDesktops = new AllDesktops(this);
         _allDesktops.Set(true);
+        // top middle of the monitor that is shared (the main one for a window there, or when it can't be told)
         Loaded += (_, _) =>
         {
-            var area = SystemParameters.WorkArea;
-            Left = area.Left + (area.Width - ActualWidth) / 2; Top = area.Top + 8;
+            var area = ScreenSources.WorkAreaOf(vm.Sharing);
+            ScreenSources.PlaceIn(this, area, (w, _, s) => new Int32Rect(area.X + (area.Width - w) / 2, area.Y + (int)(8 * s), 0, 0));
         };
         SizeChanged += (_, e) => { if (e.WidthChanged && IsLoaded) Left -= (e.NewSize.Width - e.PreviousSize.Width) / 2; }; // grows around its middle
         MouseLeftButtonDown += (_, e) => { if (e.ButtonState == MouseButtonState.Pressed) { try { DragMove(); } catch (InvalidOperationException) { } } };

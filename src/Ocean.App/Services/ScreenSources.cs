@@ -248,6 +248,63 @@ public static class ScreenSources
         SetWindowPos(h, IntPtr.Zero, px.X, px.Y, px.Width, px.Height, 0x0014 /* NOZORDER | NOACTIVATE */);
     }
 
+    /// <summary>
+    /// The work area (the monitor without its taskbar), in pixels, of what is picked: its monitor (a whole one or a
+    /// part of one), or the monitor a window is mostly on right now; the main monitor when there is nothing picked.
+    /// </summary>
+    public static Int32Rect WorkAreaOf(ScreenPick? pick)
+    {
+        var mon = pick switch
+        {
+            { Kind: ScreenPick.Kinds.Window } when IsWindow(pick.Window) => MonitorFromWindow(pick.Window, 2 /* NEAREST */),
+            not null => pick.Monitor,
+            _ => IntPtr.Zero,
+        };
+        var mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+        if (mon == IntPtr.Zero || !GetMonitorInfo(mon, ref mi))
+        {
+            mi = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
+            if (!GetMonitorInfo(MonitorFromPoint(0, 1 /* PRIMARY */), ref mi)) return new Int32Rect(0, 0, 1280, 720);
+        }
+        var w = mi.rcWork;
+        return new Int32Rect(w.Left, w.Top, w.Right - w.Left, w.Bottom - w.Top);
+    }
+
+    /// <summary>A window of ours, in pixels (null before it has a handle).</summary>
+    public static Int32Rect? PixelBounds(Window window)
+    {
+        var h = new WindowInteropHelper(window).Handle;
+        return h != IntPtr.Zero && GetWindowRect(h, out var r) ? new Int32Rect(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top) : null;
+    }
+
+    /// <summary>
+    /// Puts a window of ours on a work area (pixels): first into its middle, so the window takes that monitor's
+    /// scale (monitors may differ), then where <paramref name="place"/> says, given the window's size in pixels
+    /// and that monitor's scale (1 = 96 dpi); it returns the top left, or a whole rectangle to resize it too.
+    /// </summary>
+    public static void PlaceIn(Window window, Int32Rect area, Func<int, int, double, Int32Rect> place)
+    {
+        var h = new WindowInteropHelper(window).EnsureHandle();
+        const uint flags = 0x0001 /* NOSIZE */ | 0x0004 /* NOZORDER */ | 0x0010 /* NOACTIVATE */;
+        SetWindowPos(h, IntPtr.Zero, area.X + area.Width / 2, area.Y + area.Height / 2, 0, 0, flags);
+        if (!GetWindowRect(h, out var r)) return;
+        var scale = GetDpiForWindow(h) is var dpi and > 0 ? dpi / 96.0 : 1.0;
+        var to = place(r.Right - r.Left, r.Bottom - r.Top, scale);
+        // never outside the work area
+        var w = to.Width > 0 ? Math.Min(to.Width, area.Width) : r.Right - r.Left;
+        var hh = to.Height > 0 ? Math.Min(to.Height, area.Height) : r.Bottom - r.Top;
+        var x = Math.Clamp(to.X, area.X, Math.Max(area.X, area.X + area.Width - w));
+        var y = Math.Clamp(to.Y, area.Y, Math.Max(area.Y, area.Y + area.Height - hh));
+        SetWindowPos(h, IntPtr.Zero, x, y, w, hh, to.Width > 0 ? flags & ~0x0001u : flags);
+    }
+
+    /// <summary>Whether the middle of a rectangle (pixels) lies in an area.</summary>
+    public static bool Inside(Int32Rect r, Int32Rect area)
+    {
+        int cx = r.X + r.Width / 2, cy = r.Y + r.Height / 2;
+        return cx >= area.X && cx < area.X + area.Width && cy >= area.Y && cy < area.Y + area.Height;
+    }
+
     // ---- native ----
 
     [StructLayout(LayoutKind.Sequential)] private struct RECT { public int Left, Top, Right, Bottom; }
@@ -271,6 +328,9 @@ public static class ScreenSources
     [DllImport("user32.dll")] private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
     [DllImport("user32.dll")] private static extern bool SetWindowDisplayAffinity(IntPtr hwnd, uint affinity);
     [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
+    [DllImport("user32.dll")] private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+    [DllImport("user32.dll")] private static extern IntPtr MonitorFromPoint(long point, uint flags);
+    [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
     [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attr, out int value, int size);
     [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attr, out RECT value, int size);

@@ -150,6 +150,8 @@ public sealed partial class ScreenViewModel : ObservableObject
     private ScreenSoundSender? _sound;
     /// <summary>What I share (for pointing: where on my screen a viewer's spot is).</summary>
     private ScreenPick? _pick;
+    /// <summary>What I share, if I do: the "sharing" bar and the board open on its monitor.</summary>
+    public ScreenPick? Sharing => _pick;
     private bool _stopping;
     /// <summary>Between asking the service to start and having the capture ready: the service's own word about the new session arrives in between.</summary>
     private bool _starting;
