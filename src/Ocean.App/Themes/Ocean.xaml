@@ -475,33 +475,81 @@
     </Style>
 
     <!-- ============================ scrollbars ============================ -->
+    <!-- Thin and quiet: a 4 px rounded line, faint while the mouse is elsewhere, clearer over what scrolls, a
+         little lighter over the bar itself and lighter still while dragged (it never grows). The whole 10 px strip
+         still takes the mouse (grab anywhere across it; a click beside the line pages). -->
     <Style x:Key="ScrollThumb" TargetType="Thumb">
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Thumb">
-                    <Border x:Name="Bd" Background="#3A4D70" CornerRadius="4" Margin="2"/>
+                    <Grid Background="Transparent">
+                        <Border x:Name="Bd" Background="#7486A8" CornerRadius="2" Width="4" Margin="0,2" HorizontalAlignment="Center" Opacity="0.4"/>
+                    </Grid>
                     <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="#5A6F95"/>
+                        <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Value="True">
+                            <Setter TargetName="Bd" Property="Opacity" Value="0.7"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ScrollBar}}" Value="True">
+                            <Setter TargetName="Bd" Property="Opacity" Value="1"/>
+                            <Setter TargetName="Bd" Property="Background" Value="#8FA1C2"/>
+                        </DataTrigger>
+                        <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="Bd" Property="Opacity" Value="1"/>
+                            <Setter TargetName="Bd" Property="Background" Value="#A3B3CF"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
     </Style>
+    <Style x:Key="ScrollThumbH" TargetType="Thumb">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Thumb">
+                    <Grid Background="Transparent">
+                        <Border x:Name="Bd" Background="#7486A8" CornerRadius="2" Height="4" Margin="2,0" VerticalAlignment="Center" Opacity="0.4"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ScrollViewer}}" Value="True">
+                            <Setter TargetName="Bd" Property="Opacity" Value="0.7"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ScrollBar}}" Value="True">
+                            <Setter TargetName="Bd" Property="Opacity" Value="1"/>
+                            <Setter TargetName="Bd" Property="Background" Value="#8FA1C2"/>
+                        </DataTrigger>
+                        <Trigger Property="IsDragging" Value="True">
+                            <Setter TargetName="Bd" Property="Opacity" Value="1"/>
+                            <Setter TargetName="Bd" Property="Background" Value="#A3B3CF"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <!-- (the page buttons either side of the line: nothing to see, but a click pages) -->
+    <Style x:Key="ScrollPage" TargetType="RepeatButton">
+        <Setter Property="Focusable" Value="False"/>
+        <Setter Property="IsTabStop" Value="False"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
     <Style TargetType="ScrollBar">
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Width" Value="10"/>
+        <Setter Property="MinWidth" Value="10"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ScrollBar">
                     <Grid Background="Transparent">
                         <Track x:Name="PART_Track" IsDirectionReversed="True">
                             <Track.DecreaseRepeatButton>
-                                <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0"/>
+                                <RepeatButton Command="ScrollBar.PageUpCommand" Style="{StaticResource ScrollPage}"/>
                             </Track.DecreaseRepeatButton>
                             <Track.IncreaseRepeatButton>
-                                <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0"/>
+                                <RepeatButton Command="ScrollBar.PageDownCommand" Style="{StaticResource ScrollPage}"/>
                             </Track.IncreaseRepeatButton>
                             <Track.Thumb>
                                 <Thumb Style="{StaticResource ScrollThumb}"/>
@@ -514,20 +562,22 @@
         <Style.Triggers>
             <Trigger Property="Orientation" Value="Horizontal">
                 <Setter Property="Width" Value="Auto"/>
+                <Setter Property="MinWidth" Value="0"/>
                 <Setter Property="Height" Value="10"/>
+                <Setter Property="MinHeight" Value="10"/>
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="ScrollBar">
                             <Grid Background="Transparent">
                                 <Track x:Name="PART_Track">
                                     <Track.DecreaseRepeatButton>
-                                        <RepeatButton Command="ScrollBar.PageLeftCommand" Opacity="0"/>
+                                        <RepeatButton Command="ScrollBar.PageLeftCommand" Style="{StaticResource ScrollPage}"/>
                                     </Track.DecreaseRepeatButton>
                                     <Track.IncreaseRepeatButton>
-                                        <RepeatButton Command="ScrollBar.PageRightCommand" Opacity="0"/>
+                                        <RepeatButton Command="ScrollBar.PageRightCommand" Style="{StaticResource ScrollPage}"/>
                                     </Track.IncreaseRepeatButton>
                                     <Track.Thumb>
-                                        <Thumb Style="{StaticResource ScrollThumb}"/>
+                                        <Thumb Style="{StaticResource ScrollThumbH}"/>
                                     </Track.Thumb>
                                 </Track>
                             </Grid>
