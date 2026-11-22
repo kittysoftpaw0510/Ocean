@@ -72,6 +72,27 @@ public sealed class ScreenViewer : IDisposable
     }
     /// <summary>For tests: this share (percent) of the data and parity packets is thrown away on arrival (OCEAN_TEST_SCREEN_DROP).</summary>
     private static readonly int TestDrop = int.TryParse(Environment.GetEnvironmentVariable("OCEAN_TEST_SCREEN_DROP"), out var d) ? Math.Clamp(d, 0, 100) : 0;
+    /// <summary>
+    /// (Developers) OCEAN_TEST_SCREEN_LINK="mbit,kb": packets come through a slower link with a small buffer in front of
+    /// it (a switch port of 100 Mbit/s, say), which drops what overflows the buffer, as a real one does.
+    /// </summary>
+    private static readonly (double Rate, double Buffer)? TestLink = Environment.GetEnvironmentVariable("OCEAN_TEST_SCREEN_LINK") is { Length: > 0 } link
+        && link.Split(',') is [var mbit, var kb] && double.TryParse(mbit, System.Globalization.CultureInfo.InvariantCulture, out var r) && double.TryParse(kb, System.Globalization.CultureInfo.InvariantCulture, out var b)
+        ? (r * 1_000_000 / 8, b * 1024) : null;
+    private double _linkQueue;
+    private long _linkAt = System.Diagnostics.Stopwatch.GetTimestamp();
+
+    /// <summary>The test link: true when the packet overflows its buffer (dropped).</summary>
+    private bool LinkDrops(int bytes)
+    {
+        if (TestLink is not { } link) return false;
+        var now = System.Diagnostics.Stopwatch.GetTimestamp();
+        _linkQueue = Math.Max(0, _linkQueue - (now - _linkAt) / (double)System.Diagnostics.Stopwatch.Frequency * link.Rate);
+        _linkAt = now;
+        if (_linkQueue + bytes > link.Buffer) return true;
+        _linkQueue += bytes;
+        return false;
+    }
 
     private sealed class View
     {
@@ -102,6 +123,7 @@ public sealed class ScreenViewer : IDisposable
         public int Lost, Recovered, Viewers;
         public volatile bool Ended;
         public volatile bool DirectNow;
+        public readonly DateTime WatchingSince = DateTime.UtcNow;
         public DateTime LastBeatOk = DateTime.UtcNow;
         // sound (all under SoundGate)
         public volatile bool Sound;
@@ -338,6 +360,15 @@ public sealed class ScreenViewer : IDisposable
         var directWait = TimeSpan.FromMilliseconds(200);
         var stickyUntil = DateTime.MinValue;
         var starts = new Queue<DateTime>();
+        // what the status says changes at most every 10 s once it says "direct" (a bad way shouldn't make it flicker)
+        var shownAt = DateTime.MinValue;
+        void Show(bool direct, DateTime at)
+        {
+            if (direct == v.DirectNow || (!direct && at - shownAt < TimeSpan.FromSeconds(10))) return;
+            v.DirectNow = direct;
+            if (direct) shownAt = at;
+            Publish(v);
+        }
         try
         {
             while (!linked.IsCancellationRequested && v.Pump == pump)
@@ -362,22 +393,29 @@ public sealed class ScreenViewer : IDisposable
                         lock (v.Gate) from = v.Next;
                         directCts = CancellationTokenSource.CreateLinkedTokenSource(linked.Token);
                         direct = DirectAsync(v, from, directCts.Token);
-                        directStarted = now; v.DirectNow = true;
+                        directStarted = now;
                         // packets that keep failing: stay on the direct connection for a while instead of going back and forth
                         starts.Enqueue(now);
                         while (starts.Count > 0 && now - starts.Peek() > TimeSpan.FromSeconds(20)) starts.Dequeue();
                         if (starts.Count >= 4) { stickyUntil = now + TimeSpan.FromSeconds(30); starts.Clear(); }
-                        Publish(v);
+                        // what the viewer is told: a gap filled now and then is still the packets ("Live"); the direct
+                        // connection is the way only while packets don't come at all, or keep failing (staying on it)
+                        bool packetsCome;
+                        // (the first seconds: packets are on their way, the picture starts over the connection meanwhile)
+                        lock (v.Gate) packetsCome = now - v.LastControl < TimeSpan.FromSeconds(2) || now - v.WatchingSince < TimeSpan.FromSeconds(3);
+                        var directNow = !packetsCome || now < stickyUntil;
+                        Show(directNow, now);
                     }
-                    else if (v.DirectNow && v.Next >= 0) { v.DirectNow = false; Publish(v); }
+                    else if (v.DirectNow && v.Next >= 0) Show(false, now);
                 }
+                // the direct connection says so once it stays: sticky, or a top-up that keeps going (packets keep failing)
+                else if (!v.DirectNow && (now < stickyUntil || now - directStarted > TimeSpan.FromSeconds(3))) Show(true, now);
                 else if (now >= stickyUntil && now - directStarted > TimeSpan.FromMilliseconds(600) && PacketsKeepUp(v, now))
                 {
                     directCts!.Cancel();
                     try { await direct; } catch { }
                     direct = null; directCts.Dispose(); directCts = null; directEnded = now; directWait = TimeSpan.Zero;
-                    v.DirectNow = false;
-                    Publish(v);
+                    Show(false, now);
                 }
                 if (!wrote)
                 {
@@ -665,6 +703,7 @@ public sealed class ScreenViewer : IDisposable
                 if (from is IPEndPoint src && !Net.LocalNetworks.IsLan(src.Address)) continue; // local network only
                 if (!CastWire.TryParse(packet.AsSpan(0, n), out var session, out var type, out var seq, out var payload) || session != v.Id) continue;
                 if (TestDrop > 0 && type != CastWire.TypeControl && Random.Shared.Next(100) < TestDrop) continue;
+                if (TestLink is not null && LinkDrops(n)) continue;
                 if (type == ScreenWire.TypeSound)
                 {
                     if (!CastWire.Open(aes, type, seq, payload, plain, out var slen)) continue;
@@ -747,9 +786,17 @@ public sealed class ScreenViewer : IDisposable
     private async Task BeatLoopAsync(View v)
     {
         var ct = v.Cts.Token;
+        var lossTold = 0;
         while (!ct.IsCancellationRequested)
         {
-            try { await Task.Delay(BeatEvery, ct); } catch (OperationCanceledException) { return; }
+            // every 5 s; sooner (after a second) when packets were lost meanwhile: the host slows its packets down then
+            var waited = TimeSpan.Zero;
+            while (waited < BeatEvery && !(waited >= TimeSpan.FromSeconds(1) && v.Lost + v.Recovered > lossTold))
+            {
+                try { await Task.Delay(TimeSpan.FromMilliseconds(250), ct); } catch (OperationCanceledException) { return; }
+                waited += TimeSpan.FromMilliseconds(250);
+            }
+            lossTold = v.Lost + v.Recovered;
             try
             {
                 if (_registry.TryGetOnline(v.PeerId, out var peer))

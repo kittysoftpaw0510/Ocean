@@ -45,6 +45,10 @@ public sealed class ScreenHost : IDisposable
         public IPEndPoint? Udp;      // packets straight to it (sessions for invited PCs)
         public bool Direct;
         public ScreenBeatDto Last = new();
+        /// <summary>How fast packets may go out to it (bytes a second), learnt from the losses it reports.</summary>
+        public double Pace = PaceStartRate;
+        public uint SeqAtBeat;
+        public int CleanBeats;
     }
 
     private sealed class Invited
@@ -94,6 +98,8 @@ public sealed class ScreenHost : IDisposable
         public volatile Socket? Unicast;
         /// <summary>Pacing a large picture out (a key picture is hundreds of packets): when the current burst began and its bytes.</summary>
         public long PaceStart, PaceBytes;
+        /// <summary>The pace now: the slowest of what the viewers' ways take (see <see cref="Adapt"/>).</summary>
+        public double PaceRate = PaceStartRate;
         public long Sent;
         public bool WantedTold;
     }
@@ -479,22 +485,29 @@ public sealed class ScreenHost : IDisposable
     }
 
     /// <summary>
-    /// A large picture goes out at most this fast (bytes a second) after a first burst: hundreds of packets at
-    /// once overrun a Wi-Fi access point and are lost. 20 MB/s (160 Mbit/s) is far above any picture's rate, so a
-    /// key picture of 300 KB takes about 15 ms. The wait is exact (a sleep of 1 ms is up to 15.6 ms on Windows).
+    /// A large picture goes out at a pace (bytes a second) after a short first burst: hundreds of packets at once
+    /// overrun a Wi-Fi access point, or a switch in front of a slower link (a 100 Mbit/s port, a USB adapter, an old
+    /// hub), and the end of every key picture is lost. The pace starts at 8 MB/s (64 Mbit/s: a key picture of 300 KB
+    /// in under 40 ms, and safe on 100 Mbit/s); each viewer's reports of lost packets bring it down at once (to as low
+    /// as 3 MB/s), and clean reports take it back up, a little at a time, to 20 MB/s. The wait is exact (a sleep of
+    /// 1 ms is up to 15.6 ms on Windows).
     /// </summary>
-    private const double PaceRate = 20_000_000;
-    private const int PaceBurst = 32 * 1024;
+    private const double PaceStartRate = 8_000_000, PaceMinRate = 3_000_000, PaceMaxRate = 20_000_000;
+    /// <summary>(Developers) OCEAN_TEST_SCREEN_FIXED_PACE=1: the pace of before (20 MB/s always), to compare.</summary>
+    private static readonly bool FixedPace = Environment.GetEnvironmentVariable("OCEAN_TEST_SCREEN_FIXED_PACE") == "1";
 
     private static void Pace(Session s, int bytes)
     {
+        var rate = FixedPace ? PaceMaxRate : Volatile.Read(ref s.PaceRate);
+        // the first burst: about 2 ms' worth (12 to 32 KB)
+        var burst = FixedPace ? 32 * 1024 : Math.Clamp(rate * 0.002, 12 * 1024, 32 * 1024);
         var now = System.Diagnostics.Stopwatch.GetTimestamp();
         var freq = (double)System.Diagnostics.Stopwatch.Frequency;
         // a new picture after a pause starts a new burst
-        if ((now - s.PaceStart) / freq > Math.Max(0.02, s.PaceBytes / PaceRate + 0.005)) { s.PaceStart = now; s.PaceBytes = 0; }
+        if ((now - s.PaceStart) / freq > Math.Max(0.02, s.PaceBytes / rate + 0.005)) { s.PaceStart = now; s.PaceBytes = 0; }
         s.PaceBytes += bytes;
-        if (s.PaceBytes <= PaceBurst) return;
-        var due = s.PaceStart + (long)((s.PaceBytes - PaceBurst) / PaceRate * freq);
+        if (s.PaceBytes <= burst) return;
+        var due = s.PaceStart + (long)((s.PaceBytes - burst) / rate * freq);
         while (true)
         {
             var left = (due - System.Diagnostics.Stopwatch.GetTimestamp()) / freq;
@@ -610,9 +623,45 @@ public sealed class ScreenHost : IDisposable
         var s = Find(sessionId);
         if (s is null || !s.Viewers.TryGetValue(clientId, out var v)) return new ScreenStateDto { SessionId = sessionId, Ended = true };
         var was = v.Direct;
+        var before = v.Last;
         v.LastBeat = DateTimeOffset.UtcNow; v.Direct = beat.Direct; v.Last = beat;
-        if (was != beat.Direct) _log.LogInformation("screen sharing: {Viewer} now gets it {How}", v.Name, beat.Direct ? "directly (no usable UDP)" : "by UDP");
+        if (was != beat.Direct) _log.LogInformation("screen sharing: {Viewer} now gets it {How}", v.Name, beat.Direct ? "directly (packets keep getting lost)" : "by UDP");
+        Adapt(s, v, before, beat);
         return new ScreenStateDto { SessionId = sessionId, Viewers = Live(s).Count, Sound = s.Sound };
+    }
+
+    /// <summary>
+    /// The pace follows what each viewer's way takes: packets it lost (rebuilt or not) since its last report, against
+    /// the packets sent meanwhile. Any real loss slows its pace at once (by half above 2 %); after about 30 s without
+    /// loss it goes up a tenth (a way that took more before is tried again slowly, not every few seconds). The session
+    /// goes at its slowest viewer's pace (one stream goes to all).
+    /// </summary>
+    private void Adapt(Session s, Viewer v, ScreenBeatDto before, ScreenBeatDto now)
+    {
+        uint seq;
+        lock (s.SendLock) seq = s.Seq;
+        var sent = (long)(seq - v.SeqAtBeat);
+        v.SeqAtBeat = seq;
+        if (v.Udp is null && !s.Everyone) return;              // no packets go to it
+        var lost = Math.Max(0, now.Lost + now.Recovered - before.Lost - before.Recovered);
+        if (sent <= 0 || now.BytesUdp + now.BytesDirect == 0) return;
+        var share = lost / (double)Math.Max(sent, lost);
+        var old = v.Pace;
+        if (lost > 0 && share > 0.002)
+        {
+            v.Pace = Math.Max(PaceMinRate, v.Pace * (share > 0.02 ? 0.5 : 0.75));
+            v.CleanBeats = 0;
+        }
+        else if (lost == 0 && sent >= 30)
+        {
+            // (clean reports for about 30 s before speeding up: one quiet stretch says little)
+            if (++v.CleanBeats >= 6) { v.Pace = Math.Min(PaceMaxRate, v.Pace * 1.1); v.CleanBeats = 0; }
+        }
+        var pace = s.Viewers.Values.Where(x => x.Udp is not null || s.Everyone).Select(x => x.Pace).DefaultIfEmpty(PaceStartRate).Min();
+        Volatile.Write(ref s.PaceRate, pace);
+        if (v.Pace < old)
+            _log.LogInformation("screen sharing: {Viewer} lost {Lost} of {Sent} packets ({Share:0.#} %): packets go out slower, at {Pace:0.#} MB/s",
+                v.Name, lost, sent, share * 100, v.Pace / 1_000_000);
     }
 
     public void Leave(string sessionId, string clientId)
