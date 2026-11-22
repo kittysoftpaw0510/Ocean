@@ -24,17 +24,25 @@ namespace Ocean.Service.Screen;
 /// Every stream over the direct connection has a watchdog: a connection that goes quiet (the PC in between was
 /// switched off or left the network, which closes nothing: it just goes silent) is dropped after a few seconds and
 /// opened again, through another PC in between when there is one; an answer that doesn't begin is given up too.
-/// The sound, when the host shares it, comes as its own packets (each with the frame before it) and goes to the
-/// app as it arrives (<c>/api/screen/view/sound</c>), where it is put in order and played on time; frames still
-/// missing then are concealed, not waited for. Without packets it comes over the direct connection.
+/// The sound, when the host shares it, comes both ways at once: as its own packets (each with the frame before it)
+/// and over the direct connection, always (it is little: about 15 KB a second). Whichever brings a frame first
+/// wins; the other copy is dropped. So a lost packet costs nothing, a burst of losses (Wi-Fi) costs nothing, and
+/// without packets (a PC in between, a network without UDP) nothing changes. It goes to the app as it arrives
+/// (<c>/api/screen/view/sound</c>), where it is put in order and played on time.
 /// </summary>
 public sealed class ScreenViewer : IDisposable
 {
     private static readonly TimeSpan BeatEvery = TimeSpan.FromSeconds(5);
     /// <summary>How long an answer may take to begin (the host waits for a key picture at most a few seconds).</summary>
     private static readonly TimeSpan AnswerWithin = TimeSpan.FromSeconds(12);
-    /// <summary>The picture and the sound keep coming while a session runs (a still screen too): this long without a byte, the connection is dead.</summary>
-    private static readonly TimeSpan QuietPicture = TimeSpan.FromSeconds(8), QuietSound = TimeSpan.FromSeconds(8);
+    /// <summary>The picture keeps coming while a session runs (a still screen too): this long without a byte, the connection is dead.</summary>
+    private static readonly TimeSpan QuietPicture = TimeSpan.FromSeconds(8);
+    /// <summary>
+    /// The sound's connection: a host that says so (X-Ocean-KeepAlive) sends something every second, silence too,
+    /// so 5 s without a byte is a broken way. An older host sends nothing while the sharing PC is silent: its
+    /// connection is only opened again after a while, and never taken for a PC in between that went away.
+    /// </summary>
+    private static readonly TimeSpan QuietSound = TimeSpan.FromSeconds(5), QuietSoundOld = TimeSpan.FromSeconds(30);
     /// <summary>The board's stream has a keep-alive every 5 s.</summary>
     private static readonly TimeSpan QuietBoard = TimeSpan.FromSeconds(15);
 
@@ -438,9 +446,10 @@ public sealed class ScreenViewer : IDisposable
 
     // ------------------------------------------------------------------ sound
 
-    /// <summary>A sound frame from either source: on to the app unless it came already (packets carry each frame twice).</summary>
+    /// <summary>A sound frame from either source: on to the app unless it came already (packets carry each frame twice, and the connection brings it once more).</summary>
     private static void DeliverSound(View v, in ScreenSoundFrames.Frame f, bool udp)
     {
+        if (f.Data.Length == 0) return; // (the connection's "still here" while the sharing PC is silent)
         lock (v.SoundGate)
         {
             if (udp) v.LastUdpSound = DateTime.UtcNow;
@@ -454,9 +463,8 @@ public sealed class ScreenViewer : IDisposable
 
     /// <summary>
     /// The sound for the app's player, as it arrives (the player puts it in order), until the app closes it or the
-    /// session ends. Silent while the host has the sound off. Without packets (none for 2 s, or the sound's packets
-    /// stay behind what the host says it sent) it comes over the direct connection, and goes back to packets as
-    /// soon as they arrive again.
+    /// session ends. Silent while the host has the sound off. While it is on, the direct connection brings it
+    /// alongside the packets (see the class); a connection that broke is opened again after a second.
     /// </summary>
     public async Task<bool> StreamSoundAsync(Func<IReadOnlyList<ScreenSoundFrames.Frame>, Task> write, CancellationToken ct)
     {
@@ -480,20 +488,15 @@ public sealed class ScreenViewer : IDisposable
                 while (output.Reader.TryRead(out var f)) batch.Add(f);
                 if (batch.Count > 0) await write(batch);
                 var now = DateTime.UtcNow;
-                DateTime lastControl, lastUdp, behindSince;
-                lock (v.Gate) lastControl = v.LastControl;
-                lock (v.SoundGate) { lastUdp = v.LastUdpSound; behindSince = v.SoundBehindSince; }
-                var noPackets = now - lastControl > TimeSpan.FromSeconds(2);
-                var soundMissing = behindSince != DateTime.MaxValue && now - behindSince > TimeSpan.FromMilliseconds(500);
                 if (direct is { IsCompleted: true }) { direct = null; directCts?.Dispose(); directCts = null; directEnded = now; }
-                if (direct is null && v.Sound && (noPackets || soundMissing) && now - directEnded > TimeSpan.FromSeconds(1))
+                if (direct is null && v.Sound && now - directEnded > TimeSpan.FromSeconds(1))
                 {
                     long from;
                     lock (v.SoundGate) from = v.SoundNewest;
                     directCts = CancellationTokenSource.CreateLinkedTokenSource(linked.Token);
                     direct = DirectSoundAsync(v, from, directCts.Token);
                 }
-                else if (direct is not null && (!v.Sound || (!noPackets && now - lastUdp < TimeSpan.FromMilliseconds(500))))
+                else if (direct is not null && !v.Sound)
                 {
                     directCts!.Cancel();
                     try { await direct; } catch { }
@@ -520,17 +523,24 @@ public sealed class ScreenViewer : IDisposable
 
     private async Task DirectSoundAsync(View v, long after, CancellationToken ct)
     {
+        var keepAlive = false;
         try
         {
             if (!_registry.TryGetOnline(v.PeerId, out var peer)) return;
-            using var resp = await OpenStreamAsync(peer, $"/p/screen/{v.Sid}/sound?after={after}", ct);
+            using var resp = await OpenStreamAsync(peer, $"/p/screen/{v.Sid}/sound?after={after}&ka=1", ct);
             if (!resp.IsSuccessStatusCode) return; // (an older host has no sound)
+            keepAlive = resp.Headers.Contains("X-Ocean-KeepAlive");
             await using var stream = await resp.Content.ReadAsStreamAsync(ct);
             var header = new byte[ScreenSoundFrames.HeaderSize];
-            while (await Within(t => ScreenSoundFrames.ReadAsync(stream, header, t), QuietSound, ct) is { } f) DeliverSound(v, f, udp: false);
+            while (await Within(t => ScreenSoundFrames.ReadAsync(stream, header, t), keepAlive ? QuietSound : QuietSoundOld, ct) is { } f) DeliverSound(v, f, udp: false);
         }
         catch (OperationCanceledException) { }
-        catch (TimeoutException ex) { Quiet(v, $"/p/screen/{v.Sid}/sound"); _log.LogDebug("screen: the sound's connection went quiet ({Msg}); opening it again", ex.Message); }
+        catch (TimeoutException ex)
+        {
+            // only a connection that promised to keep talking and didn't says the way is broken
+            if (keepAlive) Quiet(v, $"/p/screen/{v.Sid}/sound");
+            _log.LogDebug("screen: the sound's connection went quiet ({Msg}); opening it again", ex.Message);
+        }
         catch (Exception ex) { _log.LogDebug("screen: direct sound: {Msg}", ex.Message); }
     }
 
@@ -760,6 +770,11 @@ public sealed class ScreenViewer : IDisposable
                             Listen(v, "no packets for a while");
                     }
                 }
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // no answer within 8 s: the PC in between (if any) is probably gone; the next report goes another way
+                Quiet(v, $"/p/screen/{v.Sid}/beat");
             }
             catch (OperationCanceledException) { }
             catch (Exception ex) { _log.LogDebug("screen beat: {Msg}", ex.Message); }

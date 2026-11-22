@@ -198,27 +198,41 @@ public sealed class ScreenAsks : IDisposable
         if (_requests.Values.FirstOrDefault(r => r.Dto.PeerId == peerId && r.Dto.Kind == kind && r.Dto.State == "waiting") is { Dto: not null } open) return open.Dto;
         var dto = new ScreenRequestDto { AskId = Guid.NewGuid().ToString("N"), Kind = kind, PeerId = peerId, PeerName = name };
         if (!_registry.TryGetOnline(peerId, out var peer)) { dto.State = "unreachable"; dto.Message = $"{name} is offline."; return dto; }
-        try
+        // a way that fails for a moment (through another PC above all: two connections, a bridge just busy) is tried
+        // again for up to 25 s; asking twice is harmless (the same question id is one question at the other PC)
+        var until = DateTime.UtcNow + TimeSpan.FromSeconds(25);
+        for (var attempt = 0; ; attempt++)
         {
-            var req = _client.Build(peer, HttpMethod.Post, "/p/screen/ask");
-            req.Content = JsonContent.Create(new ScreenAskDto { AskId = dto.AskId, Kind = kind }, options: Json.Options);
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(10_000);
-            using var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseContentRead, cts.Token);
-            if (!resp.IsSuccessStatusCode)
+            try
             {
-                var err = resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed ? null : await resp.Content.ReadFromJsonAsync<ErrorDto>(Json.Options, cts.Token);
+                if (attempt > 0 && !_registry.TryGetOnline(peerId, out peer)) { dto.State = "unreachable"; dto.Message = $"{name} went offline."; return dto; }
+                var req = _client.Build(peer, HttpMethod.Post, "/p/screen/ask");
+                req.Content = JsonContent.Create(new ScreenAskDto { AskId = dto.AskId, Kind = kind }, options: Json.Options);
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                cts.CancelAfter(TimeSpan.FromSeconds(Math.Clamp((until - DateTime.UtcNow).TotalSeconds, 3, 12)));
+                using var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseContentRead, cts.Token);
+                if (resp.IsSuccessStatusCode) break;
+                var err = resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed ? null : await ReadError(resp, cts.Token);
+                // the way's own failure (a bridge: 502/503/504), not the other PC's answer: again, while there is time
+                if (err?.Error is not ("away" or "muted" or "busy" or "unsupported") && (int)resp.StatusCode >= 500 && DateTime.UtcNow < until)
+                    throw new HttpRequestException($"the way answered {(int)resp.StatusCode}");
                 dto.State = resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed ? "old" : err?.Error is "away" or "muted" or "busy" ? err.Error : "unreachable";
                 dto.Message = err?.Error == "unsupported" && peer.Bridged
                     ? $"{name} is on another network and reached only through another PC, whose Ocean is too old to pass screen sharing on. Update Ocean on that PC (it is the one shown under {name}'s name)."
                     : Explain(dto.State, name);
                 return dto;
             }
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            dto.State = "unreachable"; dto.Message = $"{name} can't be reached right now.";
-            return dto;
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                if (DateTime.UtcNow >= until)
+                {
+                    _log.LogInformation("screen sharing: {Name} can't be asked: {Msg}", name, ex.Message);
+                    dto.State = "unreachable"; dto.Message = $"{name} can't be reached right now.";
+                    return dto;
+                }
+                _log.LogInformation("screen sharing: asking {Name} failed ({Msg}); again", name, ex.Message);
+                try { await Task.Delay(TimeSpan.FromSeconds(Math.Min(4, 1 + attempt)), ct); } catch (OperationCanceledException) { throw; }
+            }
         }
         _requests[dto.AskId] = (dto, DateTimeOffset.UtcNow);
         _log.LogInformation("screen sharing: asked {Name} {What}", name, kind == ScreenAskDto.Offer ? "whether they want to see this PC's screen" : "to show their screen");
@@ -348,23 +362,49 @@ public sealed class ScreenAsks : IDisposable
         catch (Exception ex) { _log.LogDebug(ex, "screen asks tick"); }
     }
 
+    private static async Task<ErrorDto?> ReadError(HttpResponseMessage resp, CancellationToken ct)
+    {
+        try { return await resp.Content.ReadFromJsonAsync<ErrorDto>(Json.Options, ct); }
+        catch { return null; } // (a bridge's own failure may carry no body)
+    }
+
+    /// <summary>Waits between the tries of a word to another PC: soon at first, then less often; about a minute in all.</summary>
+    private static readonly TimeSpan[] SendWaits = { TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(8), TimeSpan.FromSeconds(12), TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15) };
+
+    /// <summary>
+    /// A word to another PC (an answer, "picking", "ready", a cancel): until it arrives, for about a minute. Each
+    /// carries its question's id, so one that arrives twice changes nothing. A PC that is offline for a moment (its
+    /// way through another PC being renewed) is waited for; a way that fails (a bridge's 5xx) is tried again.
+    /// Without this, a lost answer left the asker's waiting window up for ten minutes.
+    /// </summary>
     private void Send(string peerId, string path, object body)
     {
         _ = Task.Run(async () =>
         {
-            for (var attempt = 0; attempt < 2; attempt++)
+            for (var attempt = 0; ; attempt++)
             {
+                string why;
                 try
                 {
-                    if (!_registry.TryGetOnline(peerId, out var peer)) return;
-                    var req = _client.Build(peer, HttpMethod.Post, path);
-                    req.Content = JsonContent.Create(body, body.GetType(), options: Json.Options);
-                    using var cts = new CancellationTokenSource(8000);
-                    using var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+                    if (_registry.TryGetOnline(peerId, out var peer))
+                    {
+                        var req = _client.Build(peer, HttpMethod.Post, path);
+                        req.Content = JsonContent.Create(body, body.GetType(), options: Json.Options);
+                        using var cts = new CancellationTokenSource(10_000);
+                        using var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+                        if ((int)resp.StatusCode < 500) return; // there (also "not known there": nothing more to do)
+                        why = $"answered {(int)resp.StatusCode}";
+                    }
+                    else why = "offline";
+                }
+                catch (Exception ex) { why = ex.Message; }
+                if (attempt >= SendWaits.Length)
+                {
+                    _log.LogInformation("screen sharing: {Path} didn't reach {Peer} ({Why})", path, _peers.NameOf(peerId), why);
                     return;
                 }
-                catch (Exception ex) { _log.LogDebug("screen sharing: {Path} to {Peer}: {Msg}", path, _peers.NameOf(peerId), ex.Message); }
-                await Task.Delay(1500);
+                _log.LogDebug("screen sharing: {Path} to {Peer}: {Why}; again", path, _peers.NameOf(peerId), why);
+                await Task.Delay(SendWaits[attempt]);
             }
         });
     }

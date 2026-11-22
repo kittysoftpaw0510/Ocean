@@ -68,7 +68,12 @@ public sealed class ScreenHost : IDisposable
         public readonly ScreenRing Ring = new();
         public readonly ScreenSoundRing SoundRing = new();
         public ScreenBoard Board = null!;
-        public ScreenSoundFrames.Frame? LastSound; // (under SendLock)
+        // the sound goes out on its own (under SoundLock), never waiting behind a picture: its own numbers (the
+        // nonce has the packet's type in it, so they never meet the picture's) and its own cipher
+        public readonly object SoundLock = new();
+        public AesGcm? SoundAes;
+        public uint SoundSeq;
+        public ScreenSoundFrames.Frame? LastSound;
         public long SoundSent;
         public readonly ConcurrentDictionary<string, Viewer> Viewers = new(StringComparer.Ordinal);
         public readonly ConcurrentDictionary<string, Invited> People = new(StringComparer.Ordinal);
@@ -84,8 +89,11 @@ public sealed class ScreenHost : IDisposable
         public AesGcm? Aes;
         public uint Seq;
         public readonly List<(uint Seq, byte[] Sealed)> Group = new(CastWire.Group);
-        public readonly List<Socket> Multicast = new();
-        public Socket? Unicast;
+        // (replaced whole when the network changes: the sound sends on them without SendLock)
+        public volatile Socket[] Multicast = Array.Empty<Socket>();
+        public volatile Socket? Unicast;
+        /// <summary>Pacing a large picture out (a key picture is hundreds of packets): when the current burst began and its bytes.</summary>
+        public long PaceStart, PaceBytes;
         public long Sent;
         public bool WantedTold;
     }
@@ -138,6 +146,7 @@ public sealed class ScreenHost : IDisposable
                 Everyone = req.Everyone, Sound = req.Sound, StartedAt = DateTimeOffset.UtcNow,
             };
             s.Aes = new AesGcm(s.Key, 16);
+            s.SoundAes = new AesGcm(s.Key, 16);
             s.Board = new ScreenBoard(s.Sid);
             _s = s;
         }
@@ -236,7 +245,7 @@ public sealed class ScreenHost : IDisposable
         if (s.Sound != on)
         {
             s.Sound = on;
-            lock (s.SendLock) s.LastSound = null;
+            lock (s.SoundLock) s.LastSound = null;
             _log.LogInformation("screen sharing: sound {OnOff}", on ? "on" : "off");
             SendControl(s);
         }
@@ -277,11 +286,12 @@ public sealed class ScreenHost : IDisposable
         }
         lock (s.SendLock)
         {
-            foreach (var sock in s.Multicast) sock.Dispose();
-            s.Multicast.Clear();
+            var multi = s.Multicast; s.Multicast = Array.Empty<Socket>();
+            foreach (var sock in multi) sock.Dispose();
             s.Unicast?.Dispose(); s.Unicast = null;
             s.Aes?.Dispose(); s.Aes = null;
         }
+        lock (s.SoundLock) { s.SoundAes?.Dispose(); s.SoundAes = null; }
         if (s.Everyone) _catalog.NotifyCastChanged();
         var st = Status();
         st.Ended = why;
@@ -421,19 +431,23 @@ public sealed class ScreenHost : IDisposable
 
     // ------------------------------------------------------------------ packets out
 
+    /// <summary>Under SendLock. The new sockets replace the old ones whole (the sound may be sending on them meanwhile).</summary>
     private void OpenSockets(Session s)
     {
-        foreach (var old in s.Multicast) old.Dispose();
-        s.Multicast.Clear();
-        s.Unicast?.Dispose(); s.Unicast = null;
+        var oldMulti = s.Multicast; var oldUni = s.Unicast;
+        s.Multicast = Array.Empty<Socket>(); s.Unicast = null;
+        foreach (var old in oldMulti) old.Dispose();
+        oldUni?.Dispose();
         try
         {
-            s.Unicast = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            s.Unicast.Bind(new IPEndPoint(IPAddress.Any, 0));
-            s.Unicast.SendBufferSize = 2 * 1024 * 1024;
+            var uni = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            uni.Bind(new IPEndPoint(IPAddress.Any, 0));
+            uni.SendBufferSize = 2 * 1024 * 1024;
+            s.Unicast = uni;
         }
         catch (Exception ex) { _log.LogDebug("screen sharing: no UDP socket: {Msg}", ex.Message); }
         if (!s.Everyone) return;
+        var multi = new List<Socket>();
         var peerAddrs = _registry.Snapshot().Where(p => p.Online && !p.Bridged).SelectMany(p => p.Addresses.Keys.Append(p.Address));
         var adapters = LocalNetworks.MulticastAddresses(peerAddrs);
         foreach (var (addr, _) in adapters)
@@ -446,21 +460,49 @@ public sealed class ScreenHost : IDisposable
                 sock.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastTimeToLive, 1);
                 sock.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.MulticastLoopback, true);
                 sock.SendBufferSize = 2 * 1024 * 1024;
-                s.Multicast.Add(sock);
+                multi.Add(sock);
             }
             catch (Exception ex) { _log.LogDebug("screen sharing: no sender on {Addr}: {Msg}", addr, ex.Message); }
         }
-        _log.LogInformation("screen sharing: packets go out on {Adapters}", s.Multicast.Count == 0 ? "no adapter (viewers get it directly)" : string.Join(", ", adapters.Select(a => $"{a.Adapter} ({a.Address})")));
+        s.Multicast = multi.ToArray();
+        _log.LogInformation("screen sharing: packets go out on {Adapters}", multi.Count == 0 ? "no adapter (viewers get it directly)" : string.Join(", ", adapters.Select(a => $"{a.Adapter} ({a.Address})")));
     }
 
     private static readonly IPEndPoint GroupTarget = new(CastWire.GroupAddress, ScreenWire.Port);
 
-    /// <summary>Under SendLock.</summary>
-    private void Emit(Session s, byte[] packet)
+    /// <summary>To the group, or straight to each viewer that gets packets. (A UDP socket may be sent on from two threads at once.)</summary>
+    private static void Emit(Session s, byte[] packet)
     {
         foreach (var sock in s.Multicast) { try { sock.SendTo(packet, GroupTarget); } catch { } }
         if (s.Unicast is { } uni && !s.Everyone)
             foreach (var v in s.Viewers.Values) { if (v.Udp is { } ep) { try { uni.SendTo(packet, ep); } catch { } } }
+    }
+
+    /// <summary>
+    /// A large picture goes out at most this fast (bytes a second) after a first burst: hundreds of packets at
+    /// once overrun a Wi-Fi access point and are lost. 20 MB/s (160 Mbit/s) is far above any picture's rate, so a
+    /// key picture of 300 KB takes about 15 ms. The wait is exact (a sleep of 1 ms is up to 15.6 ms on Windows).
+    /// </summary>
+    private const double PaceRate = 20_000_000;
+    private const int PaceBurst = 32 * 1024;
+
+    private static void Pace(Session s, int bytes)
+    {
+        var now = System.Diagnostics.Stopwatch.GetTimestamp();
+        var freq = (double)System.Diagnostics.Stopwatch.Frequency;
+        // a new picture after a pause starts a new burst
+        if ((now - s.PaceStart) / freq > Math.Max(0.02, s.PaceBytes / PaceRate + 0.005)) { s.PaceStart = now; s.PaceBytes = 0; }
+        s.PaceBytes += bytes;
+        if (s.PaceBytes <= PaceBurst) return;
+        var due = s.PaceStart + (long)((s.PaceBytes - PaceBurst) / PaceRate * freq);
+        while (true)
+        {
+            var left = (due - System.Diagnostics.Stopwatch.GetTimestamp()) / freq;
+            if (left <= 0) return;
+            if (left > 0.003) Thread.Sleep(1);
+            else if (left > 0.0002) Thread.Yield();
+            else Thread.SpinWait(20);
+        }
     }
 
     private void SendData(Session s, long offset, ReadOnlySpan<byte> bytes)
@@ -469,18 +511,18 @@ public sealed class ScreenHost : IDisposable
         {
             if (s.Aes is not { } aes) return;
             if (s.NetworkChanged) { s.NetworkChanged = false; OpenSockets(s); }
-            var burst = 0;
             while (bytes.Length > 0)
             {
                 var n = Math.Min(CastWire.DataChunk, bytes.Length);
                 var sealedData = CastWire.Seal(aes, CastWire.TypeData, s.Seq, CastWire.DataPlain(offset, bytes[..n]));
-                Emit(s, CastWire.Build(s.Id, CastWire.TypeData, s.Seq, sealedData));
+                var packet = CastWire.Build(s.Id, CastWire.TypeData, s.Seq, sealedData);
+                // a key picture is hundreds of packets: not all in one burst (Wi-Fi drops those)
+                Pace(s, packet.Length);
+                Emit(s, packet);
                 s.Group.Add((s.Seq, sealedData));
                 s.Seq++;
                 offset += n; bytes = bytes[n..]; s.Sent += n;
                 if (s.Group.Count == CastWire.Group) FlushGroup(s);
-                // a key picture is a hundred packets and more: not all in one burst (Wi-Fi drops those)
-                if (++burst % 24 == 0) Thread.Sleep(1);
             }
             // the end of what came in one go is the end of a picture: its parity goes with it, not with the next picture
             FlushGroup(s);
@@ -497,17 +539,19 @@ public sealed class ScreenHost : IDisposable
 
     private void FlushGroup(Session s) => FlushGroupPackets(s, p => Emit(s, p));
 
-    /// <summary>A sound frame as one packet, with the frame before it (no parity: a lost packet is in the next one).</summary>
+    /// <summary>
+    /// A sound frame as one packet, with the frame before it (no parity: a lost packet is in the next one). It goes
+    /// at once, never behind a picture being paced out (its own lock, numbers and cipher).
+    /// </summary>
     private void SendSound(Session s, ScreenSoundFrames.Frame f)
     {
-        lock (s.SendLock)
+        lock (s.SoundLock)
         {
-            if (s.Aes is not { } aes) return;
-            if (s.NetworkChanged) { s.NetworkChanged = false; OpenSockets(s); }
+            if (s.SoundAes is not { } aes) return;
             var before = s.LastSound is { } b && b.Seq + 1 == f.Seq ? b : (ScreenSoundFrames.Frame?)null;
             var plain = ScreenWire.SoundPlain(f, before);
-            Emit(s, CastWire.Build(s.Id, ScreenWire.TypeSound, s.Seq, CastWire.Seal(aes, ScreenWire.TypeSound, s.Seq, plain)));
-            s.Seq++;
+            var seq = s.SoundSeq++;
+            Emit(s, CastWire.Build(s.Id, ScreenWire.TypeSound, seq, CastWire.Seal(aes, ScreenWire.TypeSound, seq, plain)));
             s.LastSound = f;
             s.SoundSent += f.Data.Length;
         }
@@ -582,9 +626,18 @@ public sealed class ScreenHost : IDisposable
     }
 
     /// <summary>
+    /// A viewer whose stream is this far behind the live picture (a slow way, a PC in between) is moved on to the
+    /// latest key picture rather than falling further behind: a live picture that comes ever later is worse than
+    /// one that skips a moment.
+    /// </summary>
+    private static readonly TimeSpan BehindLimit = TimeSpan.FromSeconds(1.5);
+
+    /// <summary>
     /// The stream from <paramref name="from"/> on, live, until the caller goes or the session ends. -1: from the
     /// latest key picture (waits for one when the encoder is just starting). <paramref name="started"/> gets the
-    /// offset it really starts at, before the first byte. Returns false when those bytes are gone already.
+    /// offset it really starts at, before the first byte. Returns false when those bytes are gone already, or are
+    /// so far behind (<see cref="BehindLimit"/>) that the viewer should start again at the latest key picture; a
+    /// stream that falls that far behind ends (the viewer asks again from where it was and is told so).
     /// </summary>
     public async Task<bool> StreamAsync(string sessionId, string clientId, long from, long to, Func<long, Task> started, Func<ReadOnlyMemory<byte>, Task> write, CancellationToken ct)
     {
@@ -608,10 +661,17 @@ public sealed class ScreenHost : IDisposable
                     linked.Token.ThrowIfCancellationRequested();
                 }
             }
+            else if (to <= 0 && FarBehind(s, from)) return false;
             await started(from);
             var buffer = new byte[64 * 1024];
+            var checkedAt = DateTime.UtcNow;
             while (!linked.IsCancellationRequested && (to <= 0 || from < to))
             {
+                if (to <= 0 && DateTime.UtcNow - checkedAt > TimeSpan.FromMilliseconds(250))
+                {
+                    checkedAt = DateTime.UtcNow;
+                    if (FarBehind(s, from)) { _log.LogInformation("screen sharing: a viewer's picture is {Behind:0.0} s behind; on to the latest key picture", s.Ring.AgeOf(from).TotalSeconds); return true; }
+                }
                 var wait = s.Ring.More();
                 var want = to > 0 ? (int)Math.Min(buffer.Length, to - from) : buffer.Length;
                 var n = s.Ring.Read(from, buffer.AsSpan(0, want));
@@ -631,11 +691,19 @@ public sealed class ScreenHost : IDisposable
         return true;
     }
 
+    /// <summary>Behind the live picture by more than <see cref="BehindLimit"/>, with a later key picture to go on from.</summary>
+    private static bool FarBehind(Session s, long from) => s.Ring.LastKey > from && s.Ring.AgeOf(from) > BehindLimit;
+
+    /// <summary>A sound frame without sound: "still here" while the sharing PC is silent (no frames come then).</summary>
+    public static readonly ScreenSoundFrames.Frame KeepAlive = new(0, 0, 0, Array.Empty<byte>());
+
     /// <summary>
     /// The sound over the peer connection, from the frame after <paramref name="after"/> (-1: from about now), live,
-    /// until the caller goes or the session ends. For viewers that get no packets.
+    /// until the caller goes or the session ends. Every viewer has it (alongside the packets, when they come: each
+    /// frame then arrives twice, and the first counts). <paramref name="keepAlive"/>: a frame without sound every
+    /// second while nothing is played (the sharing PC sends no frames then), so silence isn't taken for a broken way.
     /// </summary>
-    public async Task<bool> StreamSoundAsync(string sessionId, string clientId, long after, Func<IReadOnlyList<ScreenSoundFrames.Frame>, Task> write, CancellationToken ct)
+    public async Task<bool> StreamSoundAsync(string sessionId, string clientId, long after, bool keepAlive, Func<IReadOnlyList<ScreenSoundFrames.Frame>, Task> write, CancellationToken ct)
     {
         var s = Find(sessionId);
         if (s is null) return false;
@@ -655,7 +723,9 @@ public sealed class ScreenHost : IDisposable
                     if (s.Viewers.TryGetValue(clientId, out var v)) v.LastBeat = DateTimeOffset.UtcNow;
                     continue;
                 }
-                await Task.WhenAny(wait, Task.Delay(2000, linked.Token));
+                var idle = Task.Delay(keepAlive ? 1000 : 2000, linked.Token);
+                await Task.WhenAny(wait, idle);
+                if (keepAlive && !wait.IsCompleted && idle.IsCompleted) await write(new[] { KeepAlive });
             }
         }
         catch (OperationCanceledException) { }

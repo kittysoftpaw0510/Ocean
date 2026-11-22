@@ -137,13 +137,37 @@ public sealed class RelayWorker : IDisposable
             upload.Headers.TryAddWithoutValidation("X-Relay-Status", ((int)answer.StatusCode).ToString());
             upload.Headers.TryAddWithoutValidation("X-Relay-Headers", Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(Json.Serialize(headers))));
             await using var body = await answer.Content.ReadAsStreamAsync(ct);
-            upload.Content = new StreamContent(body, 1 << 17); // streamed (chunked) upload: video flows as it is read
+            // streamed (chunked) upload: video flows as it is read. A live stream (a shared screen's picture, sound,
+            // board) goes on piece by piece, each sent at once: the upload would otherwise hold small pieces until
+            // a few KB gathered (a sound frame is 300 bytes: a quarter of a second late, and in bursts)
+            // (also when it only passes through here: "/p/via/{node}/p/screen/...")
+            upload.Content = job.Path.Contains("/p/screen/", StringComparison.Ordinal) ? new LiveContent(body) : new StreamContent(body, 1 << 17);
             using var done = await _client.SendAsync(upload, HttpCompletionOption.ResponseHeadersRead, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _log.LogDebug(ex, "reverse link to {Peer}: serving {Path} failed", peer.Name, job.Path);
         }
+    }
+
+    /// <summary>A request body that passes each piece on as soon as it is read (written and flushed).</summary>
+    private sealed class LiveContent : HttpContent
+    {
+        private readonly Stream _source;
+        public LiveContent(Stream source) => _source = source;
+
+        protected override async Task SerializeToStreamAsync(Stream stream, System.Net.TransportContext? context)
+        {
+            var buffer = new byte[64 * 1024];
+            int n;
+            while ((n = await _source.ReadAsync(buffer)) > 0)
+            {
+                await stream.WriteAsync(buffer.AsMemory(0, n));
+                await stream.FlushAsync();
+            }
+        }
+
+        protected override bool TryComputeLength(out long length) { length = -1; return false; }
     }
 
     private string Name(string peerId) => _registry.TryGet(peerId, out var p) ? p.Name : peerId[..12];

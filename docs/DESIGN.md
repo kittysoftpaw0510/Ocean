@@ -356,7 +356,10 @@ with the PC's sound or without. View only (nothing typed or clicked at the viewe
   session key, one parity packet per 8 and at the end of every picture) on port 38474: to the multicast group
   (239.255.77.1) when everyone may watch, straight to each viewer's own UDP port otherwise (only when the join came
   straight from that PC, not through a bridge or a reverse link). A control packet twice a second: head offset,
-  viewers, ended, sound on, the newest sound frame.
+  viewers, ended, sound on, the newest sound frame. A key picture (hundreds of packets, every 4 s) is paced: a first
+  32 KB at once, the rest at 20 MB/s, waited out exactly (`Pace`; a `Thread.Sleep(1)` is up to 15.6 ms on Windows,
+  and used to hold a key picture back by as much as 150 ms). The sound's packets never wait behind a picture: they
+  have their own lock, sequence numbers (the nonce includes the packet type) and cipher.
 - **Nothing is ever missing** (`ScreenViewer`): UDP only gives the low delay. The viewer puts the stream together
   in order from two sources: the packets, and `GET /p/screen/{id}/stream?from=` over the peer connection. The
   direct stream always brings the start (`from=-1`: the latest key picture, waiting for one while the encoder
@@ -367,15 +370,27 @@ with the PC's sound or without. View only (nothing typed or clicked at the viewe
   median from "picture handed to the encoder" to "picture decoded at the viewer" at 15 pictures a second (two
   picture intervals); with 3 % of the packets thrown away the same, worst case 224 ms; with 10 % and with all
   packets thrown away every picture still decodes without an error.
+- **Never far behind** (`ScreenHost.StreamAsync`, `ScreenRing.AgeOf`): the ring knows when each byte came in. A
+  viewer whose direct stream is more than 1.5 s behind the live picture (a slow way, a PC in between, a connection
+  that was stuck) is moved on to the latest key picture: the stream ends, and its next request from where it was
+  gets 410, which starts it at the latest key picture. Before, the delay grew until the 8 MB were gone (at 3 Mbit/s
+  some 20 s).
 - **Across networks** (two PCs that reach each other only through a third, `Via`). All of screen sharing passes a
   bridge: the questions and answers, the picture, the sound, the board and pointing (`/p/screen/` is in
   `Via.IsRelayable`; a bridge on an older Ocean refuses it, and the asker is told to update that PC). No packet gets
   across, so everything comes over the direct streams. The bridge passes the stream's start (`X-Ocean-Offset`) on,
-  sends every piece on at once and never cuts a live stream for being slow (`Via.IsLive`). A bridge that goes away
-  without closing anything (switched off, off the network: its connections just go silent): every stream has a
-  watchdog (picture and sound 8 s without a byte, the board 15 s with a keep-alive every 5 s, an answer that
-  doesn't begin 12 s), and the bridge that went quiet is skipped for that PC for 30 s (`PeerClient.Stalled`), so
-  the stream opens again through another one at once. Measured with three and four test nodes on one PC (two
+  sends every piece on at once and never cuts a live stream for being slow (`Via.IsLive`). A reverse connection
+  does the same: its answer to a live stream is uploaded piece by piece, each flushed (`RelayWorker.LiveContent`;
+  before, the upload held small pieces until a few KB gathered: the sound came 0.15 to 0.3 s late, in bursts,
+  and 1201 of 1500 frames were too late to play). A bridge that goes away without closing anything (switched off,
+  off the network: its connections just go silent): every stream has a watchdog (the picture 8 s without a byte,
+  the sound 5 s with a keep-alive every second, the board 15 s with one every 5 s, an answer that doesn't begin
+  12 s, a status report 8 s), and the bridge that went quiet comes last for that PC for 30 s
+  (`PeerClient.Stalled`), so the stream opens again through another one at once. Last, not never: with one bridge
+  (often the only way) a single hiccup must not cut the PC off for half a minute. The sound's keep-alive matters:
+  the sharing PC sends no frames while nothing plays, and before, every 8 s of silence counted as a dead bridge,
+  which cut the viewer off from the sharer for 30 s each time (no reports, no requests; through one bridge the
+  sound never came back). Measured with three and four test nodes on one PC (two
   that can't hear each other): through the bridge, 60 pictures in 4.6 s, all sound frames, the board both ways
   within 20 ms; the bridge in use frozen (a PC gone): the picture went on through the other bridge after at most
   9.2 s, the board and the sound too; no bridge at all for 15 s: the picture back 0.6 s after the bridges, the
@@ -393,7 +408,10 @@ with the PC's sound or without. View only (nothing typed or clicked at the viewe
   goes as soon as the other side acts: an answer (an allowed "show" tells the asker at once with
   `POST /p/screen/progress {reason: picking}`, before the picking), Cancel (`/p/screen/cancel`), the asker's Ocean
   closed (its service takes its questions back after 8 s), either PC offline (2 s after the registry counts it as
-  offline). Measured between two test nodes: answer, cancel and decline 0.1 s; app closed 9 s; PC shut down 3 s;
+  offline). The question is tried again for up to 25 s when the way fails (two connections through a bridge, a bridge
+  busy for a moment); answers, "picking", "ready" and cancels for about a minute, waiting while the other PC is
+  offline for a moment (each carries its question's id, so twice is the same as once; before, two tries 1.5 s apart,
+  and a lost answer left the asker's waiting window up for ten minutes). Measured between two test nodes: answer, cancel and decline 0.1 s; app closed 9 s; PC shut down 3 s;
   switched off without a goodbye 20 s; the asked PC shut down: the asker's request over in 2.5 s. Answers the asker may get: allowed, declined, timeout,
   away, busy, muted, old (a 404: an Ocean without screen sharing).
 - **With everyone:** the session is in the catalog (`CatalogDto.Screen`, also in partial updates) and `PeerDto.Screen`;
@@ -414,10 +432,13 @@ with the PC's sound or without. View only (nothing typed or clicked at the viewe
   it for everyone at once (the control packet carries it, and the newest frame's number); `ScreenStartDto.Sound`
   starts with it (the picker's *Sound* switch, remembered in `%LocalAppData%\Ocean\screen.json`).
   - On the way: `POST /api/screen/feed/{id}/sound` (frames, `ScreenSoundFrames`) → packets of their own type (4,
-    sealed like the rest; older viewers pass over them), each with the frame before it, so one lost packet costs
-    nothing (no parity, no retransmission: a frame that is late is no use). Without packets (none for 2 s, or the
-    sound more than 25 frames behind what the control packet says was sent) the viewer gets it over
-    `GET /p/screen/{id}/sound?after=` until packets arrive again; the host keeps the last 3 s for that.
+    sealed like the rest; older viewers pass over them), each with the frame before it, and at the same time, always,
+    `GET /p/screen/{id}/sound?after=&ka=1` over the peer connection (about 15 KB a second; the host keeps the last
+    3 s). Whichever brings a frame first wins, the other copy is dropped: a burst of lost packets (Wi-Fi) costs
+    nothing, and without packets (a bridge, a reverse link) nothing changes. Before, the connection was only used
+    after the packets had failed for a while, and dropped again at the first packet: under steady loss it went back
+    and forth, and with 20 % of the packets lost 54 frames of 1500 were concealed (now none). `ka=1`: a frame
+    without sound every second of silence (said in `X-Ocean-KeepAlive`, which bridges pass on).
   - Played by time, not by arrival: every frame is heard a fixed time after it was played on the sharing PC, about
     as long as the picture takes (`PictureDelayMs`: 41 ms + 2.7 picture times; 221 ms at 15 pictures a second,
     131 ms at 30: capture half a picture time and 8 ms, encoder to decoded picture 2.2 picture times and 5 ms
@@ -426,7 +447,12 @@ with the PC's sound or without. View only (nothing typed or clicked at the viewe
     out by playing up to 0.5 % faster or slower (unheard); a time stamp that moves within an unbroken run moves the
     time line, not the samples (no click); after a break a frame goes exactly where it belongs; settling (4 s)
     jumps, later only a difference over 80 ms is jumped. A frame missing when it is due is concealed by Opus
-    (up to 60 ms), then silence. Measured between two services on one PC (one clock): heard 220.4 ms after it was
+    (up to 60 ms), then silence. The delay adapts to the way: how much later than the quickest each frame arrives
+    is kept (the last 30 s), and the delay leaves room for 97 % of them (that lateness + 80 ms: the frame, the
+    device's lead, Opus's look-ahead, a margin), never less than the picture's. More needed: taken at once (one
+    short gap instead of one every few seconds; logged); less: lowered by 0.4 % of the time, which the speed
+    control follows unheard. With 300 ms of every 2 s arriving 150 ms late, the fixed delay would have lost 232 of
+    2250 frames; the adaptive one rose once to 236 ms and lost 8, all before it had 5 s to judge by. Measured between two services on one PC (one clock): heard 220.4 ms after it was
     played at 15 pictures a second (target 221), 130.3 ms at 30 (target 131), spread 0.1 ms, no gaps; with 15 % of
     the packets lost every tick still on time, 2 % of the frames concealed; with all packets lost the same over the
     direct connection.

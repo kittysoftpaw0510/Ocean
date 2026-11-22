@@ -220,7 +220,7 @@ public sealed class ViaForwarder
 {
     private static readonly string[] RequestHeaders = { "Range", "If-Range", "If-None-Match", "If-Modified-Since" };
     private static readonly string[] ResponseHeaders = { "Content-Type", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified", "Retry-After", "Cache-Control",
-        "X-Ocean-Offset" /* where a shared screen's stream starts */ };
+        "X-Ocean-Offset" /* where a shared screen's stream starts */, "X-Ocean-KeepAlive" /* its sound says when silence is silence */ };
 
     private readonly PeerRegistry _registry;
     private readonly PeerClient _client;

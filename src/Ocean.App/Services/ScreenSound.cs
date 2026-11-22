@@ -522,6 +522,10 @@ public sealed class ScreenSoundSender : IDisposable
 /// Small differences (the two sound cards never run at exactly the same speed) are evened out by playing up to
 /// 0.5 % faster or slower, which nobody hears; a large one (after a stall) is a clean jump. A frame that hasn't
 /// come by the time it is due is concealed (Opus fills the gap from the sound before it), and silence after 60 ms.
+/// The delay adapts to the way the frames come: how much later than the quickest they arrive is watched (the last
+/// 30 s); when the delay doesn't leave room for nearly all of them (a PC in between, a busy Wi-Fi, a connection
+/// that waits for a lost packet), it grows at once (one short gap instead of one every few seconds), and it comes
+/// back down slowly and unheard (0.4 %) once they arrive in time again; never below the picture's delay.
 /// Follows the default output device when it changes (Windows tells it at once; it checks every 2 s too).
 /// </summary>
 public sealed class ScreenSoundPlayer : IDisposable
@@ -540,6 +544,15 @@ public sealed class ScreenSoundPlayer : IDisposable
     /// <summary>Settling: in the first seconds the clocks' link is still being learned; a difference is jumped, not played out slowly.</summary>
     private const long SettleUs = 4_000_000;
     private const int OutLatencyMs = 40;
+    /// <summary>
+    /// What a frame's lateness must leave of the delay: the frame itself (20 ms: it is sent once it is complete),
+    /// the device's lead (it asks for samples up to 40 ms before they are heard), Opus's look-ahead and a margin.
+    /// </summary>
+    private const long RoomUs = 80_000;
+    /// <summary>The delay covers this share of the frames' lateness (the rest: a rare spike, concealed).</summary>
+    private const double CoverShare = 0.97;
+    private const long MaxDelayUs = 1_000_000;
+    private const int LateWindow = 1500; // 30 s of frames
 
     private readonly string _url;
     private readonly object _lock = new();
@@ -569,9 +582,18 @@ public sealed class ScreenSoundPlayer : IDisposable
     private long _lastSeq = -1;
     private int _concealed;
     private long _writtenFrames;
+    // how much later than the quickest the frames arrive (µs, the last 30 s), and the delay that leaves room for them
+    private readonly int[] _lateness = new int[LateWindow];
+    private int _latenessCount, _latenessPos, _sinceTarget;
+    private long _targetUs, _delayUs, _delaySetAt;
+    private bool _raise;
 
-    /// <summary>From the sharing PC playing a sound to it being heard here (ms).</summary>
+    /// <summary>The picture's delay: the least time from the sharing PC playing a sound to it being heard here (ms).</summary>
     public int DelayMs { get; }
+    /// <summary>The delay now (ms): the picture's, or more when the frames come too unevenly for it.</summary>
+    public int CurrentDelayMs { get { lock (_lock) return (int)(_delayUs / 1000); } }
+    /// <summary>For checks: how often the delay grew.</summary>
+    public long Raises { get; private set; }
     public bool Muted { get; set; }
     public long FramesIn { get; private set; }
     public long Concealed { get; private set; }
@@ -588,6 +610,7 @@ public sealed class ScreenSoundPlayer : IDisposable
     {
         _url = $"{api.BaseUrl}/api/screen/view/sound?k={api.Token}";
         DelayMs = PictureDelayMs(fps);
+        _delayUs = _targetUs = DelayMs * 1000L;
     }
 
     /// <summary>
@@ -661,9 +684,33 @@ public sealed class ScreenSoundPlayer : IDisposable
             var min = long.MaxValue;
             for (var k = 0; k < _minBuckets.Length; k++) if (_bucketAt[k] > bucket - _minBuckets.Length && _minBuckets[k] < min) min = _minBuckets[k];
             _offsetUs = min;
+            // how much later than the quickest: what the delay must leave room for
+            _lateness[_latenessPos] = (int)Math.Clamp(d - min, 0, int.MaxValue);
+            _latenessPos = (_latenessPos + 1) % LateWindow;
+            if (_latenessCount < LateWindow) _latenessCount++;
+            // (from 5 s on: the first frames include the few the host sends from just before, which come late by design)
+            if (++_sinceTarget >= 25 && _latenessCount >= 250) { _sinceTarget = 0; Target(); }
             if (_running && f.HostUs - CodecDelayUs + FrameUs <= PcmEndUs()) { Late++; return; } // its time has passed
             _pending[f.HostUs] = f;
             while (_pending.Count > 200) _pending.RemoveAt(0);
+        }
+    }
+
+    /// <summary>
+    /// The delay the frames' arrival calls for (under _lock): room for nearly all of them, never less than the
+    /// picture's. More than now: taken at once (Fill jumps); less: Fill comes down to it slowly.
+    /// </summary>
+    private void Target()
+    {
+        var sorted = new int[_latenessCount];
+        Array.Copy(_lateness, sorted, _latenessCount);
+        Array.Sort(sorted);
+        var cover = sorted[(int)Math.Min(sorted.Length - 1, Math.Ceiling(sorted.Length * CoverShare) - 1)];
+        _targetUs = Math.Clamp(cover + RoomUs, DelayMs * 1000L, MaxDelayUs);
+        if (_targetUs > _delayUs + 5_000)
+        {
+            AppLog.Info("Screen", $"sound: the frames come unevenly (97 % within {cover / 1000} ms of the quickest); delay {_delayUs / 1000} -> {_targetUs / 1000} ms");
+            _delayUs = _targetUs; _delaySetAt = NowUs(); _raise = true; Raises++;
         }
     }
 
@@ -746,10 +793,18 @@ public sealed class ScreenSoundPlayer : IDisposable
         {
             // the first few frames first: the clocks' link needs more than one arrival
             if (_offsetUs == long.MinValue || (!_running && FramesIn < 5)) { Array.Clear(buffer, offset, frames * Ch); Interlocked.Add(ref _writtenFrames, frames); return; }
+            // a smaller delay is reached slowly (0.4 %: the speed control follows it unheard)
+            if (_targetUs < _delayUs)
+            {
+                var since = Math.Max(0, now - Math.Max(_delaySetAt, now - 100_000));
+                _delayUs = Math.Max(_targetUs, _delayUs - (long)(since * 0.004));
+                _delaySetAt = now;
+            }
             // the host time that should be heard then
-            var due = heardAt - (_offsetUs - WayUs) - DelayMs * 1000L;
-            if (!_running) { Restart(due); _running = true; _startedUs = now; }
+            var due = heardAt - (_offsetUs - WayUs) - _delayUs;
+            if (!_running) { Restart(due); _running = true; _startedUs = now; _raise = false; }
             var error = _cursorUs - due; // > 0: ahead (heard too early): play slower
+            if (_raise) { _raise = false; if (error > 5_000) { Restart(due); error = 0; } } // the delay grew: one short gap now
             if (Math.Abs(error) > (now - _startedUs < SettleUs ? 6_000 : 80_000)) { if (now - _startedUs >= SettleUs) Jumps++; Restart(due); error = 0; }
             var ratio = 1 - Math.Clamp(error * 5e-7, -0.005, 0.005);
             // the samples to read, and how they are spread over the frames asked for (linear: the change is tiny)

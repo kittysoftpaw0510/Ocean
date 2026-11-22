@@ -169,10 +169,16 @@ public sealed class PeerClient : IDisposable
         // least busy first, counting what we started ourselves lately (a bridge's own count lags a few seconds)
         var mine = _sticky.Values.Where(v => now - v.Used < TimeSpan.FromSeconds(30)).GroupBy(v => v.Bridge).ToDictionary(g => g.Key, g => g.Count());
         var kind = Kind(path);
-        var bridges = peer.LiveBridges()
-            .Where(b => !_avoid.ContainsKey((peer.Id, b.Id)) && !_avoid.ContainsKey((peer.Id, b.Id + "|" + kind)))
-            .OrderBy(b => b.Load + mine.GetValueOrDefault(b.Id)).ThenByDescending(b => b.Confirmed).ToList();
-        if (_sticky.TryGetValue(key, out var s) && bridges.FirstOrDefault(b => b.Id == s.Bridge) is { } same)
+        // a bridge that failed a moment ago comes last, not never: with one bridge (often the only way) a single
+        // hiccup must not cut the PC off for half a minute; with several, the others are tried first. (One that
+        // can't pass this kind of request at all, an older Ocean, stays out.)
+        var able = peer.LiveBridges().Where(b => !_avoid.ContainsKey((peer.Id, b.Id + "|" + kind))).ToList();
+        var bridges = able.Where(b => !_avoid.ContainsKey((peer.Id, b.Id)))
+            .OrderBy(b => b.Load + mine.GetValueOrDefault(b.Id)).ThenByDescending(b => b.Confirmed)
+            .Concat(able.Where(b => _avoid.ContainsKey((peer.Id, b.Id))).OrderBy(b => _avoid.TryGetValue((peer.Id, b.Id), out var until) ? until : now))
+            .ToList();
+        // (the bridge this kind of request used last goes first, unless it failed a moment ago: then it stays last)
+        if (_sticky.TryGetValue(key, out var s) && !_avoid.ContainsKey((peer.Id, s.Bridge)) && bridges.FirstOrDefault(b => b.Id == s.Bridge) is { } same)
         {
             bridges.Remove(same);
             bridges.Insert(0, same);

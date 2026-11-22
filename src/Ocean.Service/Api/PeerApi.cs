@@ -336,8 +336,9 @@ public static class PeerApi
             if (point is null) return Results.BadRequest();
             return screen.Point(sessionId, pc.ClientId, DisplayNames.Of(pc.User, pc.Name), point) ? Results.Ok() : Results.NotFound();
         });
-        // the sound, for a viewer that gets no packets: Opus frames after the one it has (see ScreenSoundFrames)
-        g.MapGet("/screen/{sessionId}/sound", async (HttpContext ctx, string sessionId, long? after, ScreenHost screen) =>
+        // the sound over the connection: Opus frames after the one the viewer has (see ScreenSoundFrames); ka=1: a frame
+        // without sound every second of silence (said in X-Ocean-KeepAlive, so the viewer knows silence isn't a broken way)
+        g.MapGet("/screen/{sessionId}/sound", async (HttpContext ctx, string sessionId, long? after, int? ka, ScreenHost screen) =>
         {
             var pc = PeerContext.Get(ctx);
             var allowed = screen.Allowed(sessionId, pc.ClientId);
@@ -347,10 +348,11 @@ public static class PeerApi
             if (ctx.Features.Get<Microsoft.AspNetCore.Server.Kestrel.Core.Features.IHttpMinResponseDataRateFeature>() is { } rate) rate.MinDataRate = null;
             ctx.Response.ContentType = "application/octet-stream";
             ctx.Response.Headers.CacheControl = "no-store";
+            if (ka == 1) ctx.Response.Headers["X-Ocean-KeepAlive"] = "1";
             try
             {
                 await ctx.Response.StartAsync(ctx.RequestAborted);
-                await screen.StreamSoundAsync(sessionId, pc.ClientId, after ?? -1, async frames =>
+                await screen.StreamSoundAsync(sessionId, pc.ClientId, after ?? -1, ka == 1, async frames =>
                 {
                     foreach (var f in frames) await ctx.Response.Body.WriteAsync(ScreenSoundFrames.Pack(f), ctx.RequestAborted);
                     await ctx.Response.Body.FlushAsync(ctx.RequestAborted);

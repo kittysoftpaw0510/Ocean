@@ -20,8 +20,21 @@ public sealed class ScreenRing
     private bool _afterStart;
     private int _startZeros;
     private bool _closed;
+    // when the bytes came: (offset after an append, its time), oldest first, as far back as the ring reaches
+    private readonly Queue<(long End, long Ticks)> _times = new();
 
     public ScreenRing(int capacity = 8 * 1024 * 1024) { _buf = new byte[capacity]; }
+
+    /// <summary>How long ago the byte at <paramref name="offset"/> came in (zero for what hasn't come yet).</summary>
+    public TimeSpan AgeOf(long offset)
+    {
+        lock (_lock)
+        {
+            foreach (var (end, ticks) in _times)
+                if (end > offset) return TimeSpan.FromTicks(Math.Max(0, DateTime.UtcNow.Ticks - ticks));
+            return TimeSpan.Zero;
+        }
+    }
 
     public long Head { get { lock (_lock) return _head; } }
     public long Base { get { lock (_lock) return Math.Max(0, _head - _buf.Length); } }
@@ -64,6 +77,8 @@ public sealed class ScreenRing
             _head += src.Length;
             var floor = Math.Max(0, _head - _buf.Length);
             while (_keys.Count > 0 && _keys[0] < floor) _keys.RemoveAt(0);
+            _times.Enqueue((_head, DateTime.UtcNow.Ticks));
+            while (_times.Count > 4096 || (_times.Count > 1 && _times.Peek().End <= floor)) _times.Dequeue();
             wake = _more;
             _more = new(TaskCreationOptions.RunContinuationsAsynchronously);
         }

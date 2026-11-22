@@ -148,9 +148,13 @@ builder.WebHost.ConfigureKestrel(k =>
     k.ListenAnyIP(cfg.PeerPort, l =>
     {
         // local network only: a connection from the internet or a VPN is closed before the TLS handshake
+        // (developers only: OCEAN_TEST_NO_INCOMING=1 refuses every other PC, as a firewall does: they reach this one
+        // through the reverse connection it opens to them)
+        var noIncoming = Environment.GetEnvironmentVariable("OCEAN_TEST_NO_INCOMING") == "1";
         l.Use(next => conn =>
         {
             var remote = (conn.RemoteEndPoint as IPEndPoint)?.Address;
+            if (noIncoming && remote is not null && !IPAddress.IsLoopback(remote)) { conn.Abort(); return Task.CompletedTask; }
             if (LocalNetworks.IsLan(remote)) return next(conn);
             LanOnly.Refused("connection from", remote);
             conn.Abort();
