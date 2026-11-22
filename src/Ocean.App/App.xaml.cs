@@ -27,6 +27,7 @@ public partial class App : Application
         AppLog.Start(e.Args);
         AppLog.Info("App", "networking: " + NetworkCompat.Describe());
         DispatcherUnhandledException += OnUnhandled;
+        Services.ScreenSources.GuardPopups(); // (tooltips of the board and the bars stay out of a shared screen)
         TaskScheduler.UnobservedTaskException += (_, args) =>
         {
             AppLog.Warn("App", "background task failed (ignored)", args.Exception.InnerException ?? args.Exception);

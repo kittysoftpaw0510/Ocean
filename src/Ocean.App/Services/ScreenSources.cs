@@ -227,6 +227,34 @@ public static class ScreenSources
         catch { return false; }
     }
 
+    /// <summary>
+    /// Tooltips and right-click menus are windows of their own: one that opens for a window kept out of the capture
+    /// (the board, the sharing and recording bars, the shapes' choice) is kept out too, else viewers see a tooltip
+    /// floating where the sharing PC's mouse is. It is done when it opens, before it is first drawn (these windows
+    /// are see-through and show nothing until then), so not even one picture of it is captured. Once, at start.
+    /// </summary>
+    public static void GuardPopups()
+    {
+        EventManager.RegisterClassHandler(typeof(System.Windows.Controls.ToolTip), System.Windows.Controls.ToolTip.OpenedEvent,
+            new RoutedEventHandler((s, _) => { if (s is System.Windows.Controls.ToolTip t) Follow(t, t.PlacementTarget); }));
+        EventManager.RegisterClassHandler(typeof(System.Windows.Controls.ContextMenu), System.Windows.Controls.ContextMenu.OpenedEvent,
+            new RoutedEventHandler((s, _) => { if (s is System.Windows.Controls.ContextMenu m) Follow(m, m.PlacementTarget); }));
+    }
+
+    /// <summary>The popup's window is kept out of the capture when its owner's window is.</summary>
+    private static void Follow(System.Windows.Media.Visual popup, UIElement? owner)
+    {
+        try
+        {
+            if (owner is null || PresentationSource.FromVisual(owner) is not HwndSource from || !IsHiddenFromCapture(from.Handle)) return;
+            if (PresentationSource.FromVisual(popup) is HwndSource src) HideFromCapture(src.Handle);
+        }
+        catch { }
+    }
+
+    /// <summary>Is this window kept out of every capture?</summary>
+    public static bool IsHiddenFromCapture(IntPtr h) => GetWindowDisplayAffinity(h, out var affinity) && affinity == 0x11;
+
     /// <summary>The same for a window of ours that isn't a Window (a popup's).</summary>
     public static bool HideFromCapture(IntPtr h)
     {
@@ -333,6 +361,7 @@ public static class ScreenSources
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
     [DllImport("user32.dll")] private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
     [DllImport("user32.dll")] private static extern bool SetWindowDisplayAffinity(IntPtr hwnd, uint affinity);
+    [DllImport("user32.dll")] private static extern bool GetWindowDisplayAffinity(IntPtr hwnd, out uint affinity);
     [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
     [DllImport("user32.dll")] private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
     [DllImport("user32.dll")] private static extern IntPtr MonitorFromPoint(long point, uint flags);

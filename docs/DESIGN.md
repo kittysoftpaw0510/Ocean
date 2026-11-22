@@ -424,6 +424,9 @@ with the PC's sound or without. View only (nothing typed or clicked at the viewe
   second key picture): the first picture is there about a second after opening.
 - **Seen by the user:** a red bar "Sharing ... with ..., N watching, Stop sharing" on top of everything and on every
   virtual desktop while a session runs; it is excluded from capture (`WDA_EXCLUDEFROMCAPTURE`) and can't be closed.
+  Tooltips and right-click menus are windows of their own: one that opens for a window kept out of the capture
+  (the board, the bars, the shapes' choice) is kept out too, as it opens and before it is first drawn
+  (`ScreenSources.GuardPopups`, once at start); before, viewers saw the board's tooltips float in the picture.
 - **The sound** (`ScreenSoundSender`, `ScreenSoundPlayer`). What every program on the PC plays, on every output
   device (`SoundCapture`, see below), cut into 20 ms frames on the capture's own time line and encoded with Opus
   (Concentus, in the app: 96 kbps constrained VBR, about 3 % of one core), each frame stamped with the moment its
