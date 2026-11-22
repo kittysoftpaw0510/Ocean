@@ -868,23 +868,28 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>The banner's button: installs what is downloaded, or downloads it first and then installs.</summary>
+    /// <summary>
+    /// The banner's button: always the newest version. The service looks first (what it found earlier may have been
+    /// passed by), then it installs what is on disk for that version, or downloads it first and then installs.
+    /// </summary>
     [RelayCommand]
     private async Task UpdateNow()
     {
-        if (Update is { Ready: true }) { await InstallUpdateAsync(confirm: true); return; }
         try
         {
-            _installWhenReady = true;
-            AppLog.Info("Update", $"update now: downloading {Update?.Latest}");
-            ApplyUpdate(await Api.PostAsync<UpdateStatusDto>("/api/update/download", null));
+            AppLog.Info("Update", $"update now (known: {Update?.Latest}, ready: {Update?.Ready == true})");
+            var st = await Api.PostAsync<UpdateStatusDto>("/api/update/download", null);
+            if (st is { Ready: true, Available: true }) { ApplyUpdate(st); await InstallUpdateAsync(confirm: true); return; }
+            _installWhenReady = st is { Available: true };
+            ApplyUpdate(st);
+            if (st is { Available: false }) Toast("Ocean is up to date", $"You have the newest version ({st.Current}).", "success");
         }
         catch (Exception ex) { _installWhenReady = false; Error("Could not download the update", ex); }
     }
 
-    /// <summary>Runs the downloaded installer (silent, Windows asks for permission); it closes Ocean, updates and reopens it.</summary>
+    /// <summary>Settings' "Install update": the same as Update now (the newest version, looked for first).</summary>
     [RelayCommand]
-    public Task InstallUpdate() => InstallUpdateAsync(confirm: true);
+    public Task InstallUpdate() => UpdateNowCommand.ExecuteAsync(null);
 
     private async Task InstallUpdateAsync(bool confirm)
     {

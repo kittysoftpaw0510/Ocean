@@ -260,10 +260,16 @@ public sealed class Updater : BackgroundService
 
     public void CheckSoon() => _wake.Cancel();
 
-    /// <summary>"Update now": download the newest version (looking first when none is known yet); progress comes as events.</summary>
+    /// <summary>
+    /// "Update now": the newest version, downloaded (progress comes as events) or ready on disk. It looks first, unless
+    /// it looked a minute ago: a version found hours or days ago (and remembered over restarts) may have been passed
+    /// by since, and updating to it would only mean updating again. Without a connection what is known is used.
+    /// </summary>
     public async Task<UpdateStatusDto> DownloadNowAsync(CancellationToken ct)
     {
+        var fresh = _saved is { LastAttemptOk: true, LastAttempt: { } at } && DateTimeOffset.UtcNow - at is var since && since >= TimeSpan.Zero && since < TimeSpan.FromMinutes(1);
         if (_found is null || !IsNewer(_found.Version, Current)) await CheckAsync(ct);
+        else if (!fresh) await CheckCoreAsync(ct, userAsked: false);
         if (_found is { } rel && IsNewer(rel.Version, Current) && !Status.Ready) _ = DownloadInBackground(rel, quiet: false);
         return Status;
     }
@@ -278,7 +284,9 @@ public sealed class Updater : BackgroundService
             s.Checking = false; s.CheckedAt = checkedAt ?? DateTimeOffset.UtcNow;
             s.Latest = rel.Version; s.Notes = rel.Notes; s.Url = rel.Url; s.PublishedAt = rel.PublishedAt; s.InstallerSize = rel.AssetSize;
             s.Available = newer;
-            if (!newer) { s.Ready = false; s.InstallerPath = null; }
+            // ready means this version's installer: one of an older version (a newer one came out meanwhile) isn't
+            if (!newer || s.InstallerPath is { } path && !string.Equals(Path.GetFileName(path), rel.AssetName, StringComparison.OrdinalIgnoreCase))
+            { s.Ready = false; s.InstallerPath = null; }
         });
     }
 
