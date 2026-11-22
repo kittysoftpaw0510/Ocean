@@ -273,6 +273,13 @@ public sealed class DecisionDto
 /// <summary>Paused: stopped by the user, what came so far is kept; Resume goes on from there.</summary>
 public enum DownloadStatus { Queued, Running, Done, Failed, Canceled, Paused }
 
+/// <summary>What to get ready on another PC's page: the files in view (in order), or the one to play next.</summary>
+public sealed class PrefetchDto
+{
+    public List<string>? ItemIds { get; set; }
+    public bool Next { get; set; }
+}
+
 /// <summary>A download another PC is making of one of my files, as I send it (GET /api/uploads, "uploads" events).</summary>
 public sealed class UploadDto
 {

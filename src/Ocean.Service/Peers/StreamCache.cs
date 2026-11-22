@@ -185,7 +185,7 @@ public sealed class StreamCache
     /// Throws <see cref="PeerStatusException"/> when the owner refuses (nothing written to dest in that case if the
     /// very first bytes had to come from it).
     /// </summary>
-    public async Task CopyAsync(string peerId, ItemDto item, long from, long to, Stream dest, bool fill, bool download, CancellationToken ct)
+    public async Task CopyAsync(string peerId, ItemDto item, long from, long to, Stream dest, bool fill, bool download, CancellationToken ct, bool prefetch = false)
     {
         var size = item.Size;
         if (size <= 0 || from > to || to >= size) throw new ArgumentOutOfRangeException(nameof(from));
@@ -246,7 +246,7 @@ public sealed class StreamCache
                 {
                     try
                     {
-                        using var resp = await _peers.OpenStreamAsync(peerId, item.Id, $"bytes={p}-{fetchEnd}", ct, download);
+                        using var resp = await _peers.OpenStreamAsync(peerId, item.Id, $"bytes={p}-{fetchEnd}", ct, download, prefetch);
                         if (resp.StatusCode != HttpStatusCode.PartialContent
                             || resp.Content.Headers.ContentRange is not { From: { } start } || start != p)
                         {

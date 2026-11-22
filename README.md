@@ -18,6 +18,11 @@ and every byte between them travels over mutually authenticated, end-to-end encr
   and a colour per family, and its extension: DOCX, XLSX, ZIP…). Leftovers of other programs (half downloads,
   temporary and lock files, `Thumbs.db`) are never shared. Both Browse and *My shares* can show one kind alone
   in the folder shown and sort by *Type*. Ocean 1.6.4 and older are not told about these files.
+- **Ready before you click**, as on a video site: while you look at another PC's files, the start of each one in
+  view is fetched in the background (about its first 6 s; an MP4 that keeps its index at the end gets that too),
+  and short clips (up to 25 MB) come whole, so a click starts at once; while something plays, the next one in the
+  list gets ready. It asks the other PC after anyone watching, takes none of its download places, and stops when
+  you leave the page. With the stream cache off (Settings) nothing is fetched ahead.
 - **Find** (Ctrl+F) in a PDF or a text: Enter / Shift+Enter go through the matches, all marked, the current one
   stronger. A PDF's words are read by Windows' own text recognition, on this PC (no internet), page by page from
   the one in view, so scanned PDFs are searchable too. A PDF opens at its real size (100 %); the size button

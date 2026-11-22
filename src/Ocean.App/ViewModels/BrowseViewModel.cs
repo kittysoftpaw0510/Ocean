@@ -272,8 +272,40 @@ public partial class BrowseViewModel : ObservableObject
         _ => q.OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase),
     }).ToList();
 
+    // ---- getting the files in view ready before they are clicked (the service fetches their start in the background)
+    private System.Windows.Threading.DispatcherTimer? _prefetchDelay;
+    private string _prefetchSent = "";
+
+    /// <summary>The files shown now, in their order, told to the service a moment after the list settles.</summary>
+    private void PrefetchSoon()
+    {
+        _prefetchDelay ??= new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(700) };
+        _prefetchDelay.Tick -= OnPrefetchTick; _prefetchDelay.Tick += OnPrefetchTick;
+        _prefetchDelay.Stop(); _prefetchDelay.Start();
+    }
+
+    private void OnPrefetchTick(object? sender, EventArgs e)
+    {
+        _prefetchDelay?.Stop();
+        if (!ReferenceEquals(_main.Page, this) || !Peer.Online) return;
+        var ids = Items.Where(i => i.Opens && !i.IsLocked).Take(24).Select(i => i.Id).ToList();
+        SendPrefetch(ids);
+    }
+
+    private void SendPrefetch(List<string> ids)
+    {
+        var key = string.Join(",", ids);
+        if (key == _prefetchSent) return;
+        _prefetchSent = key;
+        _ = _main.Api.PostAsync($"/api/peers/{Peer.Id}/prefetch", new PrefetchDto { ItemIds = ids }).ContinueWith(_ => { });
+    }
+
+    /// <summary>The page was left: nothing more is got ready for it.</summary>
+    public void StopPrefetch() { _prefetchDelay?.Stop(); if (_prefetchSent.Length > 0) SendPrefetch(new()); }
+
     private void Rebuild()
     {
+        PrefetchSoon();
         var shareId = SelectedShare?.Id;
         var shareDto = shareId is null ? null : Catalog?.Shares.FirstOrDefault(s => s.Id == shareId);
         // (one kind of file keeps the folders: they show only that kind)

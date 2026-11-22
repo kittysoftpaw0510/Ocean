@@ -6,6 +6,11 @@ public static class PeerHeaders
     /// <summary>"download" when the bytes are saved as a copy (can wait), absent when someone is watching.</summary>
     public const string Purpose = "X-Ocean-Purpose";
     public const string Download = "download";
+    /// <summary>
+    /// Getting a file ready before it is clicked (its start): after anyone watching, no download slot, not counted as
+    /// watching. (An older Ocean treats it as watching.)
+    /// </summary>
+    public const string Prefetch = "prefetch";
 
     /// <summary>The kinds of file this Ocean can open ("video,audio,image,pdf"); an older one sends none and gets videos only.</summary>
     public const string Kinds = "X-Ocean-Kinds";

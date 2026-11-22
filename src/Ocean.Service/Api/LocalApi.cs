@@ -84,6 +84,14 @@ public static class LocalApi
                                : Results.Json(cat, Json.Options);
         });
 
+        // the files in view on another PC's page (in the order shown), or the one to play next: got ready in the background
+        g.MapPost("/peers/{peerId}/prefetch", async (string peerId, HttpContext ctx, Ocean.Service.Peers.Prefetcher prefetcher) =>
+        {
+            var req = await ctx.Request.ReadFromJsonAsync<PrefetchDto>(Json.Options) ?? new PrefetchDto();
+            prefetcher.Set(peerId, req.ItemIds ?? new(), req.Next);
+            return Results.Ok();
+        });
+        g.MapGet("/prefetch", (Ocean.Service.Peers.Prefetcher prefetcher) => Results.Json(prefetcher.Recent(), Json.Options));
         g.MapPost("/peers/{peerId}/visited", (string peerId, PeerService peers) => { peers.MarkVisited(peerId); return Results.Ok(); });
 
         g.MapPost("/peers/{peerId}/unlock", async (string peerId, HttpContext ctx, PeerService peers) =>

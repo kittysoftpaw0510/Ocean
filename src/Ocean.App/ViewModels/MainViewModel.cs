@@ -107,7 +107,14 @@ public partial class MainViewModel : ObservableObject
         if (item.IsText) { AppLog.Info("Viewer", $"text {item.Name} from {peer.Label}"); Viewer.OpenText(Entry(item)); return; }
         // any other file: Ocean can't show it, it is downloaded
         if (item.IsFile) { _ = BrowseFor(peer).DownloadCommand.ExecuteAsync(item); return; }
-        if (item.IsPlayable) { Player.Open(item, Api.StreamUrl(peer.Id, item.Id, item.Name), peer, startAt); return; }
+        if (item.IsPlayable)
+        {
+            Player.Open(item, Api.StreamUrl(peer.Id, item.Id, item.Name), peer, startAt);
+            // the next one in the list gets ready meanwhile (it then starts at once)
+            if (siblings is not null && siblings.SkipWhile(i => !ReferenceEquals(i, item)).Skip(1).FirstOrDefault(i => i.IsPlayable && !i.IsLocked) is { } next)
+                _ = Api.PostAsync($"/api/peers/{peer.Id}/prefetch", new PrefetchDto { ItemIds = new() { next.Id }, Next = true }).ContinueWith(_ => { });
+            return;
+        }
         AppLog.Info("Viewer", $"{(item.IsPdf ? "pdf" : "picture")} {item.Name} from {peer.Label}");
         if (item.IsPdf) { Viewer.OpenPdf(Entry(item)); return; }
         var pictures = Pictures(item, siblings, i => i.IsImage && !i.IsLocked && i.Dto.ShareId == item.Dto.ShareId && i.Dto.Folder == item.Dto.Folder);
@@ -146,6 +153,8 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private NodeStatusDto? _status;
     [ObservableProperty] private string _nav = "home";
     [ObservableProperty] private object? _page;
+    // (a page of another PC's files that is left stops getting its files ready)
+    partial void OnPageChanged(object? oldValue, object? newValue) { if (oldValue is BrowseViewModel b && !ReferenceEquals(oldValue, newValue)) b.StopPrefetch(); }
     [ObservableProperty] private PeerVm? _selectedPeer;
     [ObservableProperty] private string _searchText = "";
     [ObservableProperty] private bool _sharingPaused;

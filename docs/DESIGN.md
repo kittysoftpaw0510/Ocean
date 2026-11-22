@@ -402,15 +402,24 @@ with the PC's sound or without. View only (nothing typed or clicked at the viewe
   (239.255.77.1) when everyone may watch, straight to each viewer's own UDP port otherwise (only when the join came
   straight from that PC, not through a bridge or a reverse link). A control packet twice a second: head offset,
   viewers, ended, sound on, the newest sound frame. A key picture (hundreds of packets, every 4 s) is paced: a first
-  32 KB at once, the rest at 20 MB/s, waited out exactly (`Pace`; a `Thread.Sleep(1)` is up to 15.6 ms on Windows,
-  and used to hold a key picture back by as much as 150 ms). The sound's packets never wait behind a picture: they
+  burst of about 2 ms (12–32 KB), the rest at the session's pace, waited out exactly (`Pace`; a `Thread.Sleep(1)` is
+  up to 15.6 ms on Windows, and used to hold a key picture back by as much as 150 ms). The pace adapts (`Adapt`):
+  it starts at 8 MB/s (64 Mbit/s), each viewer's beat reports its lost packets (rebuilt or not; the viewer beats
+  after 1 s instead of 5 when it lost some), and against the packets sent since its last beat any loss above 0.2 %
+  cuts its pace (by half above 2 %, else a quarter; at least 3 MB/s); 30 s without loss raise it a tenth (at most
+  20 MB/s). The session goes at its slowest viewer's pace. A fixed 20 MB/s lost the end of every key picture where a
+  switch feeds a slower link (100 Mbit/s ports, USB adapters, hubs): 3 % of the packets, a third of the picture
+  over the connection, the status going back and forth. (Developers: `OCEAN_TEST_SCREEN_LINK=mbit,kb` puts such a
+  link in front of a viewer; `OCEAN_TEST_SCREEN_FIXED_PACE=1` sends at the old fixed pace.) The sound's packets never wait behind a picture: they
   have their own lock, sequence numbers (the nonce includes the packet type) and cipher.
 - **Nothing is ever missing** (`ScreenViewer`): UDP only gives the low delay. The viewer puts the stream together
   in order from two sources: the packets, and `GET /p/screen/{id}/stream?from=` over the peer connection. The
   direct stream always brings the start (`from=-1`: the latest key picture, waiting for one while the encoder
   starts), then only what is missing for a moment: a hole after 120 ms, a missing end after 300 ms (the control
   packet says where the head is), everything after 2 s without packets. It is dropped again as soon as packets
-  keep up (fresh, none lost for 2 s); after four switches in 20 s it stays for 30 s. Through bridges, reverse links
+  keep up (fresh, none lost for 2 s); after four switches in 20 s it stays for 30 s. What the viewer is told
+  ("Live" / "Direct connection") follows the way, not each gap filled: "direct" while packets don't come, while it
+  stays on the connection, or once a top-up has gone on for 3 s; once said, it holds for at least 10 s. Through bridges, reverse links
   and where multicast doesn't arrive, everything comes that way. Measured between two services on one PC: 147 ms
   median from "picture handed to the encoder" to "picture decoded at the viewer" at 15 pictures a second (two
   picture intervals); with 3 % of the packets thrown away the same, worst case 224 ms; with 10 % and with all
@@ -767,6 +776,12 @@ Downloads read through the stream cache (below), so whatever was already watched
 
 - **Viewer side.** The player's requests go to `PeerMedia`: the same video in my own shares (name + size)
   or a finished download of it plays from disk; otherwise bytes come through the **stream cache**
+  (filled ahead by the `Prefetcher`: the app posts the files in view on a node's page, in order, 700 ms after the
+  list settles, and an empty list when the page is left; `POST /api/peers/{id}/prefetch`, `next: true` for the one
+  after what plays; two workers; per file the first ~6 s at its bit rate (2–8 MB), the whole file up to 25 MB (at
+  most 8 per list, 24 files in all), and for an MP4 whose top-level boxes put `mdat` before `moov` the end from
+  there (up to 16 MB). Asked with `X-Ocean-Purpose: prefetch`: the owner paces it like a download but takes no
+  download slot, doesn't count it as watching and doesn't list it as sending; an older owner takes it as watching)
   (`cache/streams/`): one sparse file per video filled in 1 MB blocks + a block map, keyed by node, item,
   size and mtime. Cached blocks are served from disk, missing runs are fetched from the owner and stored.
   LRU eviction beyond the size in Settings (default 5 GB, 0 = off). A finished download drops the video's

@@ -95,6 +95,7 @@ builder.Services.AddSingleton<Ocean.Service.Media.LightCopies>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Ocean.Service.Media.LightCopies>());
 builder.Services.AddSingleton<Ocean.Service.Cast.ViewerTracker>();
 builder.Services.AddSingleton<UploadBoard>();
+builder.Services.AddSingleton<Ocean.Service.Peers.Prefetcher>();
 builder.Services.AddSingleton<Ocean.Service.Social.Ratings>();
 builder.Services.AddSingleton<Ocean.Service.Social.Notes>();
 builder.Services.AddSingleton<Ocean.Service.Social.MyVotes>();

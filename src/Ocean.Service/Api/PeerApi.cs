@@ -394,12 +394,15 @@ public static class PeerApi
             if (!catalog.IsItemAccessible(share, item, access.Checker(pc.ClientId, pc.Grants))) return Locked(share, item);
             var full = wantLight ? light.PathFor(baseId, item) : catalog.FullPath(share, item);
             if (full is null) return Results.NotFound();
-            if (HttpMethods.IsGet(ctx.Request.Method)) ctx.Response.RegisterForDispose(viewers.Track(baseId, pc.ClientId)); // "3 watching" on my side
-            // Saving a copy can wait; watching can't. Downloads beyond a few at once are asked to come back shortly.
-            var kind = string.Equals(ctx.Request.Headers[PeerHeaders.Purpose], PeerHeaders.Download, StringComparison.OrdinalIgnoreCase)
+            var purpose = ctx.Request.Headers[PeerHeaders.Purpose].ToString();
+            var prefetch = string.Equals(purpose, PeerHeaders.Prefetch, StringComparison.OrdinalIgnoreCase);
+            // "3 watching" on my side (getting a file ready before it is clicked isn't watching)
+            if (HttpMethods.IsGet(ctx.Request.Method) && !prefetch) ctx.Response.RegisterForDispose(viewers.Track(baseId, pc.ClientId));
+            // Saving a copy, or getting one ready, can wait; watching can't. Downloads beyond a few at once are asked to come back shortly.
+            var kind = prefetch || string.Equals(purpose, PeerHeaders.Download, StringComparison.OrdinalIgnoreCase)
                 ? UploadKind.Download : UploadKind.Stream;
             IDisposable? slot = null;
-            if (kind == UploadKind.Download && HttpMethods.IsGet(ctx.Request.Method))
+            if (kind == UploadKind.Download && !prefetch && HttpMethods.IsGet(ctx.Request.Method))
             {
                 slot = uploads.TryStartDownload(pc.ClientId);
                 if (slot is null)
@@ -420,7 +423,7 @@ public static class PeerApi
             catch { slot?.Dispose(); throw; }
             // a download: on the list of what I send (which file, to whom, how far), where I can let it go at full speed
             UploadBoard.Transfer? transfer = null;
-            if (kind == UploadKind.Download && HttpMethods.IsGet(ctx.Request.Method))
+            if (kind == UploadKind.Download && !prefetch && HttpMethods.IsGet(ctx.Request.Method))
             {
                 var from = ctx.Request.GetTypedHeaders().Range is { Ranges.Count: > 0 } range && range.Ranges.First().From is long f ? f : 0;
                 transfer = board.Begin(baseId, item.Name, share.Name, pc.ClientId, fs.Length, from);
