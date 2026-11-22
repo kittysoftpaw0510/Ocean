@@ -443,6 +443,9 @@ public static class LocalApi
         g.MapPost("/downloads/clear", (DownloadManager dl) => Results.Json(new { removed = dl.ClearCompleted() }));
         g.MapPost("/downloads/{id}/cancel", (string id, DownloadManager dl) => dl.Cancel(id) ? Results.Ok() : Results.NotFound());
         g.MapPost("/downloads/{id}/retry", (string id, DownloadManager dl) => dl.Retry(id) ? Results.Ok() : Results.NotFound());
+        // what others download from me right now; one of them at full speed (past the upload limit) or back
+        g.MapGet("/uploads", (UploadBoard board) => Results.Json(board.List(), Json.Options));
+        g.MapPost("/uploads/{id}/fullspeed", (string id, bool? on, UploadBoard board) => board.SetFullSpeed(id, on ?? true) ? Results.Ok() : Results.NotFound());
         g.MapPost("/downloads/{id}/pause", (string id, DownloadManager dl) => dl.Pause(id) ? Results.Ok() : Results.NotFound());
         g.MapPost("/downloads/{id}/resume", (string id, DownloadManager dl) => dl.Resume(id) ? Results.Ok() : Results.NotFound());
         g.MapDelete("/downloads/{id}", (string id, DownloadManager dl) => dl.Remove(id) ? Results.Ok() : Results.NotFound());

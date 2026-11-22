@@ -168,19 +168,25 @@ public sealed class UploadScheduler
     }
 }
 
-/// <summary>Read-only stream wrapper that paces reads through the scheduler and releases a download slot when done.</summary>
+/// <summary>
+/// Read-only stream wrapper that paces reads through the scheduler and releases a download slot when done. A
+/// download on the <see cref="UploadBoard"/> is counted there, and isn't paced while its owner lets it go at full speed.
+/// </summary>
 public sealed class ThrottledStream : Stream
 {
     private readonly Stream _inner;
     private readonly UploadScheduler _scheduler;
     private readonly UploadKind _kind;
     private IDisposable? _slot;
+    private UploadBoard.Transfer? _transfer;
     private const int Chunk = 64 * 1024;
 
-    public ThrottledStream(Stream inner, UploadScheduler scheduler, UploadKind kind, IDisposable? slot = null)
+    public ThrottledStream(Stream inner, UploadScheduler scheduler, UploadKind kind, IDisposable? slot = null, UploadBoard.Transfer? transfer = null)
     {
-        _inner = inner; _scheduler = scheduler; _kind = kind; _slot = slot;
+        _inner = inner; _scheduler = scheduler; _kind = kind; _slot = slot; _transfer = transfer;
     }
+
+    private bool Paced => _transfer is not { FullSpeed: true };
 
     public override bool CanRead => _inner.CanRead;
     public override bool CanSeek => _inner.CanSeek;
@@ -195,18 +201,20 @@ public sealed class ThrottledStream : Stream
     public override int Read(byte[] buffer, int offset, int count)
     {
         count = Math.Min(count, Chunk);
-        _scheduler.WaitAsync(count, _kind, CancellationToken.None).AsTask().GetAwaiter().GetResult();
+        if (Paced) _scheduler.WaitAsync(count, _kind, CancellationToken.None).AsTask().GetAwaiter().GetResult();
         var n = _inner.Read(buffer, offset, count);
         _scheduler.Sent(n, _kind);
+        _transfer?.Sent(n, _inner.Position);
         return n;
     }
 
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default)
     {
         if (buffer.Length > Chunk) buffer = buffer[..Chunk];
-        await _scheduler.WaitAsync(buffer.Length, _kind, ct);
+        if (Paced) await _scheduler.WaitAsync(buffer.Length, _kind, ct);
         var n = await _inner.ReadAsync(buffer, ct);
         _scheduler.Sent(n, _kind);
+        _transfer?.Sent(n, _inner.Position);
         return n;
     }
 
@@ -215,7 +223,7 @@ public sealed class ThrottledStream : Stream
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing) { _inner.Dispose(); Interlocked.Exchange(ref _slot, null)?.Dispose(); }
+        if (disposing) { _inner.Dispose(); Interlocked.Exchange(ref _slot, null)?.Dispose(); Interlocked.Exchange(ref _transfer, null)?.Dispose(); }
         base.Dispose(disposing);
     }
 
@@ -223,6 +231,7 @@ public sealed class ThrottledStream : Stream
     {
         await _inner.DisposeAsync();
         Interlocked.Exchange(ref _slot, null)?.Dispose();
+        Interlocked.Exchange(ref _transfer, null)?.Dispose();
         GC.SuppressFinalize(this);
     }
 }

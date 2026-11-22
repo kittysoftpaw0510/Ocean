@@ -64,10 +64,54 @@ public partial class DownloadVm : ObservableObject
     }
 }
 
+/// <summary>A download another PC is making of one of my files, as I send it.</summary>
+public partial class UploadVm : ObservableObject
+{
+    public string Id { get; }
+    public string Name { get; }
+    public string ShareName { get; }
+    [ObservableProperty] private string _who = "";
+    [ObservableProperty] private long _size;
+    [ObservableProperty] private long _sent;
+    [ObservableProperty] private double _speedBps;
+    [ObservableProperty] private bool _fullSpeed;
+    [ObservableProperty] private bool _active;
+
+    public UploadVm(UploadDto d, string who) { Id = d.Id; Name = d.Name; ShareName = d.ShareName; Update(d, who); }
+
+    public void Update(UploadDto d, string who)
+    {
+        Who = who; Size = d.Size; Sent = d.Sent; SpeedBps = d.SpeedBps; FullSpeed = d.FullSpeed; Active = d.Active;
+        OnPropertyChanged(nameof(Percent)); OnPropertyChanged(nameof(ProgressText)); OnPropertyChanged(nameof(FullSpeedTip));
+    }
+
+    public double Percent => Size > 0 ? Math.Min(100, Sent * 100.0 / Size) : 0;
+    /// <summary>"143 MB of 381 MB  ·  11 MB/s  ·  22s left"; between requests: where it stopped.</summary>
+    public string ProgressText
+    {
+        get
+        {
+            var of = Size > 0 ? $"{Format.Bytes(Sent)} of {Format.Bytes(Size)}" : Format.Bytes(Sent);
+            if (!Active) return Sent >= Size && Size > 0 ? $"Sent  ·  {Format.Bytes(Size)}" : $"{of}  ·  stopped (paused or waiting on their side)";
+            if (SpeedBps <= 0) return of;
+            var left = Size > Sent ? (Size - Sent) / SpeedBps : 0;
+            var eta = left < 1 ? "" : left < 60 ? $"  ·  {left:0}s left" : left < 3600 ? $"  ·  {left / 60:0} min left" : $"  ·  {left / 3600:0.#} h left";
+            return $"{of}  ·  {Format.Speed(SpeedBps)}{eta}";
+        }
+    }
+    public string FullSpeedTip => FullSpeed
+        ? "Full speed is on: sent as fast as the network goes. Click to send it at the normal pace again."
+        : "Full speed: send this one as fast as the network goes (past your upload limit, not slowed down for people watching).";
+}
+
 public partial class DownloadsViewModel : ObservableObject
 {
     private readonly MainViewModel _main;
     public ObservableCollection<DownloadVm> Jobs { get; } = new();
+    /// <summary>What others download from me right now (empty: the section doesn't show).</summary>
+    public ObservableCollection<UploadVm> Sending { get; } = new();
+    [ObservableProperty] private int _sendingCount;
+    [ObservableProperty] private string _sendingSummary = "";
     [ObservableProperty] private int _activeCount;
     [ObservableProperty] private string _summary = "";
     [ObservableProperty] private bool _isEmpty = true;
@@ -83,8 +127,35 @@ public partial class DownloadsViewModel : ObservableObject
             Jobs.Clear();
             foreach (var d in list) Jobs.Add(new DownloadVm(d, PeerLabel(d)));
             Recount();
+            SetSending(await _main.Api.GetAsync<List<UploadDto>>("/api/uploads") ?? new());
         }
         catch (Exception ex) { _main.Error("Could not load downloads", ex); }
+    }
+
+    /// <summary>The list of what I send, as the service has it now (rows kept in place, so nothing jumps).</summary>
+    public void SetSending(List<UploadDto> list)
+    {
+        foreach (var gone in Sending.Where(s => list.All(d => d.Id != s.Id)).ToList()) Sending.Remove(gone);
+        foreach (var d in list)
+        {
+            var who = _main.Peers.FirstOrDefault(p => p.Id == d.PeerId)?.Label
+                      ?? (d.PeerUser.Length > 0 ? d.PeerUser : d.PeerName.Length > 0 ? d.PeerName : "another PC");
+            var vm = Sending.FirstOrDefault(s => s.Id == d.Id);
+            if (vm is null) Sending.Add(new UploadVm(d, who)); else vm.Update(d, who);
+        }
+        SendingCount = Sending.Count(s => s.Active);
+        var speed = Sending.Where(s => s.Active).Sum(s => s.SpeedBps);
+        SendingSummary = SendingCount == 0 ? "" : $"{SendingCount} sending{(speed > 0 ? "  ·  " + Format.Speed(speed) : "")}";
+    }
+
+    [RelayCommand]
+    private async Task ToggleFullSpeed(UploadVm? up)
+    {
+        if (up is null) return;
+        var on = !up.FullSpeed;
+        up.FullSpeed = on; // (at once; the next update confirms it)
+        try { await _main.Api.PostAsync($"/api/uploads/{up.Id}/fullspeed?on={(on ? "true" : "false")}"); }
+        catch (Exception ex) { up.FullSpeed = !on; _main.Error("Could not change its speed", ex); }
     }
 
     // the name the sender uses now (older downloads recorded the PC's name)

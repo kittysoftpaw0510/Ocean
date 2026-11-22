@@ -273,6 +273,28 @@ public sealed class DecisionDto
 /// <summary>Paused: stopped by the user, what came so far is kept; Resume goes on from there.</summary>
 public enum DownloadStatus { Queued, Running, Done, Failed, Canceled, Paused }
 
+/// <summary>A download another PC is making of one of my files, as I send it (GET /api/uploads, "uploads" events).</summary>
+public sealed class UploadDto
+{
+    public string Id { get; set; } = "";
+    public string ItemId { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string ShareName { get; set; } = "";
+    /// <summary>The PC downloading it: its id, its name and its user's name.</summary>
+    public string PeerId { get; set; } = "";
+    public string PeerName { get; set; } = "";
+    public string PeerUser { get; set; } = "";
+    public long Size { get; set; }
+    /// <summary>How far it has come (bytes from the start of the file).</summary>
+    public long Sent { get; set; }
+    public double SpeedBps { get; set; }
+    /// <summary>Sent at full speed: past the upload limit, not slowed down for people watching.</summary>
+    public bool FullSpeed { get; set; }
+    /// <summary>A request is being served now (else it paused or is between requests; it goes from the list shortly).</summary>
+    public bool Active { get; set; }
+    public DateTimeOffset StartedAt { get; set; }
+}
+
 public sealed class DownloadJobDto
 {
     public string Id { get; set; } = "";

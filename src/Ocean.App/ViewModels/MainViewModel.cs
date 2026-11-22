@@ -533,6 +533,12 @@ public partial class MainViewModel : ObservableObject
                     if (vm is not null) Pending.Remove(vm);
                     break;
                 }
+                case "uploads":
+                {
+                    var list = Json.Deserialize<List<UploadDto>>(data);
+                    if (list is not null) DownloadsVm.SetSending(list);
+                    break;
+                }
                 case "download":
                 {
                     var dto = Json.Deserialize<DownloadJobDto>(data);

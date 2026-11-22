@@ -751,6 +751,12 @@ Jobs are persisted (`downloads.json`) and resumed with HTTP ranges from a `.ocea
 = `<download dir>\<peer name>\<relative path>` after sanitizing each segment (invalid characters,
 reserved device names, 200-char segment cap, unique suffix on collision); .NET handles paths beyond
 `MAX_PATH`. Up to N parallel jobs (setting), 3 automatic retries with back-off for transient errors.
+What others download from me is on the `UploadBoard` (`GET /api/uploads`, "uploads" events every second while
+anything is sent): one row per file and PC (its requests, retries and ranges together; it stays 20 s after the last
+request so a retry keeps its settings), how far (the highest file position sent), speed (last second, smoothed).
+`POST /api/uploads/{id}/fullspeed?on=` lets one go unpaced: its `ThrottledStream` skips the scheduler (the upload
+limit and the share downloads get while someone watches) while still counting its bytes. It still takes one of the
+download slots, and a bridge in between keeps its own limit.
 A job can be paused (`POST /api/downloads/{id}/pause`, `DownloadStatus.Paused`): a running one is stopped and,
 unlike a canceled one, keeps its `.oceanpart`; a waiting one just stops waiting. Paused is persisted, so it stays
 paused over a restart and frees its slot for the next job. `/resume` queues it again and it goes on from the

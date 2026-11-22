@@ -4,6 +4,7 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
@@ -23,7 +24,75 @@
             </StackPanel>
         </Grid>
 
-        <ListBox Grid.Row="1" ItemsSource="{Binding Jobs}" Margin="12,0">
+        <!-- what others download from me right now: which file, to whom, how far; one can be let go at full speed -->
+        <StackPanel Grid.Row="1" Margin="24,0,24,10" Visibility="{Binding Sending.Count, Converter={StaticResource CountToVis}}">
+            <StackPanel Orientation="Horizontal" Margin="2,0,0,6">
+                <TextBlock Text="&#xE898;" Style="{StaticResource Icon}" FontSize="11" Foreground="{StaticResource Accent}" Margin="0,0,7,0" VerticalAlignment="Center"/>
+                <TextBlock Text="SENDING TO OTHERS" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource TextMuted}" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding SendingSummary}" Style="{StaticResource Dim}" Margin="10,0,0,0" VerticalAlignment="Center"/>
+            </StackPanel>
+            <ScrollViewer MaxHeight="232" VerticalScrollBarVisibility="Auto">
+                <ItemsControl ItemsSource="{Binding Sending}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Margin="0,2" CornerRadius="10" Background="{StaticResource Bg1}" BorderBrush="{StaticResource Border}" BorderThickness="1" Padding="14,8">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Right" Style="{StaticResource Dim}" Margin="12,0,0,0" VerticalAlignment="Center">
+                                                <Run Text="to "/><Run Text="{Binding Who, Mode=OneWay}" Foreground="{StaticResource Text}" FontWeight="SemiBold"/>
+                                            </TextBlock>
+                                            <TextBlock TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" Foreground="{StaticResource Text}">
+                                                <Run Text="{Binding Name, Mode=OneWay}" FontWeight="SemiBold"/><Run Text="   "/><Run Text="{Binding ShareName, Mode=OneWay}" Foreground="{StaticResource TextDim}" FontSize="12"/>
+                                            </TextBlock>
+                                        </DockPanel>
+                                        <ProgressBar Value="{Binding Percent, Mode=OneWay}" Maximum="100" Height="4" Margin="0,6,0,0">
+                                            <ProgressBar.Style>
+                                                <Style TargetType="ProgressBar" BasedOn="{StaticResource {x:Type ProgressBar}}">
+                                                    <Style.Triggers><DataTrigger Binding="{Binding Active}" Value="False"><Setter Property="Opacity" Value="0.4"/></DataTrigger></Style.Triggers>
+                                                </Style>
+                                            </ProgressBar.Style>
+                                        </ProgressBar>
+                                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                            <Border CornerRadius="4" Padding="5,0,6,1" Margin="0,0,8,0" Background="#2614B8A6" VerticalAlignment="Center"
+                                                    Visibility="{Binding FullSpeed, Converter={StaticResource BoolToVis}}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="&#xE945;" Style="{StaticResource Icon}" FontSize="9" Foreground="{StaticResource Accent}" Margin="0,0,3,0" VerticalAlignment="Center"/>
+                                                    <TextBlock Text="Full speed" FontSize="10.5" FontWeight="SemiBold" Foreground="{StaticResource Accent}" VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                            </Border>
+                                            <TextBlock Text="{Binding ProgressText}" Style="{StaticResource Muted}" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <!-- full speed: on (lit) / off -->
+                                    <Button Grid.Column="1" Content="&#xE945;" ToolTip="{Binding FullSpeedTip}" AutomationProperties.Name="Full speed" Margin="12,0,0,0" VerticalAlignment="Center"
+                                            Command="{Binding DataContext.ToggleFullSpeedCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">
+                                        <Button.Style>
+                                            <Style TargetType="Button" BasedOn="{StaticResource BtnIcon}">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding FullSpeed}" Value="True">
+                                                        <Setter Property="Foreground" Value="{StaticResource Accent}"/>
+                                                        <Setter Property="Background" Value="#2614B8A6"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+            <TextBlock Text="MY DOWNLOADS" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource TextMuted}" Margin="2,14,0,0"
+                       Visibility="{Binding IsEmpty, Converter={StaticResource InvBoolToVis}}"/>
+        </StackPanel>
+
+        <ListBox Grid.Row="2" ItemsSource="{Binding Jobs}" Margin="12,0">
             <ListBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
             <ListBox.ItemTemplate>
                 <DataTemplate>
@@ -92,7 +161,7 @@
             </ListBox.ItemTemplate>
         </ListBox>
 
-        <StackPanel Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVis}}">
+        <StackPanel Grid.Row="2" VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVis}}">
             <TextBlock Text="&#xE896;" Style="{StaticResource Icon}" FontSize="36" Foreground="{StaticResource TextDim}"/>
             <TextBlock Text="No downloads yet" Style="{StaticResource H2}" HorizontalAlignment="Center" Margin="0,12,0,4"/>
             <TextBlock Text="Right-click any file on a node, or use “Download all” on a share." Style="{StaticResource Muted}"/>

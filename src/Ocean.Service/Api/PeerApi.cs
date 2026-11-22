@@ -384,7 +384,7 @@ public static class PeerApi
             return Results.Json(light.Request(itemId, enqueue: HttpMethods.IsPost(ctx.Request.Method)), Json.Options);
         });
 
-        g.MapMethods("/stream/{itemId}", new[] { "GET", "HEAD" }, (HttpContext ctx, string itemId, CatalogService catalog, AccessService access, UploadScheduler uploads, ConfigStore config, Media.LightCopies light, ViewerTracker viewers) =>
+        g.MapMethods("/stream/{itemId}", new[] { "GET", "HEAD" }, (HttpContext ctx, string itemId, CatalogService catalog, AccessService access, UploadScheduler uploads, ConfigStore config, Media.LightCopies light, ViewerTracker viewers, UploadBoard board) =>
         {
             if (config.Current.SharingPaused) return Results.StatusCode(503);
             // "{id}@light": the lighter copy instead of the original (same locks)
@@ -418,8 +418,15 @@ public static class PeerApi
             catch (DirectoryNotFoundException) { slot?.Dispose(); return Results.NotFound(); }
             catch (UnauthorizedAccessException) { slot?.Dispose(); return Results.StatusCode(403); }
             catch { slot?.Dispose(); throw; }
-            // always paced and metered: tells the scheduler who is watching and how fast this PC uploads
-            var body = new ThrottledStream(fs, uploads, kind, slot);
+            // a download: on the list of what I send (which file, to whom, how far), where I can let it go at full speed
+            UploadBoard.Transfer? transfer = null;
+            if (kind == UploadKind.Download && HttpMethods.IsGet(ctx.Request.Method))
+            {
+                var from = ctx.Request.GetTypedHeaders().Range is { Ranges.Count: > 0 } range && range.Ranges.First().From is long f ? f : 0;
+                transfer = board.Begin(baseId, item.Name, share.Name, pc.ClientId, fs.Length, from);
+            }
+            // always paced (unless let go at full speed) and metered: tells the scheduler who is watching and how fast this PC uploads
+            var body = new ThrottledStream(fs, uploads, kind, slot, transfer);
             ctx.Response.Headers.CacheControl = "private, no-transform";
             return Results.Stream(body, MediaKinds.ContentType(full), lastModified: item.ModifiedAt,
                 entityTag: new EntityTagHeaderValue($"\"{item.Id}-{item.ModifiedAt.UtcTicks}\""), enableRangeProcessing: true);
