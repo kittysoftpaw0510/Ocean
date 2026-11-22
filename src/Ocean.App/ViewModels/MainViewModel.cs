@@ -542,6 +542,17 @@ public partial class MainViewModel : ObservableObject
                     if (vm is not null) Pending.Remove(vm);
                     break;
                 }
+                case "uploadStarted":
+                {
+                    var s = Json.Deserialize<UploadStartedDto>(data);
+                    if (s is null) break;
+                    var who = Peers.FirstOrDefault(x => x.Id == s.PeerId)?.Label ?? (s.PeerUser.Length > 0 ? s.PeerUser : s.PeerName.Length > 0 ? s.PeerName : "Another PC");
+                    var what = s.Count <= 1 ? $"“{s.Names.FirstOrDefault()}”" : $"{s.Count} files: " + string.Join(", ", s.Names) + (s.Count > s.Names.Count ? "…" : "");
+                    var from = s.Shares.Count == 1 ? $" from {s.Shares[0]}" : "";
+                    Toast($"{who} is downloading from you", what + from, "info", ShowDownloads);
+                    TrayNotify?.Invoke($"{who} is downloading from you", what + from, ShowDownloads); // (shown only while the window is closed to the tray)
+                    break;
+                }
                 case "uploads":
                 {
                     var list = Json.Deserialize<List<UploadDto>>(data);

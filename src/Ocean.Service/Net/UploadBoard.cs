@@ -9,11 +9,18 @@ namespace Ocean.Service.Net;
 /// to whom, how far, how fast. The owner can let one go at full speed: past the upload limit from Settings and not
 /// slowed down for people watching. One entry per file and PC: a download that comes in several requests (retries,
 /// ranges) is one row, and it stays a little after its last request (so a retry keeps its full speed).
-/// Published as "uploads" events every second while anything is sent.
+/// Published as "uploads" events every second while anything is sent. When a PC starts downloading from me (after 2
+/// minutes without any), an "uploadStarted" event tells the app once (with the files that began in its first 2
+/// seconds), not once per file: a "Download all" of a folder is one notice.
 /// </summary>
 public sealed class UploadBoard : IDisposable
 {
     private static readonly TimeSpan Linger = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan QuietBefore = TimeSpan.FromMinutes(2), Gather = TimeSpan.FromSeconds(2);
+
+    // a PC's downloads: when it was last busy, and the notice being gathered (its first files)
+    private readonly Dictionary<string, DateTimeOffset> _busyAt = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (DateTimeOffset Due, List<string> Names, List<string> Shares)> _notices = new(StringComparer.Ordinal);
 
     internal sealed class Entry
     {
@@ -45,8 +52,16 @@ public sealed class UploadBoard : IDisposable
         Entry e;
         lock (_lock)
         {
+            var now = DateTimeOffset.UtcNow;
             if (!_entries.TryGetValue(id, out e!))
-                _entries[id] = e = new Entry { Id = id, ItemId = itemId, Name = name, ShareName = shareName, ClientId = clientId, StartedAt = DateTimeOffset.UtcNow };
+            {
+                _entries[id] = e = new Entry { Id = id, ItemId = itemId, Name = name, ShareName = shareName, ClientId = clientId, StartedAt = now };
+                // a PC that starts downloading from me (it hadn't for a while): the owner is told, once
+                if (_notices.TryGetValue(clientId, out var n)) { if (!n.Names.Contains(name)) n.Names.Add(name); if (!n.Shares.Contains(shareName)) n.Shares.Add(shareName); }
+                else if (!_busyAt.TryGetValue(clientId, out var busy) || now - busy > QuietBefore)
+                    _notices[clientId] = (now + Gather, new List<string> { name }, new List<string> { shareName });
+            }
+            _busyAt[clientId] = now;
             e.Size = size; e.Position = from; e.Open++; e.LastActive = DateTimeOffset.UtcNow;
         }
         Publish();
@@ -117,6 +132,18 @@ public sealed class UploadBoard : IDisposable
             foreach (var gone in _entries.Values.Where(e => e.Open <= 0 && now - e.LastActive > Linger).Select(e => e.Id).ToList())
                 _entries.Remove(gone);
             any = _entries.Count > 0;
+            foreach (var e in _entries.Values.Where(e => e.Open > 0)) _busyAt[e.ClientId] = now;
+            foreach (var quiet in _busyAt.Where(kv => now - kv.Value > QuietBefore * 2).Select(kv => kv.Key).ToList()) _busyAt.Remove(quiet);
+            foreach (var (client, n) in _notices.Where(kv => kv.Value.Due <= now).ToList())
+            {
+                _notices.Remove(client);
+                _registry.TryGet(client, out var peer);
+                _events.Publish("uploadStarted", new UploadStartedDto
+                {
+                    PeerId = client, PeerName = peer?.Name ?? "", PeerUser = peer?.User ?? "",
+                    Names = n.Names.Take(5).ToList(), Count = n.Names.Count, Shares = n.Shares,
+                });
+            }
         }
         // every second while anything is here, once more when the last one went
         if (any || _announced) Publish();

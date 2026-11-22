@@ -300,6 +300,18 @@ public sealed class PrefetchDto
     public bool Next { get; set; }
 }
 
+/// <summary>Another PC started downloading from me ("uploadStarted" event): who, and the files it began with.</summary>
+public sealed class UploadStartedDto
+{
+    public string PeerId { get; set; } = "";
+    public string PeerName { get; set; } = "";
+    public string PeerUser { get; set; } = "";
+    /// <summary>The first files (at most 5) and how many began together.</summary>
+    public List<string> Names { get; set; } = new();
+    public int Count { get; set; }
+    public List<string> Shares { get; set; } = new();
+}
+
 /// <summary>A download another PC is making of one of my files, as I send it (GET /api/uploads, "uploads" events).</summary>
 public sealed class UploadDto
 {

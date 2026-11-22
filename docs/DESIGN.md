@@ -763,6 +763,8 @@ reserved device names, 200-char segment cap, unique suffix on collision); .NET h
 What others download from me is on the `UploadBoard` (`GET /api/uploads`, "uploads" events every second while
 anything is sent): one row per file and PC (its requests, retries and ranges together; it stays 20 s after the last
 request so a retry keeps its settings), how far (the highest file position sent), speed (last second, smoothed).
+A PC that starts downloading after 2 minutes without any is announced once ("uploadStarted": who, the files that
+began in the first 2 s, their shares); the app shows a toast and, in the tray, a Windows notification.
 `POST /api/uploads/{id}/fullspeed?on=` lets one go unpaced: its `ThrottledStream` skips the scheduler (the upload
 limit and the share downloads get while someone watches) while still counting its bytes. It still takes one of the
 download slots, and a bridge in between keeps its own limit.
