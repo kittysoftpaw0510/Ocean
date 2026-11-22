@@ -56,6 +56,9 @@ public static class PdfFiles
     public static Task<byte[]> RenderAsync(PdfPage page, uint pixelWidth)
         => RenderAsync(page, pixelWidth, (uint)Math.Max(1, page.Size.Height * pixelWidth / Math.Max(1, page.Size.Width)), jpeg: false);
 
+    /// <summary>A page drawn exactly <paramref name="w"/> × <paramref name="h"/> pixels: PNG.</summary>
+    public static Task<byte[]> RenderAsync(PdfPage page, uint w, uint h) => RenderAsync(page, w, h, jpeg: false);
+
     private static async Task<byte[]> RenderAsync(PdfPage page, uint w, uint h, bool jpeg)
     {
         using var stream = new InMemoryRandomAccessStream();

@@ -62,6 +62,19 @@ public static class MediaKinds
     /// <summary>Named as a video, a song, a picture or a PDF: what Ocean plays or shows itself.</summary>
     public static bool IsMedia(string path) => Map.ContainsKey(Path.GetExtension(path));
 
+    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".txt", ".text", ".md", ".markdown", ".log", ".csv", ".tsv", ".json", ".xml", ".ini", ".cfg", ".conf", ".srt", ".vtt",
+        ".yaml", ".yml", ".toml", ".nfo", ".cs", ".js", ".ts", ".jsx", ".tsx", ".py", ".java", ".c", ".cpp", ".h", ".hpp", ".go",
+        ".rs", ".php", ".rb", ".swift", ".kt", ".html", ".htm", ".css", ".sql", ".sh", ".ps1", ".bat", ".cmd", ".gitignore",
+    };
+
+    /// <summary>
+    /// Any other file that is plain text (txt, md, log, csv, json, code...): Ocean shows it in its text viewer. On the
+    /// network it stays a "file" (an older Ocean downloads it); the app decides from its name.
+    /// </summary>
+    public static bool IsText(string name) => TextExtensions.Contains(Path.GetExtension(name));
+
     /// <summary>Ocean plays or shows this kind itself; the rest ("file") can only be downloaded.</summary>
     public static bool Opens(string? kind) => kind != File;
 

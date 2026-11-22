@@ -13,10 +13,15 @@ and every byte between them travels over mutually authenticated, end-to-end encr
   page n of m). The browse page shows each file's kind and filters by it (*All · Videos · Music · Pictures ·
   PDFs · Other*). PCs on an older Ocean see the videos only.
 - **Any other file** as well (*Other files* in the same list: documents, spreadsheets, archives, programs…).
-  Ocean doesn't open these: others download them. With no preview to show, each is drawn by its type (an icon
+  Ocean doesn't open these: others download them. Text files (txt, md, log, csv, json, xml, subtitles, code…)
+  are the exception: they open in a text viewer (any encoding, zoom, wrap). With no preview to show, each is drawn by its type (an icon
   and a colour per family, and its extension: DOCX, XLSX, ZIP…). Leftovers of other programs (half downloads,
   temporary and lock files, `Thumbs.db`) are never shared. Both Browse and *My shares* can show one kind alone
-  (from all folders of the share) and sort by *Type*. Ocean 1.6.4 and older are not told about these files.
+  in the folder shown and sort by *Type*. Ocean 1.6.4 and older are not told about these files.
+- **Find** (Ctrl+F) in a PDF or a text: Enter / Shift+Enter go through the matches, all marked, the current one
+  stronger. A PDF's words are read by Windows' own text recognition, on this PC (no internet), page by page from
+  the one in view, so scanned PDFs are searchable too. PDF pages are drawn for exactly the screen pixels they
+  take, so they stay sharp at any zoom.
 - **Organize** a share into folders inside Ocean: create, rename and remove folders, and move videos between them
   (drag and drop, or *Move to…*). This is Ocean's view only; files on your disk are never moved or renamed.
 - **Protect** a group, or a single video inside it: public, password, or *ask me each time*.

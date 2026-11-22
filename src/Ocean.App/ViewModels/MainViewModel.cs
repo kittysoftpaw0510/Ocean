@@ -96,16 +96,18 @@ public partial class MainViewModel : ObservableObject
     public ViewerViewModel Viewer { get; } = new();
 
     /// <summary>
-    /// Another PC's file, opened as its kind is: a video or a song in the player, a picture or a PDF in the viewer.
+    /// Another PC's file, opened as its kind is: a video or a song in the player, a picture, a PDF or a text in the
+    /// viewer; any other file is downloaded.
     /// <paramref name="siblings"/>: the list it was opened from (a picture: ←/→ through the pictures of its folder).
     /// </summary>
     public void OpenItem(ItemVm item, PeerVm peer, IReadOnlyList<ItemVm>? siblings = null, double startAt = 0)
     {
+        ViewerEntry Entry(ItemVm i) => new(i.Name, Api.StreamUrl(peer.Id, i.Id, i.Name), false, $"{peer.Label}  ·  {i.Location}", i.Kind,
+            () => i.Thumb, () => _ = BrowseFor(peer).DownloadCommand.ExecuteAsync(i));
+        if (item.IsText) { AppLog.Info("Viewer", $"text {item.Name} from {peer.Label}"); Viewer.OpenText(Entry(item)); return; }
         // any other file: Ocean can't show it, it is downloaded
         if (item.IsFile) { _ = BrowseFor(peer).DownloadCommand.ExecuteAsync(item); return; }
         if (item.IsPlayable) { Player.Open(item, Api.StreamUrl(peer.Id, item.Id, item.Name), peer, startAt); return; }
-        ViewerEntry Entry(ItemVm i) => new(i.Name, Api.StreamUrl(peer.Id, i.Id, i.Name), false, $"{peer.Label}  ·  {i.Location}", i.Kind,
-            () => i.Thumb, () => _ = BrowseFor(peer).DownloadCommand.ExecuteAsync(i));
         AppLog.Info("Viewer", $"{(item.IsPdf ? "pdf" : "picture")} {item.Name} from {peer.Label}");
         if (item.IsPdf) { Viewer.OpenPdf(Entry(item)); return; }
         var pictures = Pictures(item, siblings, i => i.IsImage && !i.IsLocked && i.Dto.ShareId == item.Dto.ShareId && i.Dto.Folder == item.Dto.Folder);
@@ -115,10 +117,11 @@ public partial class MainViewModel : ObservableObject
     /// <summary>One of my own shared files, opened as its kind is (see <see cref="OpenItem"/>).</summary>
     public void OpenLocalItem(LocalItemVm item, string shareName, IReadOnlyList<LocalItemVm>? siblings = null)
     {
+        ViewerEntry Entry(LocalItemVm i) => new(i.Name, i.FullPath, true, $"My shares  ·  {shareName}{(i.Folder.Length > 0 ? "  ›  " + i.Folder : "")}", i.Kind, () => i.Thumb);
+        if (item.IsText) { Viewer.OpenText(Entry(item)); return; }
         // any other file of mine: shown where it is on the disk
         if (item.IsFile) { SharesVm.RevealItemCommand.Execute(item); return; }
         if (item.IsPlayable) { Player.OpenLocal(item, shareName); return; }
-        ViewerEntry Entry(LocalItemVm i) => new(i.Name, i.FullPath, true, $"My shares  ·  {shareName}{(i.Folder.Length > 0 ? "  ›  " + i.Folder : "")}", i.Kind, () => i.Thumb);
         if (item.IsPdf) { Viewer.OpenPdf(Entry(item)); return; }
         var pictures = Pictures(item, siblings, i => i.IsImage && i.Dto.Folder == item.Dto.Folder);
         Viewer.OpenImages(pictures.Select(Entry).ToList(), pictures.IndexOf(item));

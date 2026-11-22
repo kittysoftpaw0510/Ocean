@@ -71,13 +71,15 @@ public partial class LocalItemVm : ObservableObject
     public bool IsPlayable => Kind is Core.Media.MediaKinds.Video or Core.Media.MediaKinds.Audio;
     /// <summary>Any other file: Ocean can't show it (others download it).</summary>
     public bool IsFile => Kind == Core.Media.MediaKinds.File;
-    public bool Opens => !IsFile;
+    /// <summary>Any other file that is plain text: shown in the text viewer.</summary>
+    public bool IsText => IsFile && Core.Media.MediaKinds.IsText(Name);
+    public bool Opens => !IsFile || IsText;
     public string? TypeLabel => IsFile ? Core.Media.MediaKinds.ExtensionLabel(Name) : null;
     public System.Windows.Media.Brush TypeBrush => IsFile ? KindText.FileBrush(Name) : KindText.Dim;
     public string Ext => Path.GetExtension(Name);
     public string KindGlyph => IsFile ? KindText.FileGlyph(Name) : KindText.Glyph(Kind);
     public string? KindBadge => KindText.Badge(Kind);
-    public string OpenVerb => KindText.Verb(Kind);
+    public string OpenVerb => IsText ? "Open" : KindText.Verb(Kind);
     public string OpenGlyph => IsPlayable ? "\uE768" : "\uE890";
     public string LightTag => Dto.Light == LightVariant.Ready ? $"  ·  Light copy {Format.Bytes(Dto.LightSize)}" : Dto.Light == LightVariant.Preparing ? "  ·  Preparing a light copy…" : "";
     public string AddedText => Format.Ago(Dto.AddedAt);
