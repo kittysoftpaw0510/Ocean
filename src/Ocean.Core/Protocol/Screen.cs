@@ -331,6 +331,8 @@ public sealed class BoardItemDto
 public sealed class BoardOpDto
 {
     public const string Put = "put", Delete = "delete", Clear = "clear", Restore = "restore", Text = "text", Caret = "caret";
+    /// <summary>"Follow me": everybody else goes to what the sender sees on the board (<see cref="Page"/>, <see cref="Top"/>). Nothing on the board changes.</summary>
+    public const string Follow = "follow";
     public string Op { get; set; } = Put;
     public BoardItemDto? Item { get; set; }
     /// <summary>An item (delete); the sender's own name for an edit of the text (it knows its edit when it comes back).</summary>
@@ -347,6 +349,11 @@ public sealed class BoardOpDto
     public long TextRev { get; set; }
     /// <summary>The author's caret, after the edit.</summary>
     public int? CaretAt { get; set; }
+    /// <summary>Follow: the page (draw, text) and where it is scrolled to (the drawing: its top in board units; the text: the first character in view).</summary>
+    public string? Page { get; set; }
+    public double? Top { get; set; }
+    /// <summary>At the host: when a follow was logged (one replayed later to a viewer that was away is stale and left out).</summary>
+    [System.Text.Json.Serialization.JsonIgnore] public DateTime LoggedAt { get; set; }
     /// <summary>Set by the host: the board's version after this change.</summary>
     public long Rev { get; set; }
     public string SessionId { get; set; } = "";

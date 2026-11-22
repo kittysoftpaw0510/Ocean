@@ -500,6 +500,12 @@ with the PC's sound or without. View only (nothing typed or clicked at the viewe
     one step (a new line, a pause of a second or 5 s of typing starts another). Clear and Copy on its bar. Checked
     with 300 random runs of three people typing, undoing and redoing at once with changes arriving in any order
     (the host's own code, the app's own code): the same text everywhere every time, and between two test nodes.
+  - **Follow** (the eye on the bar, "Follow" where there is room): `follow {page, top}` (the drawing: the top of
+    the view in board units; the text: the first character in view) goes to everybody like a change, but changes
+    nothing on the board. Everybody else's board opens on that page, scrolled there, with "Gabe brought you here";
+    the one who clicked is told "Everybody sees ... here now". A one-off, not a lock: anybody moves on freely after.
+    The host leaves a follow older than 5 s out when a viewer catches up later (one that was away isn't taken
+    anywhere afterwards). 17 to 35 ms between two test nodes.
   - An older host has no text page and no shapes: the page says so, and a shape gets "the Ocean of the one sharing
     is older: update it there". Viewers: `GET /p/screen/{id}/board`, then `GET /p/screen/{id}/board/stream?since=` (a line
   of JSON per change, an empty line as keep-alive, `reset` when the change is no longer kept), and

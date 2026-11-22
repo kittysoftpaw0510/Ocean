@@ -80,6 +80,8 @@ public partial class BoardView : UserControl
         PageBox.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler((_, _) => Carets()));
         PageBox.SizeChanged += (_, _) => Carets();
         PageBox.MaxLength = BoardLimits.MaxPage;
+        // a narrow board: Follow shows only its eye
+        SizeChanged += (_, _) => FollowText.Visibility = ActualWidth >= 340 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     public void Attach(BoardVm vm)
@@ -91,6 +93,7 @@ public partial class BoardView : UserControl
         vm.Put += OnPut;
         vm.Removed += OnRemoved;
         vm.PropertyChanged += OnVmChanged;
+        vm.FollowTo += OnFollowTo;
         vm.TextPage.Changed += OnPageChanged;
         vm.TextPage.Replaced += OnPageReplaced;
         vm.TextPage.CaretsMoved += Carets;
@@ -111,6 +114,7 @@ public partial class BoardView : UserControl
         if (_vm is not { } vm) return;
         EndEdit(commit: true);
         vm.Reset -= Rebuild; vm.Put -= OnPut; vm.Removed -= OnRemoved; vm.PropertyChanged -= OnVmChanged;
+        vm.FollowTo -= OnFollowTo;
         vm.TextPage.Changed -= OnPageChanged; vm.TextPage.Replaced -= OnPageReplaced; vm.TextPage.CaretsMoved -= Carets; vm.TextPage.PropertyChanged -= OnTextVmChanged;
         if (_shapes is not null) _shapes.IsOpen = false;
         _vm = null;
@@ -728,6 +732,39 @@ public partial class BoardView : UserControl
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) { if (_vm is not null) _vm.Visible = false; }
+
+    // ------------------------------------------------------------------ follow me
+
+    /// <summary>Everybody else goes to what this panel shows: its page, and where it is scrolled to.</summary>
+    private void Follow_Click(object sender, RoutedEventArgs e)
+    {
+        if (_vm is null) return;
+        double top;
+        if (OnText) top = Math.Max(0, PageBox.GetCharacterIndexFromPoint(new Point(12, PageBox.Padding.Top + 4), true));
+        else { EndEdit(commit: true); top = Scroller.VerticalOffset / Scale; }
+        _ = _vm.FollowMeAsync(top);
+    }
+
+    /// <summary>Somebody said "follow me" (the page is switched already): to their place, once the page is laid out.</summary>
+    private void OnFollowTo(string page, double top)
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (page == BoardVm.TextPageName)
+            {
+                var at = (int)Math.Clamp(top, 0, PageBox.Text.Length);
+                var r = PageBox.GetRectFromCharacterIndex(at);
+                if (!r.IsEmpty) PageBox.ScrollToVerticalOffset(Math.Max(0, PageBox.VerticalOffset + r.Top - PageBox.Padding.Top));
+                Carets();
+            }
+            else
+            {
+                EndEdit(commit: true);
+                Grow();
+                Scroller.ScrollToVerticalOffset(Math.Max(0, top * Scale));
+            }
+        }, DispatcherPriority.Loaded);
+    }
 
     private static string NewId() => Guid.NewGuid().ToString("N")[..16];
 

@@ -8,6 +8,8 @@ namespace Ocean.Service.Screen;
 /// with the session. Two pages:
 /// The drawing: an item is changed only by its author; anybody may wipe one away (the eraser) or clear them all.
 /// What goes is kept for a while, so whoever wiped it can bring it back (undo: restore), as it was, by its author.
+/// "Follow me": anybody sends everybody else to what they see on the board (a page and a place on it); it is
+/// passed on like a change, and left out for a viewer that only catches up on it later.
 /// The text: one text everybody types in at once. Edits come with the version they were made on; one made on an
 /// older version is transformed past the edits that came in between (<see cref="TextOp.Transform"/>), so nobody's
 /// typing is lost and everybody ends up with the same text.
@@ -139,6 +141,12 @@ public sealed class ScreenBoard
                     done = Log(new BoardOpDto { Op = BoardOpDto.Text, Id = op.Id, Edit = edit.ToWire(), Base = _textRev - 1, TextRev = _textRev, CaretAt = caret is { } k ? Math.Clamp(k, 0, _text.Length) : null });
                     break;
                 }
+                case BoardOpDto.Follow:
+                {
+                    if (op.Page is not ("draw" or "text")) return Refuse("no such page");
+                    done = Log(new BoardOpDto { Op = BoardOpDto.Follow, Page = op.Page, Top = Math.Clamp(op.Top ?? 0, 0, 10_000_000), LoggedAt = DateTime.UtcNow });
+                    break;
+                }
                 case BoardOpDto.Caret:
                 {
                     if (op.CaretAt is not { } c || op.Base > _textRev || op.Base < _textRev - _textLog.Count) return Refuse("resync");
@@ -189,7 +197,9 @@ public sealed class ScreenBoard
         {
             if (rev >= _rev) return new();
             if (_log.Count == 0 || _log[0].Rev > rev + 1) return null;
-            return _log.Where(o => o.Rev > rev).ToList();
+            // (a "follow me" is for now: one a viewer missed while it was away doesn't take it anywhere later)
+            var now = DateTime.UtcNow;
+            return _log.Where(o => o.Rev > rev && (o.Op != BoardOpDto.Follow || now - o.LoggedAt < TimeSpan.FromSeconds(5))).ToList();
         }
     }
 

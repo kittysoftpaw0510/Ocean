@@ -127,6 +127,29 @@
                                     </RadioButton>
                                 </StackPanel>
                             </Border>
+                            <!-- follow me: everybody else goes to this page, at this place (the word goes when the board is narrow) -->
+                            <Button x:Name="FollowButton" Click="Follow_Click" Margin="6,0,0,0" Cursor="Hand" Foreground="#93A3B8" VerticalAlignment="Center"
+                                    ToolTip="Follow: everybody in this sharing goes to what you see here: this page, at this place" AutomationProperties.Name="Follow: bring everybody here">
+                                <Button.Template>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border x:Name="Bd" Background="Transparent" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="6" Height="22" Padding="6,0,7,0">
+                                            <ContentPresenter VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="#402DD4BF"/>
+                                                <Setter TargetName="Bd" Property="BorderBrush" Value="#662DD4BF"/>
+                                                <Setter Property="Foreground" Value="#5EEAD4"/>
+                                            </Trigger>
+                                            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Background" Value="#662DD4BF"/></Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Button.Template>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="&#xE890;" FontFamily="Segoe MDL2 Assets" FontSize="12" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="FollowText" Text="Follow" FontSize="11.5" FontWeight="SemiBold" Margin="5,0,0,1" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button>
                         </StackPanel>
                         <Border x:Name="Grip" Background="Transparent" Cursor="SizeAll" ToolTip="{Binding Title}"/>
                     </DockPanel>

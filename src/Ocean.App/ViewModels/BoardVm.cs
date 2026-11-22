@@ -14,6 +14,8 @@ public sealed record BoardChange(string Id, BoardItemDto? Before, BoardItemDto? 
 /// business.
 /// Changes may come in any order (the answer to my change and the event of somebody else's): each item remembers
 /// the version it came with, so an older change never undoes a newer one.
+/// "Follow me" (anybody) sends everybody else to the page and the place this PC shows (<see cref="FollowMeAsync"/>);
+/// one from somebody else opens the board here on theirs (<see cref="FollowTo"/>).
 /// Undo and redo take back my own changes to the drawing (what I drew, changed, wiped away or cleared), never
 /// somebody else's; a step that no longer applies (somebody wiped my stroke away meanwhile) is passed over.
 /// </summary>
@@ -55,6 +57,8 @@ public sealed partial class BoardVm : ObservableObject
     public event Action<string>? Removed;
     /// <summary>Somebody else put something on the board for the first time while it was never shown here: show it.</summary>
     public event Action? Wanted;
+    /// <summary>Somebody said "follow me": the page is switched already; the panel goes to this place on it (the drawing: its top in board units; the text: the first character in view).</summary>
+    public event Action<string, double>? FollowTo;
 
     [ObservableProperty] private bool _visible;
     /// <summary>The page shown: <see cref="DrawPage"/> or <see cref="TextPageName"/>.</summary>
@@ -133,6 +137,14 @@ public sealed partial class BoardVm : ObservableObject
                 break;
             case BoardOpDto.Text or BoardOpDto.Caret:
                 TextPage.Receive(op);
+                break;
+            case BoardOpDto.Follow when op.ById != MyId && op.Page is DrawPage or TextPageName:
+                // everybody goes where they are: the board opens, on their page, at their place
+                _everShown = true;
+                Visible = true;
+                Page = op.Page;
+                FollowTo?.Invoke(op.Page, op.Top ?? 0);
+                Say($"{(string.IsNullOrEmpty(op.ByName) ? "Somebody" : op.ByName)} brought you here");
                 break;
         }
     }
@@ -286,6 +298,15 @@ public sealed partial class BoardVm : ObservableObject
     private static bool Same(BoardItemDto a, BoardItemDto b)
         => a.Kind == b.Kind && a.Shape == b.Shape && a.X == b.X && a.Y == b.Y && a.W == b.W && a.H == b.H && a.Size == b.Size && a.Color == b.Color && a.Text == b.Text
            && (a.Image?.Length ?? 0) == (b.Image?.Length ?? 0) && (a.Points ?? new()).SequenceEqual(b.Points ?? new());
+
+    // ------------------------------------------------------------------ follow me
+
+    /// <summary>"Follow me": everybody else in the sharing goes to this page, at this place on it.</summary>
+    public async Task FollowMeAsync(double top)
+    {
+        if (await SendAsync(new BoardOpDto { Op = BoardOpDto.Follow, Page = Page, Top = top }) is not null)
+            Say(Page == TextPageName ? "Everybody sees the text here now" : "Everybody sees the drawing here now");
+    }
 
     // ------------------------------------------------------------------ a short word at the bottom
 
