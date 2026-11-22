@@ -7,6 +7,9 @@ public static class PeerHeaders
     public const string Purpose = "X-Ocean-Purpose";
     public const string Download = "download";
 
+    /// <summary>The kinds of file this Ocean can open ("video,audio,image,pdf"); an older one sends none and gets videos only.</summary>
+    public const string Kinds = "X-Ocean-Kinds";
+
     /// <summary>ErrorDto.Error when the owner already serves enough downloads (503 + Retry-After).</summary>
     public const string Busy = "busy";
 }

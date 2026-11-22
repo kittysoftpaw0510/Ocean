@@ -92,6 +92,41 @@ public partial class MainViewModel : ObservableObject
     private CancellationTokenSource? _queryCts;
     private (object Page, string Nav, PeerVm? Peer)? _beforeSearch;
     public PlayerViewModel Player { get; }
+    /// <summary>The built-in viewer for pictures and PDFs.</summary>
+    public ViewerViewModel Viewer { get; } = new();
+
+    /// <summary>
+    /// Another PC's file, opened as its kind is: a video or a song in the player, a picture or a PDF in the viewer.
+    /// <paramref name="siblings"/>: the list it was opened from (a picture: ←/→ through the pictures of its folder).
+    /// </summary>
+    public void OpenItem(ItemVm item, PeerVm peer, IReadOnlyList<ItemVm>? siblings = null, double startAt = 0)
+    {
+        if (item.IsPlayable) { Player.Open(item, Api.StreamUrl(peer.Id, item.Id, item.Name), peer, startAt); return; }
+        ViewerEntry Entry(ItemVm i) => new(i.Name, Api.StreamUrl(peer.Id, i.Id, i.Name), false, $"{peer.Label}  ·  {i.Location}", i.Kind,
+            () => i.Thumb, () => _ = BrowseFor(peer).DownloadCommand.ExecuteAsync(i));
+        AppLog.Info("Viewer", $"{(item.IsPdf ? "pdf" : "picture")} {item.Name} from {peer.Label}");
+        if (item.IsPdf) { Viewer.OpenPdf(Entry(item)); return; }
+        var pictures = Pictures(item, siblings, i => i.IsImage && !i.IsLocked && i.Dto.ShareId == item.Dto.ShareId && i.Dto.Folder == item.Dto.Folder);
+        Viewer.OpenImages(pictures.Select(Entry).ToList(), pictures.IndexOf(item));
+    }
+
+    /// <summary>One of my own shared files, opened as its kind is (see <see cref="OpenItem"/>).</summary>
+    public void OpenLocalItem(LocalItemVm item, string shareName, IReadOnlyList<LocalItemVm>? siblings = null)
+    {
+        if (item.IsPlayable) { Player.OpenLocal(item, shareName); return; }
+        ViewerEntry Entry(LocalItemVm i) => new(i.Name, i.FullPath, true, $"My shares  ·  {shareName}{(i.Folder.Length > 0 ? "  ›  " + i.Folder : "")}", i.Kind, () => i.Thumb);
+        if (item.IsPdf) { Viewer.OpenPdf(Entry(item)); return; }
+        var pictures = Pictures(item, siblings, i => i.IsImage && i.Dto.Folder == item.Dto.Folder);
+        Viewer.OpenImages(pictures.Select(Entry).ToList(), pictures.IndexOf(item));
+    }
+
+    /// <summary>The pictures to go through with ←/→: those of the list that are like it (same folder), in the list's order.</summary>
+    private static List<T> Pictures<T>(T item, IReadOnlyList<T>? siblings, Func<T, bool> alike) where T : class
+    {
+        var list = (siblings ?? Array.Empty<T>()).Where(alike).ToList();
+        if (!list.Contains(item)) list.Insert(0, item);
+        return list;
+    }
     /// <summary>Screen sharing: mine, the one I watch, and the questions about it.</summary>
     public ScreenViewModel Screen { get; }
     /// <summary>Screen recording (with the speaker and the microphone).</summary>
@@ -962,7 +997,7 @@ public partial class MainViewModel : ObservableObject
             if (top.Dto.FullPath is not { Length: > 0 } path) return;
             var local = Json.Deserialize<LocalItemDto>(Json.Serialize(top.Dto.Item)) ?? new LocalItemDto();
             local.FullPath = path;
-            Player.OpenLocal(new LocalItemVm(local, i => Thumbs.GetAsync(Api.LocalThumbPath(i.Id))), top.Dto.ShareName);
+            OpenLocalItem(new LocalItemVm(local, i => Thumbs.GetAsync(Api.LocalThumbPath(i.Id))), top.Dto.ShareName);
             return;
         }
         var peer = Peers.FirstOrDefault(p => p.Id == top.Dto.PeerId);

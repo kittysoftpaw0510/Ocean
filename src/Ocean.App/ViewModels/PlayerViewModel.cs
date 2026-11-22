@@ -48,6 +48,25 @@ public partial class PlayerViewModel : ObservableObject
     [ObservableProperty] private string? _url;
     [ObservableProperty] private string _title = "";
     [ObservableProperty] private string _subtitle = "";
+    /// <summary>A song, not a video: the player shows its cover (or a note) where the picture would be.</summary>
+    [ObservableProperty] private bool _isAudio;
+    /// <summary>A song's cover (its preview), when it has one.</summary>
+    [ObservableProperty] private System.Windows.Media.Imaging.BitmapImage? _cover;
+    public bool HasCover => Cover is not null;
+    partial void OnCoverChanged(System.Windows.Media.Imaging.BitmapImage? value) => OnPropertyChanged(nameof(HasCover));
+    private System.ComponentModel.PropertyChangedEventHandler? _coverWatch;
+    private object? _coverFrom;
+
+    /// <summary>A song's cover: its preview now, or when it comes.</summary>
+    private void TakeCover(System.ComponentModel.INotifyPropertyChanged? from, Func<System.Windows.Media.Imaging.BitmapImage?> get)
+    {
+        if (_coverFrom is System.ComponentModel.INotifyPropertyChanged old && _coverWatch is not null) old.PropertyChanged -= _coverWatch;
+        _coverFrom = from; _coverWatch = null;
+        Cover = IsAudio ? get() : null;
+        if (!IsAudio || from is null) return;
+        _coverWatch = (_, e) => { if (e.PropertyName is "Thumb" or "HasThumb" or "" && ReferenceEquals(_coverFrom, from)) Cover = get(); };
+        from.PropertyChanged += _coverWatch;
+    }
     [ObservableProperty] private bool _isPlaying;
     [ObservableProperty] private bool _isBuffering;
     [ObservableProperty] private double _positionSeconds;
@@ -554,6 +573,8 @@ public partial class PlayerViewModel : ObservableObject
         Services.AppLog.Info("Player", $"play {item.Name} from {peer.Label}" + (StartAt > 0 ? $" at {StartAt:0} s" : ""));
         Title = item.Name;
         Subtitle = $"{peer.Label}  ·  {item.ShareName}{(item.Folder.Length > 0 ? "  ›  " + item.Folder : "")}{(item.ResolutionText.Length > 0 ? "  ·  " + item.ResolutionText : "")}";
+        IsAudio = item.IsAudio;
+        TakeCover(item, () => item.Thumb);
         PositionSeconds = 0;
         DurationSeconds = item.DurationMs / 1000.0;
         ClearLoop(); // A-B points belong to one video
@@ -581,6 +602,8 @@ public partial class PlayerViewModel : ObservableObject
         Services.AppLog.Info("Player", $"play my own {item.Name}");
         Title = item.Name;
         Subtitle = $"My shares  ·  {shareName}{(item.Folder.Length > 0 ? "  ›  " + item.Folder : "")}";
+        IsAudio = !item.IsVideo;
+        TakeCover(item, () => item.Thumb);
         PositionSeconds = 0;
         DurationSeconds = (item.Dto.DurationMs ?? 0) / 1000.0;
         ClearLoop();

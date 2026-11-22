@@ -332,6 +332,8 @@ public sealed class ViaForwarder
             ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>()?.DisableBuffering();
         }
         var req = _client.Build(target, new HttpMethod(ctx.Request.Method), inner);
+        // what the caller can open is the caller's to say (an older one says nothing: videos only), not this PC's
+        req.Headers.Remove(PeerHeaders.Kinds);
         foreach (var (k, v) in ctx.Request.Headers)
         {
             var pass = (k.StartsWith("X-Ocean-", StringComparison.OrdinalIgnoreCase)

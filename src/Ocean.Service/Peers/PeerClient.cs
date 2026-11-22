@@ -80,6 +80,8 @@ public sealed class PeerClient : IDisposable
         return ok;
     }
 
+    private static readonly bool ActsOld = Environment.GetEnvironmentVariable("OCEAN_TEST_OLD_KINDS") == "1";
+
     public HttpRequestMessage Build(Peer peer, HttpMethod method, string path, IReadOnlyDictionary<string, string>? grants = null)
     {
         var cfg = _config.Current;
@@ -90,6 +92,8 @@ public sealed class PeerClient : IDisposable
         req.Headers.TryAddWithoutValidation("X-Ocean-Name", Ascii(cfg.NodeName));
         req.Headers.TryAddWithoutValidation("X-Ocean-User", Ascii(cfg.UserName));
         req.Headers.TryAddWithoutValidation("X-Ocean-Host", Ascii(Environment.MachineName));
+        // what this Ocean can open (developers: OCEAN_TEST_OLD_KINDS=1 leaves it out, as an older Ocean does)
+        if (!ActsOld) req.Headers.TryAddWithoutValidation(PeerHeaders.Kinds, string.Join(",", Ocean.Core.Media.MediaKinds.All));
         if (grants is { Count: > 0 })
             req.Headers.TryAddWithoutValidation("X-Ocean-Grants", string.Join(';', grants.Select(kv => kv.Key + "=" + kv.Value)));
         return req;

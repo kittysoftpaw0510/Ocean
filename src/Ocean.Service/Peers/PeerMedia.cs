@@ -44,7 +44,7 @@ public sealed class PeerMedia
         if (local is not null)
         {
             ctx.Response.Headers.CacheControl = "no-store";
-            await Results.File(local, VideoTypes.ContentType(item.Name), lastModified: item.ModifiedAt, enableRangeProcessing: true).ExecuteAsync(ctx);
+            await Results.File(local, MediaKinds.ContentType(item.Name), lastModified: item.ModifiedAt, enableRangeProcessing: true).ExecuteAsync(ctx);
             return;
         }
 
@@ -76,7 +76,7 @@ public sealed class PeerMedia
                     var body = new ThrottledStream(fs, _uploads, kind, slot);
                     slot = null; // released with the stream
                     ctx.Response.Headers.CacheControl = "no-store";
-                    await Results.Stream(body, VideoTypes.ContentType(item.Name), lastModified: item.ModifiedAt,
+                    await Results.Stream(body, MediaKinds.ContentType(item.Name), lastModified: item.ModifiedAt,
                         entityTag: new EntityTagHeaderValue($"\"{item.Id}-{item.ModifiedAt.UtcTicks}\""), enableRangeProcessing: true).ExecuteAsync(ctx);
                     return;
                 }
@@ -94,7 +94,7 @@ public sealed class PeerMedia
         res.Headers.CacheControl = "no-store";
         res.Headers.ETag = $"\"{item.Id}-{item.ModifiedAt.UtcTicks}\"";
         res.Headers.LastModified = item.ModifiedAt.ToString("R");
-        res.ContentType = VideoTypes.ContentType(item.Name);
+        res.ContentType = MediaKinds.ContentType(item.Name);
 
         long from = 0, to = size - 1;
         var range = ParseRange(ctx.Request.Headers.Range.ToString(), size);

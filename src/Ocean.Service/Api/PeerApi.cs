@@ -61,10 +61,12 @@ public static class PeerApi
             var pc = PeerContext.Get(ctx);
             var check = access.Checker(pc.ClientId, pc.Grants);
             var cfg = config.Current;
-            var cat = catalog.BuildCatalog(id.NodeId, cfg.NodeName, cfg.UserName, cfg.SharingPaused, check);
-            // ETag = version + what this caller can see (which locks it has open). Stable across restarts.
+            // an Ocean that knows music, pictures and PDFs says so; an older one gets the videos only
+            var allKinds = ctx.Request.Headers[PeerHeaders.Kinds].ToString().Contains("pdf", StringComparison.Ordinal);
+            var cat = catalog.BuildCatalog(id.NodeId, cfg.NodeName, cfg.UserName, cfg.SharingPaused, check, allKinds);
+            // ETag = version + what this caller can see (which locks it has open, which kinds). Stable across restarts.
             var open = string.Join(',', cat.Shares.Where(s => s.Unlocked).Select(s => s.Id).Concat(cat.Shares.SelectMany(s => s.Items).Where(i => i.Lock is not null && i.Unlocked).Select(i => i.Id)).Order());
-            var view = Fnv.Hash(open + (cfg.SharingPaused ? "|paused" : ""));
+            var view = Fnv.Hash(open + (cfg.SharingPaused ? "|paused" : "") + (allKinds ? "" : "|videos"));
             var etag = CatalogTags.Make(cat.Version, view);
             ctx.Response.Headers.CacheControl = "no-cache";
             if (ctx.Request.Headers.IfNoneMatch.ToString() == etag)
@@ -419,7 +421,7 @@ public static class PeerApi
             // always paced and metered: tells the scheduler who is watching and how fast this PC uploads
             var body = new ThrottledStream(fs, uploads, kind, slot);
             ctx.Response.Headers.CacheControl = "private, no-transform";
-            return Results.Stream(body, VideoTypes.ContentType(full), lastModified: item.ModifiedAt,
+            return Results.Stream(body, MediaKinds.ContentType(full), lastModified: item.ModifiedAt,
                 entityTag: new EntityTagHeaderValue($"\"{item.Id}-{item.ModifiedAt.UtcTicks}\""), enableRangeProcessing: true);
         });
     }

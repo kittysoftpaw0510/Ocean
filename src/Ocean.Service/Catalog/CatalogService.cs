@@ -23,7 +23,11 @@ public sealed class ItemRecord
     public long? DurationMs { get; set; }
     public int? Width { get; set; }
     public int? Height { get; set; }
+    /// <summary>A PDF's pages.</summary>
+    public int? Pages { get; set; }
     public bool Probed { get; set; }
+    /// <summary>video, audio, image, pdf (from its name).</summary>
+    public string Kind => MediaKinds.KindOf(Name) ?? MediaKinds.Video;
 }
 
 public sealed class ShareIndex
@@ -138,7 +142,7 @@ public sealed class CatalogService : IDisposable
     {
         if (item.SubPath.Length == 0) return "";
         var dir = Path.GetDirectoryName(item.SubPath) ?? "";
-        var folderRoots = roots.Count(r => !VideoTypes.IsVideo(r) || Directory.Exists(r));
+        var folderRoots = roots.Count(r => !MediaKinds.IsKnown(r) || Directory.Exists(r));
         if (folderRoots > 1)
         {
             var root = item.Root < roots.Count ? roots[item.Root] : "";
@@ -157,7 +161,7 @@ public sealed class CatalogService : IDisposable
         var target = FolderPath.Normalize(folder);
         var added = paths.Select(p => p.Trim()).Where(p => p.Length > 0)
                          .Select(p => { try { return Path.GetFullPath(p); } catch { return p; } })
-                         .Where(p => Directory.Exists(p) || (File.Exists(p) && VideoTypes.IsVideo(p)))
+                         .Where(p => Directory.Exists(p) || (File.Exists(p) && MediaKinds.IsKnown(p)))
                          .ToList();
         if (added.Count == 0) return false;
         var items = Items(shareId).ToList();
@@ -423,6 +427,7 @@ public sealed class CatalogService : IDisposable
     public ShareDefinitionDto Upsert(ShareUpsertDto dto)
     {
         var name = string.IsNullOrWhiteSpace(dto.Name) ? SuggestName(dto.Roots) : dto.Name.Trim();
+        var kinds = dto.Kinds is null ? null : MediaKinds.Normalize(dto.Kinds);
         var roots = dto.Roots.Select(r => r.Trim()).Where(r => r.Length > 0)
             .Select(r => { try { return Path.GetFullPath(r); } catch { return r; } })
             .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
@@ -435,7 +440,7 @@ public sealed class CatalogService : IDisposable
             if (existing is null)
             {
                 isNew = true;
-                def = new ShareDefinition { Id = Passwords.ShortId(6), Name = name, Mode = dto.Mode, Roots = roots };
+                def = new ShareDefinition { Id = Passwords.ShortId(6), Name = name, Mode = dto.Mode, Roots = roots, Kinds = kinds };
                 if (dto.Mode == AccessMode.Password && !string.IsNullOrEmpty(dto.Password))
                     (def.PasswordHash, def.PasswordSalt) = Passwords.Hash(dto.Password);
                 list.Add(def);
@@ -445,6 +450,7 @@ public sealed class CatalogService : IDisposable
                 def = existing;
                 def.Name = name;
                 def.Roots = roots;
+                if (kinds is not null) def.Kinds = kinds;
                 var passwordChanged = false;
                 if (dto.Password is not null)
                 {
@@ -540,6 +546,7 @@ public sealed class CatalogService : IDisposable
         Scanning = IsScanning(s.Id),
         Folders = AllFolders(s, Items(s.Id)),
         Overrides = s.Overrides.ToDictionary(k => k.Key, v => new ItemOverrideDto { Mode = v.Value.Mode, HasPassword = v.Value.PasswordHash is not null }),
+        Kinds = MediaKinds.Normalize(s.Kinds),
     };
 
     public List<LocalItemDto> LocalItems(string shareId)
@@ -585,6 +592,9 @@ public sealed class CatalogService : IDisposable
         dto.DurationMs = i.DurationMs;
         dto.Width = i.Width;
         dto.Height = i.Height;
+        var kind = i.Kind;
+        dto.Kind = kind == MediaKinds.Video ? null : kind; // (a video says nothing, as it always did)
+        dto.Pages = i.Pages;
         if (LightLookup is { } light) { (dto.Light, dto.LightSize) = light(i.Id, i); } else { dto.Light = null; dto.LightSize = 0; }
         dto.Tags = share.ItemTags.TryGetValue(i.Id, out var tags) && tags.Count > 0 ? tags : null;
         if (RatingLookup is { } rating) (dto.Up, dto.Down, dto.Finished, dto.Score) = rating(i.Id); else { dto.Up = dto.Down = dto.Finished = 0; dto.Score = 0; }
@@ -597,7 +607,8 @@ public sealed class CatalogService : IDisposable
         else dto.Unlocked = true;
     }
 
-    public CatalogDto BuildCatalog(string nodeId, string nodeName, string userName, bool paused, Func<string, bool> hasGrant)
+    /// <param name="allKinds">The caller's Ocean knows music, pictures and PDFs; an older one gets the videos only (it would try to play the rest).</param>
+    public CatalogDto BuildCatalog(string nodeId, string nodeName, string userName, bool paused, Func<string, bool> hasGrant, bool allKinds = true)
     {
         var cat = new CatalogDto
         {
@@ -609,7 +620,7 @@ public sealed class CatalogService : IDisposable
         if (paused) return cat;
         foreach (var share in Shares)
         {
-            var items = Items(share.Id).ToList();
+            var items = Items(share.Id).Where(i => allKinds || i.Kind == MediaKinds.Video).ToList();
             var unlocked = IsShareUnlocked(share, hasGrant);
             var dto = new ShareDto
             {
@@ -720,9 +731,9 @@ public sealed class CatalogService : IDisposable
         }
     }
 
-    // Video files, or extension-less paths (folders being created/renamed/deleted).
+    // Files Ocean shares, or extension-less paths (folders being created/renamed/deleted).
     private static bool IsInteresting(string path)
-        => VideoTypes.IsVideo(path) || Path.GetExtension(path).Length == 0;
+        => MediaKinds.IsKnown(path) || Path.GetExtension(path).Length == 0;
 
     private void ScheduleRescan(string shareId)
     {
@@ -760,6 +771,9 @@ public sealed class CatalogService : IDisposable
         var seen = new HashSet<string>();
         var added = 0; var updated = 0;
         var firstScan = !rt.FirstScanDone;
+        // what of the folders' files is shared (a file added on its own always is)
+        var kinds = new HashSet<string>(MediaKinds.Normalize(def.Kinds));
+        bool Wanted(string f) => MediaKinds.KindOf(f) is { } k && kinds.Contains(k);
 
         for (var r = 0; r < def.Roots.Count; r++)
         {
@@ -769,7 +783,7 @@ public sealed class CatalogService : IDisposable
             {
                 if (File.Exists(root))
                 {
-                    files = VideoTypes.IsVideo(root) ? new[] { (root, "") } : Array.Empty<(string, string)>();
+                    files = MediaKinds.IsKnown(root) ? new[] { (root, "") } : Array.Empty<(string, string)>();
                 }
                 else if (Directory.Exists(root))
                 {
@@ -781,7 +795,7 @@ public sealed class CatalogService : IDisposable
                         MaxRecursionDepth = 48,
                     };
                     files = Directory.EnumerateFiles(root, "*", opts)
-                        .Where(VideoTypes.IsVideo)
+                        .Where(Wanted)
                         .Select(f => (f, Path.GetRelativePath(root, f)));
                 }
                 else continue;
@@ -801,7 +815,7 @@ public sealed class CatalogService : IDisposable
                     if (existing.Size != fi.Length || existing.ModifiedAt != mtime || existing.Name != fi.Name)
                     {
                         existing.Size = fi.Length; existing.ModifiedAt = mtime; existing.Name = fi.Name;
-                        existing.Probed = false; existing.DurationMs = null; existing.Width = null; existing.Height = null;
+                        existing.Probed = false; existing.DurationMs = null; existing.Width = null; existing.Height = null; existing.Pages = null;
                         updated++;
                     }
                 }
@@ -871,7 +885,7 @@ public sealed class CatalogService : IDisposable
         foreach (var (itemId, probe) in results)
         {
             if (!TryGetItem(itemId, out var share, out var item)) continue;
-            item.DurationMs = probe.DurationMs; item.Width = probe.Width; item.Height = probe.Height; item.Probed = true;
+            item.DurationMs = probe.DurationMs; item.Width = probe.Width; item.Height = probe.Height; item.Pages = probe.Pages; item.Probed = true;
             touched.Add(share.Id);
         }
         foreach (var id in touched) if (_shares.TryGetValue(id, out var rt)) PersistIndex(rt);

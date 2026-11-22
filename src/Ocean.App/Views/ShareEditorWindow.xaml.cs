@@ -37,7 +37,7 @@ public partial class ShareEditorWindow : Window
         var wasEmpty = _vm.Roots.Count == 0;
         foreach (var p in paths)
         {
-            if (!(Directory.Exists(p) || (File.Exists(p) && VideoTypes.IsVideo(p)))) continue;
+            if (!(Directory.Exists(p) || (File.Exists(p) && MediaKinds.IsKnown(p)))) continue;
             if (_vm.Roots.Any(r => string.Equals(r, p, StringComparison.OrdinalIgnoreCase))) continue;
             _vm.Roots.Add(p);
         }
@@ -57,7 +57,7 @@ public partial class ShareEditorWindow : Window
 
     private void AddFiles_Click(object sender, RoutedEventArgs e)
     {
-        var files = _dialogs.PickFiles("Choose videos to share");
+        var files = _dialogs.PickFiles("Choose files to share");
         if (files is not null) AddRoots(files);
     }
 

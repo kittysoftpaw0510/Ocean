@@ -106,6 +106,7 @@ public sealed class CastHost : IDisposable
         {
             if (_s is not null) { var busy = Status(); busy.Error = "You are already multicasting; stop that one first."; return busy; }
             if (!_catalog.TryGetItem(itemId, out var share, out var item)) return new MyCastDto { Error = "This video is no longer in your shares." };
+            if (item.Kind != Ocean.Core.Media.MediaKinds.Video) return new MyCastDto { Error = "Only videos can be multicast." };
             var limit = Limit();
             if (!limit.Allowed) return new MyCastDto { Error = limit.Reason };
 

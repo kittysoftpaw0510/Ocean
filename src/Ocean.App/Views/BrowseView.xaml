@@ -50,12 +50,36 @@
             </Setter>
         </Style>
 
+        <!-- a word in a segmented control (the kinds of file) -->
+        <Style x:Key="KindSeg" TargetType="Button" BasedOn="{StaticResource SegBtn}">
+            <Setter Property="Width" Value="NaN"/>
+            <Setter Property="Padding" Value="10,0"/>
+            <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="5" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource Hover}"/>
+                                <Setter Property="Foreground" Value="{StaticResource Text}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- context menu for a video (DataContext = ItemVm, PlacementTarget.Tag = BrowseViewModel) -->
         <ContextMenu x:Key="ItemMenu">
-            <MenuItem Header="Play" Command="{Binding PlacementTarget.Tag.PlayCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}">
-                <MenuItem.Icon><TextBlock Text="&#xE768;" Style="{StaticResource Icon}"/></MenuItem.Icon>
+            <MenuItem Header="{Binding OpenVerb}" Command="{Binding PlacementTarget.Tag.PlayCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}">
+                <MenuItem.Icon><TextBlock Text="{Binding OpenGlyph}" Style="{StaticResource Icon}"/></MenuItem.Icon>
             </MenuItem>
-            <MenuItem Header="Open in external player" Command="{Binding PlacementTarget.Tag.OpenExternalCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}">
+            <MenuItem Header="Open in external player" Command="{Binding PlacementTarget.Tag.OpenExternalCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"
+                      Visibility="{Binding IsPlayable, Converter={StaticResource BoolToVis}}">
                 <MenuItem.Icon><TextBlock Text="&#xE8A7;" Style="{StaticResource Icon}"/></MenuItem.Icon>
             </MenuItem>
             <Separator/>
@@ -208,7 +232,15 @@
                 <Rectangle RadiusX="8" RadiusY="8" Visibility="{Binding HasThumb, Converter={StaticResource BoolToVis}}">
                     <Rectangle.Fill><ImageBrush ImageSource="{Binding Thumb}" Stretch="UniformToFill"/></Rectangle.Fill>
                 </Rectangle>
-                <TextBlock Text="&#xE714;" Style="{StaticResource Icon}" FontSize="26" Foreground="{StaticResource TextDim}" Visibility="{Binding HasThumb, Converter={StaticResource InvBoolToVis}}"/>
+                <TextBlock Text="{Binding KindGlyph}" Style="{StaticResource Icon}" FontSize="26" Foreground="{StaticResource TextDim}" Visibility="{Binding HasThumb, Converter={StaticResource InvBoolToVis}}"/>
+                <!-- what kind of file it is (a video says nothing) -->
+                <Border Background="#E6101826" BorderBrush="#33FFFFFF" BorderThickness="1" CornerRadius="4" Padding="4,1,5,1" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="6"
+                        Visibility="{Binding KindBadge, Converter={StaticResource NullToVis}}">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding KindGlyph}" Style="{StaticResource Icon}" FontSize="10" Foreground="{StaticResource Accent}" Margin="0,0,4,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding KindBadge}" FontSize="9.5" FontWeight="Bold" Foreground="#E8EEF8" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Border>
                 <!-- locked overlay -->
                 <Border CornerRadius="8" Background="#99000000" Visibility="{Binding IsLocked, Converter={StaticResource BoolToVis}}">
                     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
@@ -327,7 +359,7 @@
                                 Command="{Binding DataContext.VoteUpCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
                         <Button Style="{StaticResource DislikeBtn}" Content="&#xE8E0;" ToolTip="{Binding DislikeMenu}" Visibility="{Binding CanVote, Converter={StaticResource BoolToVis}}"
                                 Command="{Binding DataContext.VoteDownCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
-                        <Button Style="{StaticResource BtnIcon}" Content="&#xE768;" ToolTip="Play" Command="{Binding DataContext.PlayCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
+                        <Button Style="{StaticResource BtnIcon}" Content="{Binding OpenGlyph}" ToolTip="{Binding OpenVerb}" Command="{Binding DataContext.PlayCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
                         <Button Style="{StaticResource BtnIcon}" Content="&#xE896;" ToolTip="Download" Command="{Binding DataContext.DownloadCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
                     </StackPanel>
                 </Grid>
@@ -492,6 +524,48 @@
                         <TextBlock Text="New only" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"/>
                     </StackPanel>
                 </Button>
+
+                <!-- what kind of files (when the node shares more than videos) -->
+                <Border Background="{StaticResource Bg1}" CornerRadius="7" Padding="2" BorderBrush="{StaticResource Border}" BorderThickness="1" Margin="10,0,0,0"
+                        Visibility="{Binding HasKinds, Converter={StaticResource BoolToVis}}">
+                    <StackPanel Orientation="Horizontal">
+                        <Button Command="{Binding SetKindCommand}" CommandParameter="" ToolTip="Every kind of file" Content="All">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource KindSeg}">
+                                    <Style.Triggers><DataTrigger Binding="{Binding KindFilter}" Value="{x:Null}"><Setter Property="Background" Value="{StaticResource Bg3}"/><Setter Property="Foreground" Value="{StaticResource Accent}"/></DataTrigger></Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button Command="{Binding SetKindCommand}" CommandParameter="video" Content="Videos" Visibility="{Binding VideoCount, Converter={StaticResource CountToVis}}">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource KindSeg}">
+                                    <Style.Triggers><DataTrigger Binding="{Binding KindFilter}" Value="video"><Setter Property="Background" Value="{StaticResource Bg3}"/><Setter Property="Foreground" Value="{StaticResource Accent}"/></DataTrigger></Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button Command="{Binding SetKindCommand}" CommandParameter="audio" Content="Music" Visibility="{Binding AudioCount, Converter={StaticResource CountToVis}}">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource KindSeg}">
+                                    <Style.Triggers><DataTrigger Binding="{Binding KindFilter}" Value="audio"><Setter Property="Background" Value="{StaticResource Bg3}"/><Setter Property="Foreground" Value="{StaticResource Accent}"/></DataTrigger></Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button Command="{Binding SetKindCommand}" CommandParameter="image" Content="Pictures" Visibility="{Binding ImageCount, Converter={StaticResource CountToVis}}">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource KindSeg}">
+                                    <Style.Triggers><DataTrigger Binding="{Binding KindFilter}" Value="image"><Setter Property="Background" Value="{StaticResource Bg3}"/><Setter Property="Foreground" Value="{StaticResource Accent}"/></DataTrigger></Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button Command="{Binding SetKindCommand}" CommandParameter="pdf" Content="PDFs" Visibility="{Binding PdfCount, Converter={StaticResource CountToVis}}">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource KindSeg}">
+                                    <Style.Triggers><DataTrigger Binding="{Binding KindFilter}" Value="pdf"><Setter Property="Background" Value="{StaticResource Bg3}"/><Setter Property="Foreground" Value="{StaticResource Accent}"/></DataTrigger></Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                    </StackPanel>
+                </Border>
             </StackPanel>
 
             <StackPanel Orientation="Horizontal">

@@ -29,6 +29,16 @@ public partial class BrowseViewModel : ObservableObject
     [ObservableProperty] private SortMode _sort = _lastSort;
     [ObservableProperty] private bool _newOnly;
     [ObservableProperty] private string _filter = "";
+    /// <summary>Only one kind of file (video, audio, image, pdf); null: all of them.</summary>
+    [ObservableProperty] private string? _kindFilter;
+    /// <summary>The node shares more than one kind of file: the kind filter shows.</summary>
+    [ObservableProperty] private bool _hasKinds;
+    [ObservableProperty] private int _videoCount;
+    [ObservableProperty] private int _audioCount;
+    [ObservableProperty] private int _imageCount;
+    [ObservableProperty] private int _pdfCount;
+    partial void OnKindFilterChanged(string? value) => Rebuild();
+    [RelayCommand] private void SetKind(string? kind) => KindFilter = string.IsNullOrEmpty(kind) || kind == KindFilter ? null : kind;
     [ObservableProperty] private List<ItemVm> _items = new();
     [ObservableProperty] private string _summary = "";
     [ObservableProperty] private string _headerText = "";
@@ -262,7 +272,11 @@ public partial class BrowseViewModel : ObservableObject
     {
         var shareId = SelectedShare?.Id;
         var shareDto = shareId is null ? null : Catalog?.Shares.FirstOrDefault(s => s.Id == shareId);
-        FolderMode = shareDto is not null && string.IsNullOrWhiteSpace(Filter) && !NewOnly && TagFilter is null;
+        FolderMode = shareDto is not null && string.IsNullOrWhiteSpace(Filter) && !NewOnly && TagFilter is null && KindFilter is null;
+        // which kinds there are (the filter shows only with more than one)
+        VideoCount = _all.Count(i => i.IsVideo); AudioCount = _all.Count(i => i.IsAudio); ImageCount = _all.Count(i => i.IsImage); PdfCount = _all.Count(i => i.IsPdf);
+        HasKinds = new[] { VideoCount, AudioCount, ImageCount, PdfCount }.Count(c => c > 0) > 1;
+        if (!HasKinds && KindFilter is not null) { KindFilter = null; return; } // (this re-enters Rebuild)
 
         List<ItemVm> list;
         if (FolderMode)
@@ -285,7 +299,7 @@ public partial class BrowseViewModel : ObservableObject
             crumbs.AddRange(Core.Naming.FolderPath.SelfAndAncestors(CurrentFolder)
                 .Select(p => new Crumb(Core.Naming.FolderPath.Name(p), p, string.Equals(p, CurrentFolder, StringComparison.OrdinalIgnoreCase))));
             Crumbs = crumbs;
-            Summary = $"{(sortedFolders.Count > 0 ? $"{sortedFolders.Count} folder{(sortedFolders.Count == 1 ? "" : "s")}  ·  " : "")}{list.Count} video{(list.Count == 1 ? "" : "s")}";
+            Summary = $"{(sortedFolders.Count > 0 ? $"{sortedFolders.Count} folder{(sortedFolders.Count == 1 ? "" : "s")}  ·  " : "")}{KindText.Count(list.Select(i => i.Dto).ToList())}";
         }
         else
         {
@@ -293,6 +307,7 @@ public partial class BrowseViewModel : ObservableObject
             if (shareId is not null) q = q.Where(i => i.Dto.ShareId == shareId);
             if (NewOnly) q = q.Where(i => i.IsNew);
             if (TagFilter is { } tag) q = q.Where(i => i.HasTag(tag));
+            if (KindFilter is { } kind) q = q.Where(i => i.Kind == kind);
             if (!string.IsNullOrWhiteSpace(Filter))
             {
                 var f = Filter.Trim();
@@ -304,7 +319,7 @@ public partial class BrowseViewModel : ObservableObject
             list = SortItems(q);
             Entries = list.Cast<object>().ToList();
             Crumbs = new();
-            Summary = list.Count == 0 ? "" : $"{list.Count} video{(list.Count == 1 ? "" : "s")}  ·  {Format.Bytes(list.Sum(i => i.Size))}";
+            Summary = list.Count == 0 ? "" : $"{KindText.Count(list.Select(i => i.Dto).ToList())}  ·  {Format.Bytes(list.Sum(i => i.Size))}";
         }
 
         Items = list;
@@ -313,13 +328,16 @@ public partial class BrowseViewModel : ObservableObject
         DownloadAllLabel = FolderMode && CurrentFolder.Length > 0 ? "Download folder" : "Download all";
         HeaderText = Summary.Length > 0 ? $"{Peer.Subtitle}  ·  {Summary}" : Peer.Subtitle;
         IsEmpty = Entries.Count == 0 && !IsLoading;
+        // ("videos" where the node shares only videos, as it always did; "files" where it shares more)
+        var things = KindFilter is { } k ? (k == Core.Media.MediaKinds.Pdf ? "PDFs" : Core.Media.MediaKinds.Noun(k) + "s") : HasKinds ? "files" : "videos";
         EmptyText = !IsEmpty || SelectedShare is { IsLocked: true } ? "" :
             _all.Count == 0 && Catalog is { Shares.Count: 0 } ? "Nothing to show here." :
-            NewOnly ? "No new videos since your last visit." :
-            TagFilter is not null ? $"No videos tagged #{TagFilter} here." :
-            Filter.Length > 0 ? "No videos match your search." :
+            NewOnly ? $"No new {things} since your last visit." :
+            TagFilter is not null ? $"No {things} tagged #{TagFilter} here." :
+            Filter.Length > 0 ? $"No {things} match your search." :
+            KindFilter is not null ? $"No {things} here." :
             FolderMode && CurrentFolder.Length > 0 ? "This folder is empty." :
-            _all.Count == 0 ? "Nothing to show here." : "No videos in this share.";
+            _all.Count == 0 ? "Nothing to show here." : $"No {things} in this share.";
     }
 
     public void OnSelectionChanged()
@@ -373,7 +391,7 @@ public partial class BrowseViewModel : ObservableObject
         if (BlockedOffline()) return;
         if (item is null) return;
         if (item.IsLocked) { if (!await UnlockItemAsync(item)) return; }
-        _main.Player.Open(item, _main.Api.StreamUrl(Peer.Id, item.Id, item.Name), Peer);
+        _main.OpenItem(item, Peer, Items); // (a video or a song plays; a picture or a PDF is shown)
     }
 
     [RelayCommand]

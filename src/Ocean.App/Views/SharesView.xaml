@@ -9,17 +9,17 @@
             <Border x:Name="Row" Margin="12,1" CornerRadius="8" Padding="8,5" Background="Transparent" BorderThickness="1" BorderBrush="Transparent" Cursor="Hand">
                 <Border.ContextMenu>
                     <ContextMenu>
-                        <MenuItem Header="Play" Click="Play_Click">
-                            <MenuItem.Icon><TextBlock Text="&#xE768;" Style="{StaticResource Icon}"/></MenuItem.Icon>
+                        <MenuItem Header="{Binding OpenVerb}" Click="Play_Click">
+                            <MenuItem.Icon><TextBlock Text="{Binding OpenGlyph}" Style="{StaticResource Icon}"/></MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem Header="Start multicast" Click="StartCast_Click" Visibility="{Binding IsCasting, Converter={StaticResource InvBoolToVis}}"
+                        <MenuItem Header="Start multicast" Click="StartCast_Click" Visibility="{Binding CanCast, Converter={StaticResource BoolToVis}}"
                                   ToolTip="Send this video once to everyone who joins; you control playback">
                             <MenuItem.Icon><TextBlock Text="&#xE93E;" Style="{StaticResource Icon}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem Header="{Binding NotesMenu}" Click="Notes_Click" ToolTip="What others noted about this video; reply or leave your own">
                             <MenuItem.Icon><TextBlock Text="&#xE8BD;" Style="{StaticResource Icon}"/></MenuItem.Icon>
                         </MenuItem>
-                        <MenuItem Header="Schedule multicast" Visibility="{Binding IsCasting, Converter={StaticResource InvBoolToVis}}"
+                        <MenuItem Header="Schedule multicast" Visibility="{Binding CanCast, Converter={StaticResource BoolToVis}}"
                                   ToolTip="Start the multicast later by itself; every PC is told when it starts">
                             <MenuItem.Icon><TextBlock Text="&#xE823;" Style="{StaticResource Icon}"/></MenuItem.Icon>
                             <MenuItem Header="In 5 minutes" Tag="5" Click="ScheduleCast_Click"/>
@@ -55,15 +55,19 @@
                     </Grid.ColumnDefinitions>
                     <Grid Width="80" Height="45">
                         <Rectangle RadiusX="6" RadiusY="6" Fill="{StaticResource Bg3}"/>
+                        <TextBlock Text="{Binding KindGlyph}" Style="{StaticResource Icon}" FontSize="18" Foreground="{StaticResource TextDim}"/>
                         <Rectangle RadiusX="6" RadiusY="6">
                             <Rectangle.Fill><ImageBrush ImageSource="{Binding Thumb}" Stretch="UniformToFill"/></Rectangle.Fill>
                         </Rectangle>
+                        <!-- what kind of file (a video says nothing) -->
+                        <Border Background="#E6101826" CornerRadius="3" Padding="3,0,4,1" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="3"
+                                Visibility="{Binding KindBadge, Converter={StaticResource NullToVis}}">
+                            <TextBlock Text="{Binding KindBadge}" FontSize="8.5" FontWeight="Bold" Foreground="#E8EEF8"/>
+                        </Border>
                     </Grid>
                     <StackPanel Grid.Column="1" Margin="12,0" VerticalAlignment="Center">
                         <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
-                        <TextBlock Style="{StaticResource Dim}">
-                            <Run Text="{Binding SizeText, Mode=OneWay}"/><Run Text="{Binding DurationText, Mode=OneWay, StringFormat='  ·  {0}'}"/><Run Text="{Binding AddedText, Mode=OneWay, StringFormat='  ·  added {0}'}"/><Run Text="{Binding LightTag, Mode=OneWay}"/>
-                        </TextBlock>
+                        <TextBlock Style="{StaticResource Dim}" Text="{Binding Details}"/>
                         <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource SocialLine}"/>
                     </StackPanel>
                     <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">

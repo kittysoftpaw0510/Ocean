@@ -12,7 +12,7 @@ namespace Ocean.Core.Media;
 /// </summary>
 public static class ShellMedia
 {
-    public readonly record struct Probe(long? DurationMs, int? Width, int? Height);
+    public readonly record struct Probe(long? DurationMs, int? Width, int? Height, int? Pages = null);
 
     /// <summary>Returns a JPEG thumbnail or null if the shell has no provider for this file.</summary>
     public static byte[]? Thumbnail(string path, int width = 320, int height = 180, int quality = 78)
@@ -64,6 +64,12 @@ public static class ShellMedia
             if (item.GetUInt32(ref kW, out var fw) == 0 && fw > 0) w = (int)fw;
             var kH = PKEY_Video_FrameHeight;
             if (item.GetUInt32(ref kH, out var fh) == 0 && fh > 0) h = (int)fh;
+            // a picture: its own size properties
+            if (w is null || h is null)
+            {
+                var kIW = PKEY_Image_HorizontalSize; var kIH = PKEY_Image_VerticalSize;
+                if (item.GetUInt32(ref kIW, out var iw) == 0 && iw > 0 && item.GetUInt32(ref kIH, out var ih) == 0 && ih > 0) { w = (int)iw; h = (int)ih; }
+            }
             return new Probe(duration, w, h);
         }
         catch
@@ -80,6 +86,8 @@ public static class ShellMedia
     private static PROPERTYKEY PKEY_Media_Duration = new() { fmtid = new Guid("64440490-4C8B-11D1-8B70-080036B11A03"), pid = 3 };
     private static PROPERTYKEY PKEY_Video_FrameWidth = new() { fmtid = new Guid("64440491-4C8B-11D1-8B70-080036B11A03"), pid = 3 };
     private static PROPERTYKEY PKEY_Video_FrameHeight = new() { fmtid = new Guid("64440491-4C8B-11D1-8B70-080036B11A03"), pid = 4 };
+    private static PROPERTYKEY PKEY_Image_HorizontalSize = new() { fmtid = new Guid("6444048F-4C8B-11D1-8B70-080036B11A03"), pid = 3 };
+    private static PROPERTYKEY PKEY_Image_VerticalSize = new() { fmtid = new Guid("6444048F-4C8B-11D1-8B70-080036B11A03"), pid = 4 };
 
     [StructLayout(LayoutKind.Sequential)]
     private struct SIZE { public int cx; public int cy; }

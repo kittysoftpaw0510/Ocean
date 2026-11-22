@@ -54,6 +54,7 @@ public sealed class CastScheduler : BackgroundService
     {
         if (!_catalog.TryGetItem(req.ItemId, out var share, out var item))
             return new CastScheduleDto { Error = "This video is no longer in your shares." };
+        if (item.Kind != Ocean.Core.Media.MediaKinds.Video) return new CastScheduleDto { Error = "Only videos can be multicast." };
         var at = req.At.ToUniversalTime();
         if (at < DateTimeOffset.UtcNow.AddSeconds(-5)) return new CastScheduleDto { Error = "That time has already passed." };
         if (at > DateTimeOffset.UtcNow.AddDays(7)) return new CastScheduleDto { Error = "A multicast can be scheduled up to a week ahead." };

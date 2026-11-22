@@ -46,7 +46,11 @@ public sealed class ThumbnailService
     {
         try
         {
-            var bytes = await _sta.RunAsync(() => ShellMedia.Thumbnail(fullPath), ct);
+            // a PDF: its first page (Windows has no dependable PDF preview of its own); the rest: the shell's thumbnails
+            // (a picture itself, a song's cover, a video's frame)
+            var bytes = MediaKinds.KindOf(item.Name) == MediaKinds.Pdf
+                ? await PdfFiles.ThumbnailAsync(fullPath)
+                : await _sta.RunAsync(() => ShellMedia.Thumbnail(fullPath), ct);
             if (bytes is null || bytes.Length == 0)
             {
                 try { File.WriteAllBytes(NonePath(item), Array.Empty<byte>()); } catch { }

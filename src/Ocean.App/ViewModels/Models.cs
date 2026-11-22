@@ -167,8 +167,23 @@ public partial class ItemVm : ObservableObject
     public string Folder => Core.Naming.FolderPath.Display(Dto.Folder);
     public string Location => Folder.Length > 0 ? $"{ShareName}  ›  {Folder}" : ShareName;
     public string SizeText => Format.Bytes(Dto.Size);
-    public string DurationText => Format.Duration(Dto.DurationMs);
-    public string ResolutionText => Format.Resolution(Dto.Width, Dto.Height);
+    /// <summary>A video's and a song's length; a PDF's pages.</summary>
+    public string DurationText => KindText.Length(Dto);
+    /// <summary>A video's resolution ("1080p"); a picture's pixels.</summary>
+    public string ResolutionText => KindText.Resolution(Dto);
+    // ---- what kind of file it is (a video, a song, a picture, a PDF) ----
+    public string Kind => KindText.Of(Dto);
+    public bool IsVideo => Kind == Core.Media.MediaKinds.Video;
+    public bool IsAudio => Kind == Core.Media.MediaKinds.Audio;
+    public bool IsImage => Kind == Core.Media.MediaKinds.Image;
+    public bool IsPdf => Kind == Core.Media.MediaKinds.Pdf;
+    /// <summary>Played in the player (a video, a song).</summary>
+    public bool IsPlayable => IsVideo || IsAudio;
+    public string KindGlyph => KindText.Glyph(Kind);
+    public string? KindBadge => KindText.Badge(Kind);
+    public string OpenVerb => KindText.Verb(Kind);
+    /// <summary>The open button's icon: play (a video, a song), view (a picture, a PDF).</summary>
+    public string OpenGlyph => IsPlayable ? "\uE768" : "\uE890";
     public string AddedText => Format.Ago(Dto.AddedAt);
     public string AddedFull => Dto.AddedAt.LocalDateTime.ToString("f");
     public DateTimeOffset AddedAt => Dto.AddedAt;

@@ -521,6 +521,7 @@
 
         <!-- ================= overlays ================= -->
         <v:PlayerView x:Name="Player" Grid.ColumnSpan="2" DataContext="{Binding Player}" Visibility="{Binding ShowInWindow, Converter={StaticResource BoolToVis}}"/>
+        <v:ViewerView Grid.ColumnSpan="2" DataContext="{Binding Viewer}" Visibility="{Binding IsOpen, Converter={StaticResource BoolToVis}}"/>
 
         <ItemsControl Grid.ColumnSpan="2" ItemsSource="{Binding Toasts}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,20,18">
             <ItemsControl.ItemTemplate>

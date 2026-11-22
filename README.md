@@ -6,6 +6,12 @@ and every byte between them travels over mutually authenticated, end-to-end encr
 
 - **Share** a folder or a handful of files as a named group ("Family 2024", "Travel"). Sub-folders are kept:
   others browse the share as folders, and downloads recreate the same structure on disk.
+- **Music, pictures and PDFs** too, when a share says so (*Share from these folders*: Videos, Music, Pictures,
+  PDFs; a share starts with videos only, and every share from before stays so until its owner ticks more; a file
+  added on its own is shared whatever it is). Songs play in Ocean's player with their cover; pictures open in a
+  viewer (fit, zoom, ←/→ through the folder); PDFs in a viewer built on Windows' own PDF engine (scroll, zoom,
+  page n of m). The browse page shows each file's kind and filters by it (*All · Videos · Music · Pictures ·
+  PDFs*). PCs on an older Ocean see the videos only.
 - **Organize** a share into folders inside Ocean: create, rename and remove folders, and move videos between them
   (drag and drop, or *Move to…*). This is Ocean's view only; files on your disk are never moved or renamed.
 - **Protect** a group, or a single video inside it: public, password, or *ask me each time*.

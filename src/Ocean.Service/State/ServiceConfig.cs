@@ -29,6 +29,11 @@ public sealed class ShareDefinition
     public List<string> Folders { get; set; } = new();
     /// <summary>Roots added "into" a folder: root path → folder; applied to their videos on the next scan.</summary>
     public Dictionary<string, string> PendingPlacement { get; set; } = new();
+    /// <summary>
+    /// What of the files in its folders the share shares (MediaKinds). Null, as in every share from before: videos
+    /// only, so photos and documents that sat in a shared folder all along don't appear on the network unasked.
+    /// </summary>
+    public List<string>? Kinds { get; set; }
 }
 
 public sealed class ServiceConfig

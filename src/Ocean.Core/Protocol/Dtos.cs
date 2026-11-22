@@ -76,6 +76,10 @@ public class ItemDto
     public long? DurationMs { get; set; }
     public int? Width { get; set; }
     public int? Height { get; set; }
+    /// <summary>audio, image, pdf (see MediaKinds); null: a video (all an older Ocean shares).</summary>
+    public string? Kind { get; set; }
+    /// <summary>A PDF's pages.</summary>
+    public int? Pages { get; set; }
     public LockInfo? Lock { get; set; }
     public bool Unlocked { get; set; }
     /// <summary>The owner's tags (null when none).</summary>
@@ -210,6 +214,8 @@ public sealed class ShareDefinitionDto
     public bool Scanning { get; set; }
     public List<string> Folders { get; set; } = new();
     public Dictionary<string, ItemOverrideDto> Overrides { get; set; } = new();
+    /// <summary>What of its folders' files the share shares (MediaKinds: video always, audio, image, pdf).</summary>
+    public List<string> Kinds { get; set; } = new() { "video" };
 }
 
 public sealed class ShareUpsertDto
@@ -220,6 +226,8 @@ public sealed class ShareUpsertDto
     /// <summary>Null keeps the existing password; empty string clears it.</summary>
     public string? Password { get; set; }
     public List<string> Roots { get; set; } = new();
+    /// <summary>What of its folders' files to share (MediaKinds); null keeps what it was (a new share: videos).</summary>
+    public List<string>? Kinds { get; set; }
 }
 
 public sealed class LocalItemDto : ItemDto

@@ -71,7 +71,7 @@ public sealed class LightCopies : BackgroundService
     /// <summary>How the copy of <paramref name="itemId"/> is doing; with <paramref name="enqueue"/>, asks for one.</summary>
     public LightStatusDto Request(string itemId, bool enqueue)
     {
-        if (!_catalog.TryGetItem(itemId, out _, out var item)) return new LightStatusDto { State = "none" };
+        if (!_catalog.TryGetItem(itemId, out _, out var item) || item.Kind != Ocean.Core.Media.MediaKinds.Video) return new LightStatusDto { State = "none" }; // (videos only)
         var key = KeyOf(item);
         int pos;
         lock (_lock)

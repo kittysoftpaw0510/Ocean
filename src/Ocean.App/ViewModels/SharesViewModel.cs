@@ -48,6 +48,11 @@ public partial class LocalItemVm : ObservableObject
     /// <summary>When I've scheduled this video's multicast ("18:30"), or null.</summary>
     [ObservableProperty] private string? _scheduledAt;
     public bool HasViewers => Viewers > 0;
+    /// <summary>Only a video can be multicast.</summary>
+    public bool CanCast => IsVideo && !IsCasting;
+    partial void OnIsCastingChanged(bool value) => OnPropertyChanged(nameof(CanCast));
+    /// <summary>"54 MB  ·  1:32  ·  added 2 days ago" (a picture: its pixels; a PDF: its pages).</summary>
+    public string Details => string.Join("  ·  ", new[] { SizeText, ResolutionText, DurationText, "added " + AddedText }.Where(s => s.Length > 0)) + LightTag;
     public string ViewersText => Viewers == 1 ? "1 watching" : $"{Viewers} watching";
     partial void OnViewersChanged(int value) { OnPropertyChanged(nameof(HasViewers)); OnPropertyChanged(nameof(ViewersText)); }
     public string Id => Dto.Id;
@@ -55,7 +60,18 @@ public partial class LocalItemVm : ObservableObject
     public string Folder => FolderPath.Display(Dto.Folder);
     [ObservableProperty] private bool _isSelected;
     public string SizeText => Format.Bytes(Dto.Size);
-    public string DurationText => Format.Duration(Dto.DurationMs);
+    /// <summary>A video's and a song's length; a PDF's pages.</summary>
+    public string DurationText => KindText.Length(Dto);
+    public string ResolutionText => KindText.Resolution(Dto);
+    public string Kind => KindText.Of(Dto);
+    public bool IsVideo => Kind == Core.Media.MediaKinds.Video;
+    public bool IsImage => Kind == Core.Media.MediaKinds.Image;
+    public bool IsPdf => Kind == Core.Media.MediaKinds.Pdf;
+    public bool IsPlayable => Kind is Core.Media.MediaKinds.Video or Core.Media.MediaKinds.Audio;
+    public string KindGlyph => KindText.Glyph(Kind);
+    public string? KindBadge => KindText.Badge(Kind);
+    public string OpenVerb => KindText.Verb(Kind);
+    public string OpenGlyph => IsPlayable ? "\uE768" : "\uE890";
     public string LightTag => Dto.Light == LightVariant.Ready ? $"  ·  Light copy {Format.Bytes(Dto.LightSize)}" : Dto.Light == LightVariant.Preparing ? "  ·  Preparing a light copy…" : "";
     public string AddedText => Format.Ago(Dto.AddedAt);
     public string FullPath => Dto.FullPath;
@@ -114,6 +130,7 @@ public partial class LocalFolderVm : ObservableObject
     {
         Path = path;
         Count = contents.Count;
+        _contents = contents.Select(i => (ItemDto)i.Dto).ToList();
         TotalBytes = contents.Sum(i => i.Dto.Size);
         Cover = contents.OrderByDescending(i => i.Dto.AddedAt).FirstOrDefault();
         Newest = Cover?.Dto.AddedAt ?? DateTimeOffset.MinValue;
@@ -121,7 +138,8 @@ public partial class LocalFolderVm : ObservableObject
     }
 
     public BitmapImage? Thumb => Cover?.Thumb;
-    public string Summary => Count == 0 ? "Empty folder" : $"{Count} video{(Count == 1 ? "" : "s")}  ·  {Format.Bytes(TotalBytes)}";
+    public string Summary => Count == 0 ? "Empty folder" : $"{KindText.Count(_contents)}  ·  {Format.Bytes(TotalBytes)}";
+    private readonly List<ItemDto> _contents = new();
 }
 
 public partial class GrantVm : ObservableObject
@@ -145,6 +163,25 @@ public partial class ShareEditorViewModel : ObservableObject
     [ObservableProperty] private bool _hasExistingPassword;
     [ObservableProperty] private string? _error;
     public ObservableCollection<string> Roots { get; } = new();
+    // what of the folders' files is shared (videos always; the rest when ticked: a new share and every older one: videos only)
+    [ObservableProperty] private bool _shareMusic;
+    [ObservableProperty] private bool _sharePictures;
+    [ObservableProperty] private bool _sharePdfs;
+
+    public void SetKinds(IEnumerable<string>? kinds)
+    {
+        var k = new HashSet<string>(kinds ?? Array.Empty<string>());
+        ShareMusic = k.Contains(Core.Media.MediaKinds.Audio); SharePictures = k.Contains(Core.Media.MediaKinds.Image); SharePdfs = k.Contains(Core.Media.MediaKinds.Pdf);
+    }
+
+    private List<string> Kinds()
+    {
+        var k = new List<string> { Core.Media.MediaKinds.Video };
+        if (ShareMusic) k.Add(Core.Media.MediaKinds.Audio);
+        if (SharePictures) k.Add(Core.Media.MediaKinds.Image);
+        if (SharePdfs) k.Add(Core.Media.MediaKinds.Pdf);
+        return k;
+    }
     public bool IsNew => Id is null;
     public string Title => IsNew ? "New share" : "Edit share";
     public bool IsPasswordMode => Mode == AccessMode.Password;
@@ -161,7 +198,7 @@ public partial class ShareEditorViewModel : ObservableObject
         return new ShareUpsertDto
         {
             Id = Id, Name = name, Mode = Mode, Roots = Roots.ToList(),
-            Password = Password.Length > 0 ? Password : null,
+            Password = Password.Length > 0 ? Password : null, Kinds = Kinds(),
         };
     }
 
@@ -325,7 +362,7 @@ public partial class SharesViewModel : ObservableObject
     /// <summary>Adds files/folders to a share; when it is the open share, they land in the folder being viewed.</summary>
     public async Task AddPathsAsync(MyShareVm share, IEnumerable<string> paths)
     {
-        var list = paths.Where(p => Directory.Exists(p) || (File.Exists(p) && VideoTypes.IsVideo(p))).ToList();
+        var list = paths.Where(p => Directory.Exists(p) || (File.Exists(p) && Core.Media.MediaKinds.IsKnown(p))).ToList();
         if (list.Count == 0) { _main.Toast("Nothing to add", "Pick video files or folders.", "warn"); return; }
         var into = ReferenceEquals(share, Selected) ? CurrentFolder : "";
         try
@@ -523,8 +560,8 @@ public partial class SharesViewModel : ObservableObject
     public async Task NewShareFromPathsAsync(IEnumerable<string> paths)
     {
         var editor = new ShareEditorViewModel();
-        foreach (var p in paths.Where(p => Directory.Exists(p) || (File.Exists(p) && VideoTypes.IsVideo(p)))) editor.Roots.Add(p);
-        if (editor.Roots.Count == 0) { _main.Toast("Nothing to share", "Drop folders or video files.", "warn"); return; }
+        foreach (var p in paths.Where(p => Directory.Exists(p) || (File.Exists(p) && Core.Media.MediaKinds.IsKnown(p)))) editor.Roots.Add(p);
+        if (editor.Roots.Count == 0) { _main.Toast("Nothing to share", "Drop folders, videos, music, pictures or PDFs.", "warn"); return; }
         editor.Name = editor.SuggestName();
         var dto = await _main.Dialogs.EditShareAsync(editor);
         if (dto is null) return;
@@ -537,6 +574,7 @@ public partial class SharesViewModel : ObservableObject
         share ??= Selected;
         if (share is null) return;
         var editor = new ShareEditorViewModel { Id = share.Id, Name = share.Name, Mode = share.Mode, HasExistingPassword = share.Dto.HasPassword };
+        editor.SetKinds(share.Dto.Kinds);
         foreach (var r in share.Dto.Roots) editor.Roots.Add(r);
         var dto = await _main.Dialogs.EditShareAsync(editor);
         if (dto is null) return;
@@ -821,7 +859,7 @@ public partial class SharesViewModel : ObservableObject
     {
         if (item is null || Selected is null) return;
         if (!File.Exists(item.Dto.FullPath)) { _main.Toast("File not found", item.Dto.FullPath, "warn"); return; }
-        _main.Player.OpenLocal(item, Selected.Name);
+        _main.OpenLocalItem(item, Selected.Name, Items); // (a video or a song plays; a picture or a PDF is shown)
     }
 
     [RelayCommand]

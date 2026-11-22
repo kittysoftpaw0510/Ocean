@@ -192,9 +192,27 @@ has two networking modes (`NetworkCompat`):
   library does not light up as "new"). The browsing side flags an item **new** when
   `AddedAt > max(lastVisit, now − NewDays)`.
 - A `FileSystemWatcher` per root triggers a debounced rescan; a full rescan also runs every 15 min.
-- Duration/resolution come from Shell properties (`System.Media.Duration`, `System.Video.FrameWidth`),
-  thumbnails from `IShellItemImageFactory`, the same providers Explorer uses, run on a dedicated STA
-  thread, pre-generated in the background and cached as 320×180 JPEGs keyed by item id + mtime.
+- Duration/resolution come from Shell properties (`System.Media.Duration`, `System.Video.FrameWidth`, a
+  picture's `System.Image.HorizontalSize`), thumbnails from `IShellItemImageFactory`, the same providers Explorer
+  uses (a picture itself, a song's cover, a video's frame), run on a dedicated STA thread, pre-generated in the
+  background and cached as 320×180 JPEGs keyed by item id + mtime. A PDF: its pages and first-page preview
+  through Windows' PDF engine (`Windows.Data.Pdf`, `PdfFiles`; Windows has no dependable PDF thumbnail of its own).
+- **Kinds** (`MediaKinds`): videos, music (mp3, m4a, aac, flac, wav, ogg/opus, wma, aiff, mka), pictures (jpg,
+  png, gif, bmp, webp, heic/heif, avif, tiff) and PDFs. A share's `Kinds` say which of its folders' files it
+  shares; null (every share from before) and new shares: videos only, so photos and documents that sat in a
+  shared folder all along don't appear on the network unasked. A file added on its own is shared whatever its
+  kind. `ItemDto.Kind` is null for a video (as before), else audio, image or pdf; `Pages` for a PDF. An Ocean that
+  knows the kinds says so (`X-Ocean-Kinds`, passed on by bridges and reverse connections; a bridge drops its own,
+  so an older origin behind a newer bridge stays an older origin); one that doesn't gets the videos only (its
+  player would try to play a PDF), with its own ETag view. Lighter copies and multicasts: videos only. The app
+  opens each kind as it is (`MainViewModel.OpenItem`): videos and songs in the player (a song: its cover where the
+  picture would be), pictures and PDFs in the viewer (`ViewerViewModel`, `ViewerView`): a picture fitted (never
+  enlarged), wheel zoom around the mouse, drag, double click 100 % ↔ fit, ←/→ through the pictures of its folder
+  (the next and previous fetched ahead; decoded off the UI thread, at most 8192 px wide); a PDF fetched whole into
+  a temp file, every page laid out at its size, drawn by Windows' PDF engine when it comes near the view at the
+  size shown (sharp on this screen), let go when far; Ctrl+wheel and +/− zoom, "Page n of m". A picture Windows
+  has no decoder for (HEIC, WebP, AVIF without their free Store extensions) or a PDF with a password says so,
+  with Download. Since this, the projects target `net8.0-windows10.0.19041.0` (the WinRT PDF API).
 - Catalog version is a persisted counter bumped on any change. Responses carry an ETag that depends on
   the version *and* on which locks the caller has open.
 - **Sync costs only what changed.** A node sends back the ETag of the catalog it holds: the owner answers

@@ -55,6 +55,7 @@ public partial class MainWindow : Window, IDialogs
 
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        if (_vm.Viewer.IsOpen) return; // (the viewer has the keys: Esc, ←/→, +/−)
         if (e.Key == Key.F && Keyboard.Modifiers == ModifierKeys.Control)
         {
             VideoSearchBox.Focus(); VideoSearchBox.SelectAll(); e.Handled = true;
@@ -130,7 +131,7 @@ public partial class MainWindow : Window, IDialogs
 
     public string[]? PickFiles(string title)
     {
-        var dlg = new OpenFileDialog { Title = title, Multiselect = true, Filter = VideoTypes.FilterString(), CheckFileExists = true };
+        var dlg = new OpenFileDialog { Title = title, Multiselect = true, Filter = MediaKinds.FilterString(), CheckFileExists = true };
         return dlg.ShowDialog(Owner_) == true ? dlg.FileNames : null;
     }
 

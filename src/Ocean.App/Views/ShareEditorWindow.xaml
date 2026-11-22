@@ -28,7 +28,7 @@
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
-                <TextBlock Text="Drop folders or video files here" Style="{StaticResource Dim}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding Roots.Count, Converter={StaticResource ZeroToVis}}"/>
+                <TextBlock Text="Drop folders or files here" Style="{StaticResource Dim}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding Roots.Count, Converter={StaticResource ZeroToVis}}"/>
             </Grid>
         </Border>
         <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
@@ -36,7 +36,17 @@
             <Button Style="{StaticResource BtnGhost}" Content="+ Add files" Click="AddFiles_Click" Margin="4,0,0,0"/>
         </StackPanel>
 
-        <TextBlock Text="Who can watch" Style="{StaticResource Muted}" Margin="0,14,0,6" FontSize="12"/>
+        <!-- which of the folders' files: videos always, the rest when ticked -->
+        <TextBlock Text="Share from these folders" Style="{StaticResource Muted}" Margin="0,14,0,6" FontSize="12"/>
+        <WrapPanel>
+            <CheckBox Content="Videos" IsChecked="True" IsEnabled="False" Margin="0,0,18,4" ToolTip="Videos are always shared"/>
+            <CheckBox Content="Music" IsChecked="{Binding ShareMusic}" Margin="0,0,18,4" ToolTip="MP3, M4A, FLAC, WAV, OGG, Opus…: played in Ocean's player"/>
+            <CheckBox Content="Pictures" IsChecked="{Binding SharePictures}" Margin="0,0,18,4" ToolTip="JPEG, PNG, GIF, WebP, HEIC…: shown in Ocean's viewer"/>
+            <CheckBox Content="PDFs" IsChecked="{Binding SharePdfs}" Margin="0,0,18,4" ToolTip="Shown in Ocean's viewer"/>
+        </WrapPanel>
+        <TextBlock Text="Only what is ticked appears on the network. Files you add one by one are shared whatever they are." Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+
+        <TextBlock Text="Who can open it" Style="{StaticResource Muted}" Margin="0,14,0,6" FontSize="12"/>
         <StackPanel>
             <RadioButton Content="Everyone on the network" IsChecked="{Binding Mode, Converter={StaticResource Equals}, ConverterParameter=Public}" Margin="0,2"/>
             <RadioButton Content="People who know a password" IsChecked="{Binding Mode, Converter={StaticResource Equals}, ConverterParameter=Password}" Margin="0,2"/>
