@@ -61,12 +61,12 @@ public static class PeerApi
             var pc = PeerContext.Get(ctx);
             var check = access.Checker(pc.ClientId, pc.Grants);
             var cfg = config.Current;
-            // an Ocean that knows music, pictures and PDFs says so; an older one gets the videos only
-            var allKinds = ctx.Request.Headers[PeerHeaders.Kinds].ToString().Contains("pdf", StringComparison.Ordinal);
-            var cat = catalog.BuildCatalog(id.NodeId, cfg.NodeName, cfg.UserName, cfg.SharingPaused, check, allKinds);
+            // an Ocean says which kinds of file it knows; an older one gets only those (said nothing: the videos)
+            var level = MediaKinds.Level(ctx.Request.Headers.TryGetValue(PeerHeaders.Kinds, out var said) ? said.ToString() : null);
+            var cat = catalog.BuildCatalog(id.NodeId, cfg.NodeName, cfg.UserName, cfg.SharingPaused, check, level);
             // ETag = version + what this caller can see (which locks it has open, which kinds). Stable across restarts.
             var open = string.Join(',', cat.Shares.Where(s => s.Unlocked).Select(s => s.Id).Concat(cat.Shares.SelectMany(s => s.Items).Where(i => i.Lock is not null && i.Unlocked).Select(i => i.Id)).Order());
-            var view = Fnv.Hash(open + (cfg.SharingPaused ? "|paused" : "") + (allKinds ? "" : "|videos"));
+            var view = Fnv.Hash(open + (cfg.SharingPaused ? "|paused" : "") + (level switch { 0 => "|videos", 1 => "|media", _ => "" }));
             var etag = CatalogTags.Make(cat.Version, view);
             ctx.Response.Headers.CacheControl = "no-cache";
             if (ctx.Request.Headers.IfNoneMatch.ToString() == etag)

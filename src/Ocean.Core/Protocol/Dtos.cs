@@ -270,7 +270,8 @@ public sealed class DecisionDto
     public string Decision { get; set; } = "deny";
 }
 
-public enum DownloadStatus { Queued, Running, Done, Failed, Canceled }
+/// <summary>Paused: stopped by the user, what came so far is kept; Resume goes on from there.</summary>
+public enum DownloadStatus { Queued, Running, Done, Failed, Canceled, Paused }
 
 public sealed class DownloadJobDto
 {

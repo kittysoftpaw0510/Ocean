@@ -25,7 +25,7 @@ public sealed class ThumbnailService
 
     public bool Has(ItemRecord item) => File.Exists(JpegPath(item));
 
-    public bool Tried(ItemRecord item) => File.Exists(JpegPath(item)) || File.Exists(NonePath(item));
+    public bool Tried(ItemRecord item) => item.Kind == MediaKinds.File || File.Exists(JpegPath(item)) || File.Exists(NonePath(item));
 
     /// <summary>Returns the path of the cached JPEG, generating it if necessary; null when unavailable.</summary>
     public Task<string?> GetOrCreateAsync(string itemId, CancellationToken ct = default)
@@ -34,6 +34,8 @@ public sealed class ThumbnailService
         var jpeg = JpegPath(item);
         if (File.Exists(jpeg)) return Task.FromResult<string?>(jpeg);
         if (File.Exists(NonePath(item))) return Task.FromResult<string?>(null);
+        // any other file has no preview: the app draws its type from its name
+        if (item.Kind == MediaKinds.File) return Task.FromResult<string?>(null);
         var full = _catalog.FullPath(share, item);
         return _inflight.GetOrAdd(itemId, k => Generate(item, full, jpeg, ct).ContinueWith(t =>
         {

@@ -31,14 +31,20 @@ public partial class DownloadVm : ObservableObject
         Size = d.Size; Received = d.Received; Status = d.Status; Error = d.Error; Destination = d.Destination; SpeedBps = d.SpeedBps;
         OnPropertyChanged(nameof(StatusText)); OnPropertyChanged(nameof(ProgressText)); OnPropertyChanged(nameof(IsActive));
         OnPropertyChanged(nameof(IsDone)); OnPropertyChanged(nameof(IsFailed)); OnPropertyChanged(nameof(CanRetry)); OnPropertyChanged(nameof(Percent));
+        OnPropertyChanged(nameof(IsPaused)); OnPropertyChanged(nameof(CanPause)); OnPropertyChanged(nameof(ShowBar)); OnPropertyChanged(nameof(Glyph));
     }
 
-    public bool IsActive => Status is DownloadStatus.Queued or DownloadStatus.Running;
+    /// <summary>Not over yet (it can still be canceled): waiting, coming, or paused.</summary>
+    public bool IsActive => Status is DownloadStatus.Queued or DownloadStatus.Running or DownloadStatus.Paused;
+    public bool IsPaused => Status == DownloadStatus.Paused;
+    public bool CanPause => Status is DownloadStatus.Queued or DownloadStatus.Running;
+    /// <summary>The bar shows while it comes, and where it stopped while paused.</summary>
+    public bool ShowBar => Status == DownloadStatus.Running || (Status == DownloadStatus.Paused && Received > 0);
     public bool IsDone => Status == DownloadStatus.Done;
     public bool IsFailed => Status == DownloadStatus.Failed;
     public bool CanRetry => Status is DownloadStatus.Failed or DownloadStatus.Canceled;
     public double Percent => Size > 0 ? Math.Clamp(Received * 100.0 / Size, 0, 100) : 0;
-    public string Glyph => Status switch { DownloadStatus.Done => "", DownloadStatus.Failed => "", DownloadStatus.Canceled => "", DownloadStatus.Running => "", _ => "" };
+    public string Glyph => Status switch { DownloadStatus.Done => "", DownloadStatus.Failed => "", DownloadStatus.Canceled => "", DownloadStatus.Running => "", DownloadStatus.Paused => "", _ => "" };
     public string StatusText => Status switch
     {
         DownloadStatus.Queued => Error is null ? "Queued" : Error,
@@ -46,6 +52,7 @@ public partial class DownloadVm : ObservableObject
         DownloadStatus.Done => $"Done  ·  {Format.Bytes(Size)}",
         DownloadStatus.Failed => "Failed: " + (Error ?? "unknown error"),
         DownloadStatus.Canceled => "Canceled",
+        DownloadStatus.Paused => Received > 0 && Size > 0 ? $"Paused at {Percent:0}%  ·  {Format.Bytes(Received)} of {Format.Bytes(Size)}" : "Paused",
         _ => "",
     };
     public string ProgressText => Status == DownloadStatus.Running ? $"{Percent:0}%" : "";
@@ -114,6 +121,20 @@ public partial class DownloadsViewModel : ObservableObject
     {
         if (job is null) return;
         try { await _main.Api.PostAsync($"/api/downloads/{job.Id}/cancel"); } catch (Exception ex) { _main.Error("Could not cancel", ex); }
+    }
+
+    [RelayCommand]
+    private async Task Pause(DownloadVm? job)
+    {
+        if (job is null) return;
+        try { await _main.Api.PostAsync($"/api/downloads/{job.Id}/pause"); } catch (Exception ex) { _main.Error("Could not pause", ex); }
+    }
+
+    [RelayCommand]
+    private async Task Resume(DownloadVm? job)
+    {
+        if (job is null) return;
+        try { await _main.Api.PostAsync($"/api/downloads/{job.Id}/resume"); } catch (Exception ex) { _main.Error("Could not resume", ex); }
     }
 
     [RelayCommand]

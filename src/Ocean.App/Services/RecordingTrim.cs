@@ -19,7 +19,9 @@ public static class RecordingTrim
         if (ScreenTools.Ffmpeg is not { } ffmpeg) return new(false, null, "ffmpeg.exe is missing next to Ocean.");
         if (end - start < 0.5) return new(false, null, "That is less than half a second.");
         var inv = CultureInfo.InvariantCulture;
-        var target = Unique(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(source)!, System.IO.Path.GetFileNameWithoutExtension(source) + " (trimmed).mp4"));
+        // (a sound recording stays a sound file)
+        var soundOnly = string.Equals(System.IO.Path.GetExtension(source), ".m4a", StringComparison.OrdinalIgnoreCase);
+        var target = Unique(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(source)!, System.IO.Path.GetFileNameWithoutExtension(source) + " (trimmed)" + (soundOnly ? ".m4a" : ".mp4")));
         var onlyEnd = start < 0.05;
         var args = new List<string> { "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1" };
         if (!onlyEnd) args.AddRange(new[] { "-ss", start.ToString("0.000", inv) });
@@ -29,9 +31,10 @@ public static class RecordingTrim
             args.AddRange(new[] { "-c", "copy" });
             // Cut in decode order, not by time: a B-picture comes after the later picture it is built on, so a cut by
             // time could keep it and drop what it needs. Everything from the first picture past the end on goes.
-            if (await FirstPastAsync(ffmpeg, source, end, ct) is { } n)
+            if (!soundOnly && await FirstPastAsync(ffmpeg, source, end, ct) is { } n)
                 args.AddRange(new[] { "-bsf:v", $@"noise=drop=gte(n\,{n.ToString(inv)})" });
         }
+        else if (soundOnly) args.AddRange(new[] { "-c:a", "aac", "-b:a", "160k" });
         else args.AddRange(new[] { "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-force_key_frames", "expr:gte(t,n_forced*10)", "-fps_mode", "vfr", "-c:a", "aac", "-b:a", "128k" });
         args.AddRange(new[] { "-movflags", "+faststart", "-y", target });
 

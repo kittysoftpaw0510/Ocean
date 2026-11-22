@@ -50,8 +50,14 @@
                                 <TextBlock Style="{StaticResource Dim}" Margin="0,2,0,0">
                                     <Run Text="from "/><Run Text="{Binding PeerName, Mode=OneWay}"/><Run Text="   "/><Run Text="{Binding RelPath, Mode=OneWay}"/>
                                 </TextBlock>
-                                <Grid Margin="0,6,0,0" Visibility="{Binding Status, Converter={StaticResource EqualsToVis}, ConverterParameter=Running}">
-                                    <ProgressBar Value="{Binding Percent, Mode=OneWay}" Maximum="100" Height="6"/>
+                                <Grid Margin="0,6,0,0" Visibility="{Binding ShowBar, Converter={StaticResource BoolToVis}}">
+                                    <ProgressBar Value="{Binding Percent, Mode=OneWay}" Maximum="100" Height="6">
+                                        <ProgressBar.Style>
+                                            <Style TargetType="ProgressBar" BasedOn="{StaticResource {x:Type ProgressBar}}">
+                                                <Style.Triggers><DataTrigger Binding="{Binding IsPaused}" Value="True"><Setter Property="Opacity" Value="0.45"/></DataTrigger></Style.Triggers>
+                                            </Style>
+                                        </ProgressBar.Style>
+                                    </ProgressBar>
                                 </Grid>
                                 <TextBlock Text="{Binding StatusText}" Margin="0,4,0,0">
                                     <TextBlock.Style>
@@ -68,6 +74,11 @@
                                         Command="{Binding DataContext.OpenCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
                                 <Button Style="{StaticResource BtnIcon}" Content="&#xE8DA;" ToolTip="Show in folder" Visibility="{Binding IsDone, Converter={StaticResource BoolToVis}}"
                                         Command="{Binding DataContext.RevealCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
+                                <Button Style="{StaticResource BtnIcon}" Content="&#xE769;" ToolTip="Pause (what came so far is kept)" AutomationProperties.Name="Pause" Visibility="{Binding CanPause, Converter={StaticResource BoolToVis}}"
+                                        Command="{Binding DataContext.PauseCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
+                                <Button Style="{StaticResource BtnIcon}" Content="&#xE768;" ToolTip="Resume from where it stopped" AutomationProperties.Name="Resume" Visibility="{Binding IsPaused, Converter={StaticResource BoolToVis}}"
+                                        Foreground="{StaticResource Accent}"
+                                        Command="{Binding DataContext.ResumeCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
                                 <Button Style="{StaticResource BtnIcon}" Content="&#xE72C;" ToolTip="Retry" Visibility="{Binding CanRetry, Converter={StaticResource BoolToVis}}"
                                         Command="{Binding DataContext.RetryCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"/>
                                 <Button Style="{StaticResource BtnIcon}" Content="&#xE711;" ToolTip="Cancel" Visibility="{Binding IsActive, Converter={StaticResource BoolToVis}}"
@@ -84,7 +95,7 @@
         <StackPanel Grid.Row="1" VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVis}}">
             <TextBlock Text="&#xE896;" Style="{StaticResource Icon}" FontSize="36" Foreground="{StaticResource TextDim}"/>
             <TextBlock Text="No downloads yet" Style="{StaticResource H2}" HorizontalAlignment="Center" Margin="0,12,0,4"/>
-            <TextBlock Text="Right-click any video on a node, or use “Download all” on a share." Style="{StaticResource Muted}"/>
+            <TextBlock Text="Right-click any file on a node, or use “Download all” on a share." Style="{StaticResource Muted}"/>
         </StackPanel>
     </Grid>
 </UserControl>

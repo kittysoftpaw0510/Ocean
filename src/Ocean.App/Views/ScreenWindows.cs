@@ -131,7 +131,7 @@ public sealed class ScreenUi : IScreenUi
         _recordBar.Show();
         // the boundary of what is recorded
         _boundary?.Dispose();
-        if (record.Target is { } target)
+        if (record.Target is { SoundOnly: false } target) // (a sound recording has nothing to frame)
         {
             try { _boundary = new RecordBoundary(target, record); }
             catch (Exception ex) { AppLog.Warn("Record", "the recording boundary can't be shown", ex); }

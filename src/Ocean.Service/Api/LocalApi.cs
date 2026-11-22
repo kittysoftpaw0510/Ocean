@@ -443,6 +443,8 @@ public static class LocalApi
         g.MapPost("/downloads/clear", (DownloadManager dl) => Results.Json(new { removed = dl.ClearCompleted() }));
         g.MapPost("/downloads/{id}/cancel", (string id, DownloadManager dl) => dl.Cancel(id) ? Results.Ok() : Results.NotFound());
         g.MapPost("/downloads/{id}/retry", (string id, DownloadManager dl) => dl.Retry(id) ? Results.Ok() : Results.NotFound());
+        g.MapPost("/downloads/{id}/pause", (string id, DownloadManager dl) => dl.Pause(id) ? Results.Ok() : Results.NotFound());
+        g.MapPost("/downloads/{id}/resume", (string id, DownloadManager dl) => dl.Resume(id) ? Results.Ok() : Results.NotFound());
         g.MapDelete("/downloads/{id}", (string id, DownloadManager dl) => dl.Remove(id) ? Results.Ok() : Results.NotFound());
 
         // ---------------------------------------------------------------- settings

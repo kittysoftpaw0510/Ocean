@@ -67,8 +67,15 @@ public partial class LocalItemVm : ObservableObject
     public bool IsVideo => Kind == Core.Media.MediaKinds.Video;
     public bool IsImage => Kind == Core.Media.MediaKinds.Image;
     public bool IsPdf => Kind == Core.Media.MediaKinds.Pdf;
+    public bool IsAudio => Kind == Core.Media.MediaKinds.Audio;
     public bool IsPlayable => Kind is Core.Media.MediaKinds.Video or Core.Media.MediaKinds.Audio;
-    public string KindGlyph => KindText.Glyph(Kind);
+    /// <summary>Any other file: Ocean can't show it (others download it).</summary>
+    public bool IsFile => Kind == Core.Media.MediaKinds.File;
+    public bool Opens => !IsFile;
+    public string? TypeLabel => IsFile ? Core.Media.MediaKinds.ExtensionLabel(Name) : null;
+    public System.Windows.Media.Brush TypeBrush => IsFile ? KindText.FileBrush(Name) : KindText.Dim;
+    public string Ext => Path.GetExtension(Name);
+    public string KindGlyph => IsFile ? KindText.FileGlyph(Name) : KindText.Glyph(Kind);
     public string? KindBadge => KindText.Badge(Kind);
     public string OpenVerb => KindText.Verb(Kind);
     public string OpenGlyph => IsPlayable ? "\uE768" : "\uE890";
@@ -167,11 +174,14 @@ public partial class ShareEditorViewModel : ObservableObject
     [ObservableProperty] private bool _shareMusic;
     [ObservableProperty] private bool _sharePictures;
     [ObservableProperty] private bool _sharePdfs;
+    /// <summary>Every other file (documents, archives, programs...): others can only download those.</summary>
+    [ObservableProperty] private bool _shareFiles;
 
     public void SetKinds(IEnumerable<string>? kinds)
     {
         var k = new HashSet<string>(kinds ?? Array.Empty<string>());
         ShareMusic = k.Contains(Core.Media.MediaKinds.Audio); SharePictures = k.Contains(Core.Media.MediaKinds.Image); SharePdfs = k.Contains(Core.Media.MediaKinds.Pdf);
+        ShareFiles = k.Contains(Core.Media.MediaKinds.File);
     }
 
     private List<string> Kinds()
@@ -180,6 +190,7 @@ public partial class ShareEditorViewModel : ObservableObject
         if (ShareMusic) k.Add(Core.Media.MediaKinds.Audio);
         if (SharePictures) k.Add(Core.Media.MediaKinds.Image);
         if (SharePdfs) k.Add(Core.Media.MediaKinds.Pdf);
+        if (ShareFiles) k.Add(Core.Media.MediaKinds.File);
         return k;
     }
     public bool IsNew => Id is null;
@@ -228,6 +239,20 @@ public partial class SharesViewModel : ObservableObject
     [ObservableProperty] private bool _isEmpty = true;
     [ObservableProperty] private string _itemFilter = "";
     private List<LocalItemVm> _allItems = new();
+    // ---- the kinds of file in the share shown (as in Browse): one kind alone, from all its folders ----
+    /// <summary>Only one kind of file (video, audio, image, pdf, file); null: all of them.</summary>
+    [ObservableProperty] private string? _kindFilter;
+    /// <summary>The share holds more than one kind of file: the kind filter shows.</summary>
+    [ObservableProperty] private bool _hasKinds;
+    [ObservableProperty] private int _videoCount;
+    [ObservableProperty] private int _audioCount;
+    [ObservableProperty] private int _imageCount;
+    [ObservableProperty] private int _pdfCount;
+    [ObservableProperty] private int _fileCount;
+    /// <summary>What the flat list is, in place of the folder path: "Search results", "All pictures in this share".</summary>
+    [ObservableProperty] private string _flatLabel = "Search results";
+    partial void OnKindFilterChanged(string? value) { if (!_switchingShare) ApplyItemFilter(); }
+    [RelayCommand] private void SetKind(string? kind) => KindFilter = string.IsNullOrEmpty(kind) || kind == KindFilter ? null : kind;
 
     public SharesViewModel(MainViewModel main) { _main = main; }
 
@@ -239,7 +264,7 @@ public partial class SharesViewModel : ObservableObject
         {
             // New share: start at its root; the list is rebuilt once its items are loaded.
             _switchingShare = true;
-            try { CurrentFolder = ""; } finally { _switchingShare = false; }
+            try { CurrentFolder = ""; KindFilter = null; } finally { _switchingShare = false; }
         }
         _ = LoadItemsAsync();
     }
@@ -392,10 +417,19 @@ public partial class SharesViewModel : ObservableObject
     private void ApplyItemFilter()
     {
         var f = ItemFilter.Trim();
-        FolderMode = f.Length == 0;
+        VideoCount = _allItems.Count(i => i.IsVideo); AudioCount = _allItems.Count(i => i.IsAudio); ImageCount = _allItems.Count(i => i.IsImage);
+        PdfCount = _allItems.Count(i => i.IsPdf); FileCount = _allItems.Count(i => i.IsFile);
+        HasKinds = new[] { VideoCount, AudioCount, ImageCount, PdfCount, FileCount }.Count(c => c > 0) > 1;
+        if (!HasKinds && KindFilter is not null) { KindFilter = null; return; } // (this re-enters here)
+        FolderMode = f.Length == 0 && KindFilter is null;
         if (!FolderMode)
         {
-            Items = SortItems(_allItems.Where(i => i.Name.Contains(f, StringComparison.CurrentCultureIgnoreCase) || i.Folder.Contains(f, StringComparison.CurrentCultureIgnoreCase)));
+            // one kind of file, or a search: a flat list over all the share's folders
+            IEnumerable<LocalItemVm> q = _allItems;
+            if (KindFilter is { } kind) q = q.Where(i => i.Kind == kind);
+            if (f.Length > 0) q = q.Where(i => i.Name.Contains(f, StringComparison.CurrentCultureIgnoreCase) || i.Folder.Contains(f, StringComparison.CurrentCultureIgnoreCase));
+            FlatLabel = KindFilter is null ? "Search results" : $"All {KindText.Plural(KindFilter)} in this share" + (f.Length > 0 ? "  ·  search results" : "");
+            Items = SortItems(q);
             Entries = Items.Cast<object>().ToList();
             Crumbs = new();
             OnSelectionChanged();
@@ -430,6 +464,7 @@ public partial class SharesViewModel : ObservableObject
         SortMode.Oldest => "Oldest first",
         SortMode.Size => "Largest first",
         SortMode.Duration => "Longest first",
+        SortMode.Type => "Type",
         _ => "Name",
     };
 
@@ -441,6 +476,8 @@ public partial class SharesViewModel : ObservableObject
         SortMode.Oldest => q.OrderBy(i => i.Dto.AddedAt).ThenBy(i => i.Name, ByName),
         SortMode.Size => q.OrderByDescending(i => i.Dto.Size).ThenBy(i => i.Name, ByName),
         SortMode.Duration => q.OrderByDescending(i => i.Dto.DurationMs).ThenBy(i => i.Name, ByName),
+        // by type: videos, music, pictures, PDFs, then the rest by their extension
+        SortMode.Type => q.OrderBy(i => KindText.Order(i.Kind)).ThenBy(i => i.Ext, ByName).ThenBy(i => i.Name, ByName),
         _ => q.OrderBy(i => i.Name, ByName),
     }).ToList();
 

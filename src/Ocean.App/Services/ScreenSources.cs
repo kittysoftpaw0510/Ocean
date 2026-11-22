@@ -40,7 +40,9 @@ public sealed class ScreenShareSettings
 
 public sealed class ScreenPick
 {
-    public enum Kinds { Monitor, Window, Region }
+    /// <summary>None: nothing of the screen (recording only: the sound alone, speaker and microphone).</summary>
+    public enum Kinds { Monitor, Window, Region, None }
+    public bool SoundOnly => Kind == Kinds.None;
     public Kinds Kind { get; init; }
     public IntPtr Monitor { get; init; }
     public IntPtr Window { get; init; }

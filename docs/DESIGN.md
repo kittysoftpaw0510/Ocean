@@ -213,6 +213,17 @@ has two networking modes (`NetworkCompat`):
   size shown (sharp on this screen), let go when far; Ctrl+wheel and +/− zoom, "Page n of m". A picture Windows
   has no decoder for (HEIC, WebP, AVIF without their free Store extensions) or a PDF with a password says so,
   with Download. Since this, the projects target `net8.0-windows10.0.19041.0` (the WinRT PDF API).
+- **Any other file** is the fifth kind, `file`: whatever isn't one of the four and isn't a leftover
+  (`MediaKinds.IsJunk`: `.tmp`, `.part`, `.crdownload`, `.oceanpart`, `.lnk`, `~$…`, `Thumbs.db`, `desktop.ini`…).
+  Shared from folders when the share's `Kinds` hold `file`; a file added on its own always. Nothing is found out
+  about it (no probe) and it has no preview (the thumbnail answers 404 without asking the shell); the app draws
+  its type from its name (`KindText.FileGlyph`/`FileBrush`: a family's icon and colour, and the extension).
+  It is served as `application/octet-stream` and is never opened in Ocean: opening it downloads it (my own:
+  shown in Explorer). What a caller is told about follows what it says it knows (`MediaKinds.Level` of
+  `X-Ocean-Kinds`): nothing said: videos; the four kinds (1.6.4): those; `file` among them: everything. Each
+  level has its own ETag view. The folder watcher asks for a rescan only for files of the kinds the share shares
+  (a log file growing in a videos-only folder scans nothing). (Developers: `OCEAN_TEST_OLD_KINDS=1` says
+  nothing, `=2` says what 1.6.4 said.)
 - Catalog version is a persisted counter bumped on any change. Responses carry an ETag that depends on
   the version *and* on which locks the caller has open.
 - **Sync costs only what changed.** A node sends back the ETag of the catalog it holds: the owner answers
@@ -724,6 +735,10 @@ Jobs are persisted (`downloads.json`) and resumed with HTTP ranges from a `.ocea
 = `<download dir>\<peer name>\<relative path>` after sanitizing each segment (invalid characters,
 reserved device names, 200-char segment cap, unique suffix on collision); .NET handles paths beyond
 `MAX_PATH`. Up to N parallel jobs (setting), 3 automatic retries with back-off for transient errors.
+A job can be paused (`POST /api/downloads/{id}/pause`, `DownloadStatus.Paused`): a running one is stopped and,
+unlike a canceled one, keeps its `.oceanpart`; a waiting one just stops waiting. Paused is persisted, so it stays
+paused over a restart and frees its slot for the next job. `/resume` queues it again and it goes on from the
+part's length. Canceling a paused job deletes the part.
 Downloads read through the stream cache (below), so whatever was already watched is copied from disk.
 
 ## Bandwidth

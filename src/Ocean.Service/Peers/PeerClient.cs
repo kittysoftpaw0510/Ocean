@@ -80,7 +80,14 @@ public sealed class PeerClient : IDisposable
         return ok;
     }
 
-    private static readonly bool ActsOld = Environment.GetEnvironmentVariable("OCEAN_TEST_OLD_KINDS") == "1";
+    // (developers) OCEAN_TEST_OLD_KINDS: 1 = say nothing, as an Ocean from before the kinds does (it gets the videos);
+    // 2 = say what 1.6.4 said (it gets videos, music, pictures and PDFs, not the other files)
+    private static readonly string? KindsSaid = Environment.GetEnvironmentVariable("OCEAN_TEST_OLD_KINDS") switch
+    {
+        "1" => null,
+        "2" => "video,audio,image,pdf",
+        _ => string.Join(",", Ocean.Core.Media.MediaKinds.All),
+    };
 
     public HttpRequestMessage Build(Peer peer, HttpMethod method, string path, IReadOnlyDictionary<string, string>? grants = null)
     {
@@ -92,8 +99,8 @@ public sealed class PeerClient : IDisposable
         req.Headers.TryAddWithoutValidation("X-Ocean-Name", Ascii(cfg.NodeName));
         req.Headers.TryAddWithoutValidation("X-Ocean-User", Ascii(cfg.UserName));
         req.Headers.TryAddWithoutValidation("X-Ocean-Host", Ascii(Environment.MachineName));
-        // what this Ocean can open (developers: OCEAN_TEST_OLD_KINDS=1 leaves it out, as an older Ocean does)
-        if (!ActsOld) req.Headers.TryAddWithoutValidation(PeerHeaders.Kinds, string.Join(",", Ocean.Core.Media.MediaKinds.All));
+        // which kinds of file this Ocean knows (an owner tells it only about those)
+        if (KindsSaid is not null) req.Headers.TryAddWithoutValidation(PeerHeaders.Kinds, KindsSaid);
         if (grants is { Count: > 0 })
             req.Headers.TryAddWithoutValidation("X-Ocean-Grants", string.Join(';', grants.Select(kv => kv.Key + "=" + kv.Value)));
         return req;

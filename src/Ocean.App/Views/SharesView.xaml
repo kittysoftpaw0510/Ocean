@@ -9,7 +9,7 @@
             <Border x:Name="Row" Margin="12,1" CornerRadius="8" Padding="8,5" Background="Transparent" BorderThickness="1" BorderBrush="Transparent" Cursor="Hand">
                 <Border.ContextMenu>
                     <ContextMenu>
-                        <MenuItem Header="{Binding OpenVerb}" Click="Play_Click">
+                        <MenuItem Header="{Binding OpenVerb}" Click="Play_Click" Visibility="{Binding Opens, Converter={StaticResource BoolToVis}}">
                             <MenuItem.Icon><TextBlock Text="{Binding OpenGlyph}" Style="{StaticResource Icon}"/></MenuItem.Icon>
                         </MenuItem>
                         <MenuItem Header="Start multicast" Click="StartCast_Click" Visibility="{Binding CanCast, Converter={StaticResource BoolToVis}}"
@@ -55,7 +55,7 @@
                     </Grid.ColumnDefinitions>
                     <Grid Width="80" Height="45">
                         <Rectangle RadiusX="6" RadiusY="6" Fill="{StaticResource Bg3}"/>
-                        <TextBlock Text="{Binding KindGlyph}" Style="{StaticResource Icon}" FontSize="18" Foreground="{StaticResource TextDim}"/>
+                        <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource TypeMarkSmall}"/>
                         <Rectangle RadiusX="6" RadiusY="6">
                             <Rectangle.Fill><ImageBrush ImageSource="{Binding Thumb}" Stretch="UniformToFill"/></Rectangle.Fill>
                         </Rectangle>
@@ -267,7 +267,7 @@
                                         <MenuItem Header="Rename…" Command="{Binding PlacementTarget.Tag.RenameShareCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"/>
                                         <MenuItem Header="Who can watch…" Command="{Binding PlacementTarget.Tag.EditCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"/>
                                         <Separator/>
-                                        <MenuItem Header="Add videos…" Command="{Binding PlacementTarget.Tag.AddVideosCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"/>
+                                        <MenuItem Header="Add files…" Command="{Binding PlacementTarget.Tag.AddVideosCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"/>
                                         <MenuItem Header="Add a folder…" Command="{Binding PlacementTarget.Tag.AddFolderToCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"/>
                                         <MenuItem Header="Rescan" Command="{Binding PlacementTarget.Tag.RescanCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}"/>
                                         <MenuItem Header="Open in Explorer" Command="{Binding PlacementTarget.Tag.OpenFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" IsEnabled="{Binding HasRoots}"/>
@@ -382,13 +382,15 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <TextBlock Text="Search results" Style="{StaticResource Muted}" Visibility="{Binding FolderMode, Converter={StaticResource InvBoolToVis}}"/>
+                    <TextBlock Text="{Binding FlatLabel}" Style="{StaticResource Muted}" Visibility="{Binding FolderMode, Converter={StaticResource InvBoolToVis}}"/>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Style="{StaticResource BtnPrimary}" Margin="0,0,6,0" Command="{Binding MoveToCommand}" Visibility="{Binding SelectedItemCount, Converter={StaticResource CountToVis}}">
                         <TextBlock Foreground="{StaticResource AccentText}"><Run Text="Move "/><Run Text="{Binding SelectedItemCount, Mode=OneWay}"/><Run Text=" to…"/></TextBlock>
                     </Button>
-                    <Button x:Name="SortButton" Style="{StaticResource BtnGhost}" Margin="0,0,4,0" Click="Sort_Click" ToolTip="Sort the videos and folders shown here">
+                    <!-- one kind of file alone, from all the share's folders (when it holds more than one kind) -->
+                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource KindFilterBar}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                    <Button x:Name="SortButton" Style="{StaticResource BtnGhost}" Margin="0,0,4,0" Click="Sort_Click" ToolTip="Sort the files and folders shown here">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="&#xE8CB;" Style="{StaticResource Icon}" Margin="0,0,8,0"/>
                             <TextBlock Text="{Binding SortLabel}"/>
@@ -401,18 +403,19 @@
                                 <MenuItem Header="Name" Command="{Binding PlacementTarget.DataContext.SetSortCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Name"/>
                                 <MenuItem Header="Largest first" Command="{Binding PlacementTarget.DataContext.SetSortCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Size"/>
                                 <MenuItem Header="Longest first" Command="{Binding PlacementTarget.DataContext.SetSortCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Duration"/>
+                                <MenuItem Header="Type" Command="{Binding PlacementTarget.DataContext.SetSortCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Type"/>
                             </ContextMenu>
                         </Button.ContextMenu>
                     </Button>
-                    <Button x:Name="AddButton" Style="{StaticResource BtnGhost}" Click="Add_Click" ToolTip="Add videos or a folder from your disk into the folder shown here">
+                    <Button x:Name="AddButton" Style="{StaticResource BtnGhost}" Click="Add_Click" ToolTip="Add files or a folder from your disk into the folder shown here">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="&#xE710;" Style="{StaticResource Icon}" Margin="0,0,8,0"/>
-                            <TextBlock Text="Add videos"/>
+                            <TextBlock Text="Add files"/>
                             <TextBlock Text="&#xE70D;" Style="{StaticResource Icon}" FontSize="9" Margin="8,1,0,0"/>
                         </StackPanel>
                         <Button.ContextMenu>
                             <ContextMenu>
-                                <MenuItem Header="Video files…" Command="{Binding PlacementTarget.DataContext.AddVideosCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                <MenuItem Header="Files…" Command="{Binding PlacementTarget.DataContext.AddVideosCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
                                 <MenuItem Header="A folder (with its sub-folders)…" Command="{Binding PlacementTarget.DataContext.AddFolderToCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
                             </ContextMenu>
                         </Button.ContextMenu>
@@ -453,10 +456,10 @@
                 <TextBlock Text="&#xE8B7;" Style="{StaticResource Icon}" FontSize="32" Foreground="{StaticResource TextDim}"/>
                 <TextBlock Text="This folder is empty" Style="{StaticResource H2}" HorizontalAlignment="Center" Margin="0,12,0,4"/>
                 <TextBlock Style="{StaticResource Muted}" TextWrapping="Wrap" TextAlignment="Center"
-                           Text="Add videos from your disk, drop files onto this window, or move videos here from another folder."/>
+                           Text="Add files from your disk, drop them onto this window, or move files here from another folder."/>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,16,0,0">
                     <Button Style="{StaticResource BtnPrimary}" Command="{Binding AddVideosCommand}">
-                        <TextBlock Text="Add videos…" Foreground="{StaticResource AccentText}"/>
+                        <TextBlock Text="Add files…" Foreground="{StaticResource AccentText}"/>
                     </Button>
                     <Button Content="Add a folder…" Margin="8,0,0,0" Command="{Binding AddFolderToCommand}"/>
                 </StackPanel>

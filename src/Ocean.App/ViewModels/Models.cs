@@ -6,7 +6,7 @@ using Ocean.Core.Protocol;
 namespace Ocean.App.ViewModels;
 
 public enum ViewMode { Grid, Tiles, List }
-public enum SortMode { Newest, Oldest, Name, Size, Duration, Folder }
+public enum SortMode { Newest, Oldest, Name, Size, Duration, Folder, Type }
 
 /// <summary>Dialogs the view layer provides to view models.</summary>
 public interface IDialogs
@@ -179,11 +179,18 @@ public partial class ItemVm : ObservableObject
     public bool IsPdf => Kind == Core.Media.MediaKinds.Pdf;
     /// <summary>Played in the player (a video, a song).</summary>
     public bool IsPlayable => IsVideo || IsAudio;
-    public string KindGlyph => KindText.Glyph(Kind);
+    /// <summary>Any other file: Ocean can't show it, it can only be downloaded.</summary>
+    public bool IsFile => Kind == Core.Media.MediaKinds.File;
+    /// <summary>Ocean plays or shows it itself.</summary>
+    public bool Opens => !IsFile;
+    /// <summary>Any other file: its extension ("DOCX") under its icon, in its type's colour.</summary>
+    public string? TypeLabel => IsFile ? Core.Media.MediaKinds.ExtensionLabel(Name) : null;
+    public System.Windows.Media.Brush TypeBrush => IsFile ? KindText.FileBrush(Name) : KindText.Dim;
+    public string KindGlyph => IsFile ? KindText.FileGlyph(Name) : KindText.Glyph(Kind);
     public string? KindBadge => KindText.Badge(Kind);
     public string OpenVerb => KindText.Verb(Kind);
     /// <summary>The open button's icon: play (a video, a song), view (a picture, a PDF).</summary>
-    public string OpenGlyph => IsPlayable ? "\uE768" : "\uE890";
+    public string OpenGlyph => IsPlayable ? "\uE768" : IsFile ? "\uE896" : "\uE890";
     public string AddedText => Format.Ago(Dto.AddedAt);
     public string AddedFull => Dto.AddedAt.LocalDateTime.ToString("f");
     public DateTimeOffset AddedAt => Dto.AddedAt;

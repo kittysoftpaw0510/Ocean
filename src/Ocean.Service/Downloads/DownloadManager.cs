@@ -28,6 +28,8 @@ internal sealed class DownloadJob
 
     [System.Text.Json.Serialization.JsonIgnore] public double SpeedBps { get; set; }
     [System.Text.Json.Serialization.JsonIgnore] public CancellationTokenSource? Cts { get; set; }
+    /// <summary>The user paused it while it ran: it stops as paused (its part is kept), not as canceled.</summary>
+    [System.Text.Json.Serialization.JsonIgnore] public bool Pausing { get; set; }
     [System.Text.Json.Serialization.JsonIgnore] public long WindowStart { get; set; }
     [System.Text.Json.Serialization.JsonIgnore] public long WindowBytes { get; set; }
     [System.Text.Json.Serialization.JsonIgnore] public long LastNotify { get; set; }
@@ -129,7 +131,7 @@ public sealed class DownloadManager : BackgroundService
         {
             foreach (var item in items)
             {
-                if (_jobs.Any(j => j.PeerId == req.PeerId && j.ItemId == item.Id && j.Status is DownloadStatus.Queued or DownloadStatus.Running))
+                if (_jobs.Any(j => j.PeerId == req.PeerId && j.ItemId == item.Id && j.Status is DownloadStatus.Queued or DownloadStatus.Running or DownloadStatus.Paused))
                     continue;
                 // Same structure as shown in Ocean: <node>\<share>\<folders...>\<file>
                 var destination = Path.Combine(peerDir, SafeNames.RelPathToLocal(LocalRelPath(item)));
@@ -157,9 +159,33 @@ public sealed class DownloadManager : BackgroundService
     {
         DownloadJob? job;
         lock (_lock) job = _jobs.FirstOrDefault(j => j.Id == id);
-        if (job is null || job.Status is not (DownloadStatus.Queued or DownloadStatus.Running)) return false;
-        if (job.Status == DownloadStatus.Running) job.Cts?.Cancel();
+        if (job is null || job.Status is not (DownloadStatus.Queued or DownloadStatus.Running or DownloadStatus.Paused)) return false;
+        if (job.Status == DownloadStatus.Running) { job.Pausing = false; job.Cts?.Cancel(); }
         else { job.Status = DownloadStatus.Canceled; DeletePart(job); Persist(); Notify(job); }
+        return true;
+    }
+
+    /// <summary>
+    /// Pauses one download: it stops where it is and keeps what came (also over a restart of Ocean); the others go
+    /// on, and the next one waiting takes its place. <see cref="Resume"/> goes on from there.
+    /// </summary>
+    public bool Pause(string id)
+    {
+        DownloadJob? job;
+        lock (_lock) job = _jobs.FirstOrDefault(j => j.Id == id);
+        if (job is null || job.Status is not (DownloadStatus.Queued or DownloadStatus.Running)) return false;
+        if (job.Status == DownloadStatus.Running) { job.Pausing = true; job.Cts?.Cancel(); }
+        else { job.Status = DownloadStatus.Paused; job.Error = null; Persist(); Notify(job); }
+        return true;
+    }
+
+    public bool Resume(string id)
+    {
+        DownloadJob? job;
+        lock (_lock) job = _jobs.FirstOrDefault(j => j.Id == id);
+        if (job is null || job.Status != DownloadStatus.Paused) return false;
+        job.Status = DownloadStatus.Queued; job.Error = null; job.Attempts = 0; job.NotBefore = DateTimeOffset.MinValue;
+        Persist(); Notify(job); Wake();
         return true;
     }
 
@@ -303,6 +329,11 @@ public sealed class DownloadManager : BackgroundService
         {
             job.Status = DownloadStatus.Queued; // resume after restart
         }
+        catch (OperationCanceledException) when (job.Pausing)
+        {
+            job.Status = DownloadStatus.Paused; // (what came stays in its part file: Resume goes on from there)
+            job.Error = null;
+        }
         catch (OperationCanceledException)
         {
             job.Status = DownloadStatus.Canceled;
@@ -342,6 +373,7 @@ public sealed class DownloadManager : BackgroundService
         finally
         {
             job.SpeedBps = 0;
+            job.Pausing = false;
             job.Cts?.Dispose(); job.Cts = null;
             Persist();
             Notify(job);

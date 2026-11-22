@@ -805,4 +805,96 @@
                        Visibility="{Binding HasTags, Converter={StaticResource BoolToVis}}"/>
         </StackPanel>
     </DataTemplate>
+    <!-- a word in a segmented control (the kinds of file) -->
+    <Style x:Key="KindSeg" TargetType="Button" BasedOn="{StaticResource BtnIcon}">
+        <Setter Property="Width" Value="NaN"/>
+        <Setter Property="Height" Value="28"/>
+        <Setter Property="Padding" Value="10,0"/>
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}"/>
+        <Setter Property="FontSize" Value="12.5"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="5" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource Hover}"/>
+                            <Setter Property="Foreground" Value="{StaticResource Text}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- which kind of files to show: only the kinds there are, and only when there is more than one
+         (the view model: KindFilter, SetKindCommand, HasKinds and a count per kind) -->
+    <DataTemplate x:Key="KindFilterBar">
+        <Border Background="{StaticResource Bg1}" CornerRadius="7" Padding="2" BorderBrush="{StaticResource Border}" BorderThickness="1"
+                Visibility="{Binding HasKinds, Converter={StaticResource BoolToVis}}">
+            <StackPanel Orientation="Horizontal">
+                <Button Command="{Binding SetKindCommand}" CommandParameter="" Content="All" ToolTip="Every kind of file">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource KindSeg}">
+                            <Style.Triggers><DataTrigger Binding="{Binding KindFilter}" Value="{x:Null}"><Setter Property="Background" Value="{StaticResource Bg3}"/><Setter Property="Foreground" Value="{StaticResource Accent}"/></DataTrigger></Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button Command="{Binding SetKindCommand}" CommandParameter="video" Content="Videos" Visibility="{Binding VideoCount, Converter={StaticResource CountToVis}}">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource KindSeg}">
+                            <Style.Triggers><DataTrigger Binding="{Binding KindFilter}" Value="video"><Setter Property="Background" Value="{StaticResource Bg3}"/><Setter Property="Foreground" Value="{StaticResource Accent}"/></DataTrigger></Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button Command="{Binding SetKindCommand}" CommandParameter="audio" Content="Music" Visibility="{Binding AudioCount, Converter={StaticResource CountToVis}}">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource KindSeg}">
+                            <Style.Triggers><DataTrigger Binding="{Binding KindFilter}" Value="audio"><Setter Property="Background" Value="{StaticResource Bg3}"/><Setter Property="Foreground" Value="{StaticResource Accent}"/></DataTrigger></Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button Command="{Binding SetKindCommand}" CommandParameter="image" Content="Pictures" Visibility="{Binding ImageCount, Converter={StaticResource CountToVis}}">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource KindSeg}">
+                            <Style.Triggers><DataTrigger Binding="{Binding KindFilter}" Value="image"><Setter Property="Background" Value="{StaticResource Bg3}"/><Setter Property="Foreground" Value="{StaticResource Accent}"/></DataTrigger></Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button Command="{Binding SetKindCommand}" CommandParameter="pdf" Content="PDFs" Visibility="{Binding PdfCount, Converter={StaticResource CountToVis}}">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource KindSeg}">
+                            <Style.Triggers><DataTrigger Binding="{Binding KindFilter}" Value="pdf"><Setter Property="Background" Value="{StaticResource Bg3}"/><Setter Property="Foreground" Value="{StaticResource Accent}"/></DataTrigger></Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button Command="{Binding SetKindCommand}" CommandParameter="file" Content="Other" ToolTip="Every other file (documents, archives, programs...): Ocean can't show these, they can be downloaded" Visibility="{Binding FileCount, Converter={StaticResource CountToVis}}">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource KindSeg}">
+                            <Style.Triggers><DataTrigger Binding="{Binding KindFilter}" Value="file"><Setter Property="Background" Value="{StaticResource Bg3}"/><Setter Property="Foreground" Value="{StaticResource Accent}"/></DataTrigger></Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+            </StackPanel>
+        </Border>
+    </DataTemplate>
+
+    <!-- a file with no preview: its icon and, for any other file, its extension in its type's colour -->
+    <DataTemplate x:Key="TypeMark">
+        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+            <TextBlock Text="{Binding KindGlyph}" Style="{StaticResource Icon}" FontSize="26" Foreground="{Binding TypeBrush}" HorizontalAlignment="Center"/>
+            <TextBlock Text="{Binding TypeLabel}" FontSize="10.5" FontWeight="Bold" Foreground="{Binding TypeBrush}" HorizontalAlignment="Center" Margin="0,5,0,0"
+                       Visibility="{Binding TypeLabel, Converter={StaticResource NullToVis}}"/>
+        </StackPanel>
+    </DataTemplate>
+    <DataTemplate x:Key="TypeMarkSmall">
+        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+            <TextBlock Text="{Binding KindGlyph}" Style="{StaticResource Icon}" FontSize="17" Foreground="{Binding TypeBrush}" HorizontalAlignment="Center"/>
+            <TextBlock Text="{Binding TypeLabel}" FontSize="8.5" FontWeight="Bold" Foreground="{Binding TypeBrush}" HorizontalAlignment="Center" Margin="0,2,0,0"
+                       Visibility="{Binding TypeLabel, Converter={StaticResource NullToVis}}"/>
+        </StackPanel>
+    </DataTemplate>
+
 </ResourceDictionary>

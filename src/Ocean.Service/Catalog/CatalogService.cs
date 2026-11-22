@@ -26,7 +26,7 @@ public sealed class ItemRecord
     /// <summary>A PDF's pages.</summary>
     public int? Pages { get; set; }
     public bool Probed { get; set; }
-    /// <summary>video, audio, image, pdf (from its name).</summary>
+    /// <summary>video, audio, image, pdf, file (from its name).</summary>
     public string Kind => MediaKinds.KindOf(Name) ?? MediaKinds.Video;
 }
 
@@ -142,7 +142,7 @@ public sealed class CatalogService : IDisposable
     {
         if (item.SubPath.Length == 0) return "";
         var dir = Path.GetDirectoryName(item.SubPath) ?? "";
-        var folderRoots = roots.Count(r => !MediaKinds.IsKnown(r) || Directory.Exists(r));
+        var folderRoots = roots.Count(r => Directory.Exists(r) || (!File.Exists(r) && !MediaKinds.IsMedia(r)));
         if (folderRoots > 1)
         {
             var root = item.Root < roots.Count ? roots[item.Root] : "";
@@ -607,8 +607,8 @@ public sealed class CatalogService : IDisposable
         else dto.Unlocked = true;
     }
 
-    /// <param name="allKinds">The caller's Ocean knows music, pictures and PDFs; an older one gets the videos only (it would try to play the rest).</param>
-    public CatalogDto BuildCatalog(string nodeId, string nodeName, string userName, bool paused, Func<string, bool> hasGrant, bool allKinds = true)
+    /// <param name="level">What the caller's Ocean knows (<see cref="MediaKinds.Level"/>): an older one gets only the kinds it knows (it would try to play the rest).</param>
+    public CatalogDto BuildCatalog(string nodeId, string nodeName, string userName, bool paused, Func<string, bool> hasGrant, int level = 2)
     {
         var cat = new CatalogDto
         {
@@ -620,7 +620,7 @@ public sealed class CatalogService : IDisposable
         if (paused) return cat;
         foreach (var share in Shares)
         {
-            var items = Items(share.Id).Where(i => allKinds || i.Kind == MediaKinds.Video).ToList();
+            var items = Items(share.Id).Where(i => MediaKinds.Fits(i.Kind, level)).ToList();
             var unlocked = IsShareUnlocked(share, hasGrant);
             var dto = new ShareDto
             {
@@ -720,9 +720,9 @@ public sealed class CatalogService : IDisposable
                     NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size,
                     InternalBufferSize = 64 * 1024,
                 };
-                FileSystemEventHandler h = (_, e) => { if (IsInteresting(e.FullPath)) ScheduleRescan(share.Id); };
+                FileSystemEventHandler h = (_, e) => { if (IsInteresting(share.Id, e.FullPath)) ScheduleRescan(share.Id); };
                 w.Created += h; w.Deleted += h; w.Changed += h;
-                w.Renamed += (_, e) => { if (IsInteresting(e.FullPath) || IsInteresting(e.OldFullPath)) ScheduleRescan(share.Id); };
+                w.Renamed += (_, e) => { if (IsInteresting(share.Id, e.FullPath) || IsInteresting(share.Id, e.OldFullPath)) ScheduleRescan(share.Id); };
                 w.Error += (_, _) => ScheduleRescan(share.Id);
                 w.EnableRaisingEvents = true;
                 rt.Watchers.Add(w);
@@ -731,9 +731,16 @@ public sealed class CatalogService : IDisposable
         }
     }
 
-    // Files Ocean shares, or extension-less paths (folders being created/renamed/deleted).
-    private static bool IsInteresting(string path)
-        => MediaKinds.IsKnown(path) || Path.GetExtension(path).Length == 0;
+    // Files of the kinds this share shares, or extension-less paths (folders being created/renamed/deleted).
+    private bool IsInteresting(string shareId, string path)
+    {
+        if (Path.GetExtension(path).Length == 0) return true;
+        if (MediaKinds.KindOf(path) is not { } kind) return false;
+        if (kind == MediaKinds.Video) return true;
+        var share = GetShare(shareId);
+        return share is not null && ((share.Kinds?.Contains(kind, StringComparer.OrdinalIgnoreCase) ?? false)
+                                     || share.Roots.Any(r => string.Equals(r, path, StringComparison.OrdinalIgnoreCase)));
+    }
 
     private void ScheduleRescan(string shareId)
     {

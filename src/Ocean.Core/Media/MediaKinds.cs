@@ -1,14 +1,30 @@
 namespace Ocean.Core.Media;
 
 /// <summary>
-/// The kinds of file a share can hold: videos (always), music, pictures and PDFs. A share chooses which kinds of
-/// the files in its folders it shares (<c>Kinds</c>; older shares and the default: videos only); a file added on
-/// its own is shared whatever its kind. Every other file is never seen.
+/// The kinds of file a share can hold: videos (always), music, pictures, PDFs, and every other file ("file":
+/// documents, archives, programs...). Ocean plays or shows the first four itself; the others can only be
+/// downloaded. A share chooses which kinds of the files in its folders it shares (<c>Kinds</c>; older shares and
+/// the default: videos only); a file added on its own is shared whatever its kind. Leftovers of other programs
+/// (half downloads, temporary and lock files, Windows' own folder files) are never seen.
 /// </summary>
 public static class MediaKinds
 {
-    public const string Video = "video", Audio = "audio", Image = "image", Pdf = "pdf";
-    public static readonly string[] All = { Video, Audio, Image, Pdf };
+    public const string Video = "video", Audio = "audio", Image = "image", Pdf = "pdf", File = "file";
+    public static readonly string[] All = { Video, Audio, Image, Pdf, File };
+
+    private static readonly HashSet<string> JunkExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".tmp", ".temp", ".part", ".partial", ".crdownload", ".download", ".opdownload", ".oceanpart", ".!ut", ".bc!", ".lnk", ".lock",
+    };
+    private static readonly HashSet<string> JunkNames = new(StringComparer.OrdinalIgnoreCase) { "thumbs.db", "desktop.ini", ".ds_store", "ehthumbs.db" };
+
+    /// <summary>Something another program left lying around, not a file anyone means to share.</summary>
+    public static bool IsJunk(string path)
+    {
+        var name = Path.GetFileName(path);
+        return name.Length == 0 || name.StartsWith("~$", StringComparison.Ordinal) || name.StartsWith("._", StringComparison.Ordinal)
+               || JunkNames.Contains(name) || JunkExtensions.Contains(Path.GetExtension(name));
+    }
 
     private static readonly Dictionary<string, (string Kind, string Type)> Map = Build();
 
@@ -32,14 +48,29 @@ public static class MediaKinds
         return map;
     }
 
-    /// <summary>video, audio, image, pdf; null: not a file Ocean shares.</summary>
+    /// <summary>video, audio, image, pdf, or file (anything else); null: not a file Ocean shares (a leftover).</summary>
     public static string? KindOf(string path)
     {
         var ext = Path.GetExtension(path);
-        return ext.Length > 0 && Map.TryGetValue(ext, out var k) ? k.Kind : null;
+        if (ext.Length > 0 && Map.TryGetValue(ext, out var k)) return k.Kind;
+        return IsJunk(path) ? null : File;
     }
 
+    /// <summary>A file Ocean shares (anything but a leftover).</summary>
     public static bool IsKnown(string path) => KindOf(path) is not null;
+
+    /// <summary>Named as a video, a song, a picture or a PDF: what Ocean plays or shows itself.</summary>
+    public static bool IsMedia(string path) => Map.ContainsKey(Path.GetExtension(path));
+
+    /// <summary>Ocean plays or shows this kind itself; the rest ("file") can only be downloaded.</summary>
+    public static bool Opens(string? kind) => kind != File;
+
+    /// <summary>The extension as people read it: "DOCX", "ZIP"; "FILE" when there is none (or it is too long to be one).</summary>
+    public static string ExtensionLabel(string name)
+    {
+        var ext = Path.GetExtension(name).TrimStart('.');
+        return ext.Length is > 0 and <= 5 ? ext.ToUpperInvariant() : "FILE";
+    }
 
     public static string ContentType(string path)
         => Map.TryGetValue(Path.GetExtension(path), out var k) ? k.Type : "application/octet-stream";
@@ -57,10 +88,20 @@ public static class MediaKinds
     public static string FilterString()
     {
         string F(IEnumerable<string> exts) => string.Join(";", exts.Select(e => "*" + e));
-        return "Videos, music, pictures and PDFs|" + F(Map.Keys) + "|Videos|" + F(Extensions(Video)) + "|Music|" + F(Extensions(Audio))
-               + "|Pictures|" + F(Extensions(Image)) + "|PDFs|*.pdf|All files|*.*";
+        return "All files|*.*|Videos, music, pictures and PDFs|" + F(Map.Keys) + "|Videos|" + F(Extensions(Video)) + "|Music|" + F(Extensions(Audio))
+               + "|Pictures|" + F(Extensions(Image)) + "|PDFs|*.pdf";
     }
 
-    /// <summary>What people call it: "video", "song", "picture", "PDF".</summary>
-    public static string Noun(string? kind) => kind switch { Audio => "song", Image => "picture", Pdf => "PDF", _ => "video" };
+    /// <summary>What people call it: "video", "song", "picture", "PDF", "file".</summary>
+    public static string Noun(string? kind) => kind switch { Audio => "song", Image => "picture", Pdf => "PDF", File => "file", _ => "video" };
+
+    /// <summary>
+    /// What a caller's Ocean can take, from what it says it knows (the X-Ocean-Kinds header): 0 = videos only (it
+    /// says nothing: an Ocean from before), 1 = also music, pictures and PDFs, 2 = every file.
+    /// </summary>
+    public static int Level(string? said)
+        => said is null ? 0 : said.Contains(File, StringComparison.Ordinal) ? 2 : said.Contains(Pdf, StringComparison.Ordinal) ? 1 : 0;
+
+    /// <summary>Whether an Ocean of that level is told about a file of this kind (it would try to play what it doesn't know).</summary>
+    public static bool Fits(string kind, int level) => level >= 2 || (level == 1 ? kind != File : kind == Video);
 }

@@ -21,6 +21,8 @@ public sealed partial class ScreenSourceCard : ObservableObject
     public WindowInfo? Window { get; init; }
     /// <summary>A part of <see cref="Monitor"/> (real pixels, relative to the monitor).</summary>
     public Int32Rect? Region { get; init; }
+    /// <summary>"Nothing": no picture at all, only the sound (recording).</summary>
+    public bool SoundOnly { get; init; }
     [ObservableProperty] private BitmapSource? _preview;
 }
 
@@ -73,6 +75,9 @@ public partial class ScreenPickerWindow : Window
         // screens are pictured before this window shows, so it is not in its own pictures
         foreach (var m in ScreenSources.Monitors())
             _screens.Add(new ScreenSourceCard { Name = m.Name, Detail = m.Detail, Monitor = m, Preview = ScreenSources.Snapshot(m.Bounds) });
+        // recording: nothing of the screen, only the sound (speaker and microphone)
+        if (record is not null)
+            _screens.Add(new ScreenSourceCard { Name = "Nothing", Detail = "Sound only: speaker, microphone", Glyph = "\uE8D6", SoundOnly = true });
         Loaded += (_, _) => LoadWindows();
         Activated += (_, _) => { if (IsLoaded && !_selecting && !_marking) RefreshWindows(); };
         if (_screens.Count > 0) Screens.SelectedIndex = 0;
@@ -121,6 +126,7 @@ public partial class ScreenPickerWindow : Window
         _chosen = card;
         ShareButton.IsEnabled = card is not null;
         if (card is null) { Chosen.Text = ""; return; }
+        if (card.SoundOnly) { Chosen.Text = "Only the sound is recorded (what the PC plays and the microphone, as switched on here): a sound file"; return; }
         var pick = ToPick(card);
         var (w, h) = _record is null ? pick.SendSize() : Services.RecordingQuality.Fit(Services.RecordingQuality.Of(_record.Quality), pick.SourceWidth, pick.SourceHeight);
         var verb = _record is null ? "Shared" : "Recorded";
@@ -135,7 +141,7 @@ public partial class ScreenPickerWindow : Window
     private void Region_Click(object sender, RoutedEventArgs e)
     {
         // on the selected screen (a part of one already picked: that screen again), else the main one
-        var monitor = _chosen?.Monitor ?? _screens.FirstOrDefault()?.Monitor;
+        var monitor = _chosen?.Monitor ?? _screens.FirstOrDefault(c => c.Monitor is not null)?.Monitor;
         if (monitor is null) return;
         // out of the way while marking (minimized, not hidden: hiding would end this dialog)
         _marking = true;
@@ -163,6 +169,7 @@ public partial class ScreenPickerWindow : Window
 
     private ScreenPick ToPick(ScreenSourceCard card)
     {
+        if (card.SoundOnly) return new ScreenPick { Kind = ScreenPick.Kinds.None, Title = "Sound only" };
         if (card.Window is { } w)
         {
             // the window may have been resized since it was listed

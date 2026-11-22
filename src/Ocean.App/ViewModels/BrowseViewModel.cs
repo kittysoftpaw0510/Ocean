@@ -37,6 +37,7 @@ public partial class BrowseViewModel : ObservableObject
     [ObservableProperty] private int _audioCount;
     [ObservableProperty] private int _imageCount;
     [ObservableProperty] private int _pdfCount;
+    [ObservableProperty] private int _fileCount;
     partial void OnKindFilterChanged(string? value) => Rebuild();
     [RelayCommand] private void SetKind(string? kind) => KindFilter = string.IsNullOrEmpty(kind) || kind == KindFilter ? null : kind;
     [ObservableProperty] private List<ItemVm> _items = new();
@@ -89,6 +90,7 @@ public partial class BrowseViewModel : ObservableObject
         SortMode.Size => "Largest first",
         SortMode.Duration => "Longest first",
         SortMode.Folder => "Folder",
+        SortMode.Type => "Type",
         _ => "",
     };
 
@@ -256,6 +258,8 @@ public partial class BrowseViewModel : ObservableObject
         SortMode.Name => q.OrderBy(i => i.Name, StringComparer.CurrentCultureIgnoreCase),
         SortMode.Size => q.OrderByDescending(i => i.Size),
         SortMode.Duration => q.OrderByDescending(i => i.DurationMs).ThenBy(i => i.Name),
+        // by type: videos, music, pictures, PDFs, then the rest by their extension
+        SortMode.Type => q.OrderBy(i => KindText.Order(i.Kind)).ThenBy(i => i.Ext, StringComparer.OrdinalIgnoreCase).ThenBy(i => i.Name, StringComparer.CurrentCultureIgnoreCase),
         SortMode.Folder => q.OrderBy(i => i.ShareName).ThenBy(i => i.Folder, StringComparer.CurrentCultureIgnoreCase).ThenBy(i => i.Name, StringComparer.CurrentCultureIgnoreCase),
         _ => q.OrderByDescending(i => i.AddedAt).ThenBy(i => i.Name),
     }).ToList();
@@ -275,7 +279,8 @@ public partial class BrowseViewModel : ObservableObject
         FolderMode = shareDto is not null && string.IsNullOrWhiteSpace(Filter) && !NewOnly && TagFilter is null && KindFilter is null;
         // which kinds there are (the filter shows only with more than one)
         VideoCount = _all.Count(i => i.IsVideo); AudioCount = _all.Count(i => i.IsAudio); ImageCount = _all.Count(i => i.IsImage); PdfCount = _all.Count(i => i.IsPdf);
-        HasKinds = new[] { VideoCount, AudioCount, ImageCount, PdfCount }.Count(c => c > 0) > 1;
+        FileCount = _all.Count(i => i.IsFile);
+        HasKinds = new[] { VideoCount, AudioCount, ImageCount, PdfCount, FileCount }.Count(c => c > 0) > 1;
         if (!HasKinds && KindFilter is not null) { KindFilter = null; return; } // (this re-enters Rebuild)
 
         List<ItemVm> list;
@@ -329,7 +334,7 @@ public partial class BrowseViewModel : ObservableObject
         HeaderText = Summary.Length > 0 ? $"{Peer.Subtitle}  ·  {Summary}" : Peer.Subtitle;
         IsEmpty = Entries.Count == 0 && !IsLoading;
         // ("videos" where the node shares only videos, as it always did; "files" where it shares more)
-        var things = KindFilter is { } k ? (k == Core.Media.MediaKinds.Pdf ? "PDFs" : Core.Media.MediaKinds.Noun(k) + "s") : HasKinds ? "files" : "videos";
+        var things = KindFilter is { } k ? (k == Core.Media.MediaKinds.Audio ? "songs" : KindText.Plural(k)) : HasKinds ? "files" : "videos";
         EmptyText = !IsEmpty || SelectedShare is { IsLocked: true } ? "" :
             _all.Count == 0 && Catalog is { Shares.Count: 0 } ? "Nothing to show here." :
             NewOnly ? $"No new {things} since your last visit." :

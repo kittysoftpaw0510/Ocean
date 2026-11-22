@@ -66,8 +66,10 @@ public sealed class CatalogMaintenance : BackgroundService
             if (ct.IsCancellationRequested) break;
             var path = _catalog.FullPath(share, item);
             // a PDF: its pages, through Windows' PDF engine; everything else: the shell's properties (length, size)
-            var probe = MediaKinds.KindOf(item.Name) == MediaKinds.Pdf
-                ? new ShellMedia.Probe(null, null, null, await PdfFiles.PagesAsync(path))
+            // (any other file: nothing to find out)
+            var kind = MediaKinds.KindOf(item.Name);
+            var probe = kind == MediaKinds.File ? new ShellMedia.Probe(null, null, null, null)
+                : kind == MediaKinds.Pdf ? new ShellMedia.Probe(null, null, null, await PdfFiles.PagesAsync(path))
                 : await _sta.RunAsync(() => ShellMedia.ProbeFile(path), ct);
             results.Add((item.Id, probe));
         }

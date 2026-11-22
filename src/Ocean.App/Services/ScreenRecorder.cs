@@ -134,7 +134,8 @@ public sealed class ScreenRecorder : IDisposable
         _folder = settings.FolderOrDefault;
         Directory.CreateDirectory(_folder);
         var stamp = DateTime.Now.ToString("yyyy-MM-dd HH-mm-ss", CultureInfo.InvariantCulture);
-        FinalPath = Unique(Path.Combine(_folder, $"Screen recording {stamp}.mp4"));
+        // nothing of the screen: a sound file
+        FinalPath = Unique(Path.Combine(_folder, pick.SoundOnly ? $"Sound recording {stamp}.m4a" : $"Screen recording {stamp}.mp4"));
         _base = Path.Combine(Path.GetDirectoryName(FinalPath)!, Path.GetFileNameWithoutExtension(FinalPath));
         _speaker = settings.Speaker; _mic = settings.Mic;
         Encoder = RecordingEncoders.For(_spec);
@@ -162,6 +163,8 @@ public sealed class ScreenRecorder : IDisposable
         HasSpeaker = audio?.HasSpeaker == true; HasMic = audio?.HasMic == true;
         if (audio is not null) lock (_lock) _problems.AddRange(audio.Problems);
         if (!_withSound) { audio?.Dispose(); audio = null; }
+        if (_pick.SoundOnly && !_withSound)
+            throw new InvalidOperationException(_speaker || _mic ? "The sound can't be recorded: " + (Problems.FirstOrDefault() ?? "no sound device works") + "." : "Nothing to record: switch on Speaker or Microphone.");
         StartSegment(audio);
         _clock.Start();
         _watch = new Timer(_ => Watch(), null, 2000, 2000);
@@ -353,7 +356,7 @@ public sealed class ScreenRecorder : IDisposable
     private static List<string> CutArgs(RecordingSegment s, string from, string to, bool mp4)
     {
         var args = new List<string> { "-hide_banner", "-loglevel", "error", "-i", from, "-map", "0", "-c", "copy" };
-        if (s.Length is > 0.3 and var length)
+        if (!s.SoundOnly && s.Length is > 0.3 and var length)
         {
             // The last picture lasts until the end (Matroska counts in milliseconds; by decode time, which is right
             // with B-pictures too: measured). Nothing is cut off: the capture ended at that moment, and the sound
@@ -432,6 +435,54 @@ internal sealed class RecordingSegment
         _pick = pick; _spec = spec; _encoderName = encoder; _width = width; _height = height; Path = path; Audio = audio; _withSound = withSound;
     }
 
+    public bool SoundOnly => _pick.SoundOnly;
+
+    /// <summary>Nothing of the screen: one ffmpeg that writes the sound (as it comes through the pipe) into the file.</summary>
+    private void StartSoundOnly()
+    {
+        var ffmpeg = ScreenTools.Ffmpeg!;
+        var inv = CultureInfo.InvariantCulture;
+        var pipeName = "ocean-rec-" + Guid.NewGuid().ToString("N");
+        _pipe = new NamedPipeServerStream(pipeName, PipeDirection.Out, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 0, 1 << 20);
+        var args = new List<string>
+        {
+            "-hide_banner", "-loglevel", "error", "-nostats", "-progress", "pipe:1",
+            "-thread_queue_size", "1024", "-f", "f32le", "-ar", RecordingAudio.Rate.ToString(inv), "-ac", RecordingAudio.Channels.ToString(inv), "-i", @"\\.\pipe\" + pipeName,
+            "-c:a", "aac", "-b:a", Math.Max(128, _spec.AudioKbps) + "k", "-f", "matroska", "-y", Path,
+        };
+        var psi = new ProcessStartInfo(ffmpeg) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        var enc = Process.Start(psi) ?? throw new InvalidOperationException("ffmpeg did not start");
+        ScreenTools.TieToApp(enc);
+        _encoder = enc;
+        enc.ErrorDataReceived += (_, e) => { if (e.Data is { Length: > 0 } line) lock (_encErrors) { if (_encErrors.Length < 1500) _encErrors.AppendLine(line); } };
+        enc.BeginErrorReadLine();
+        enc.OutputDataReceived += (_, e) => { if (e.Data is { } line && line.StartsWith("total_size=", StringComparison.Ordinal) && long.TryParse(line.AsSpan(11), out var size) && size > 0) Bytes = size; };
+        enc.BeginOutputReadLine();
+        enc.EnableRaisingEvents = true;
+        enc.Exited += (_, _) =>
+        {
+            Audio?.Stop();
+            try { _pipe?.Dispose(); } catch { }
+            if (File.Exists(Path)) Bytes = new FileInfo(Path).Length;
+            _done.TrySetResult();
+            if (!_stopping) EndedByItself?.Invoke();
+        };
+        // the sound's time 0 is now
+        _firstPicture.TrySetResult(RecordingAudio.NowHns());
+        var pipe = _pipe; var audio = Audio!;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                await pipe.WaitForConnectionAsync(cts.Token);
+                audio.Start(pipe, _firstPicture.Task, _spec.Fps);
+            }
+            catch (Exception ex) { AppLog.Warn("Record", "the sound didn't reach the encoder", ex); }
+        });
+    }
+
     private string PixelFormat => _encoderName == "libx264" ? "yuv420p" : "nv12";
     /// <summary>
     /// Screen colours to video colours, on the processor (this ffmpeg can't do it on the graphics card here). At 60
@@ -441,6 +492,7 @@ internal sealed class RecordingSegment
 
     public void Start()
     {
+        if (_pick.SoundOnly) { StartSoundOnly(); return; }
         var ffmpeg = ScreenTools.Ffmpeg!;
         var inv = CultureInfo.InvariantCulture;
         var src = new List<string>
@@ -677,6 +729,7 @@ public sealed class LastTarget
     /// <summary>The same thing now, or null when it is gone (the window closed, the screen unplugged or changed).</summary>
     public ScreenPick? Resolve()
     {
+        if (Kind == ScreenPick.Kinds.None) return new ScreenPick { Kind = Kind, Title = "Sound only" };
         if (Kind == ScreenPick.Kinds.Window)
         {
             var h = new IntPtr(Window);

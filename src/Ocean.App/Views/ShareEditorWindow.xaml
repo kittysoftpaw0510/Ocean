@@ -43,6 +43,7 @@
             <CheckBox Content="Music" IsChecked="{Binding ShareMusic}" Margin="0,0,18,4" ToolTip="MP3, M4A, FLAC, WAV, OGG, Opus…: played in Ocean's player"/>
             <CheckBox Content="Pictures" IsChecked="{Binding SharePictures}" Margin="0,0,18,4" ToolTip="JPEG, PNG, GIF, WebP, HEIC…: shown in Ocean's viewer"/>
             <CheckBox Content="PDFs" IsChecked="{Binding SharePdfs}" Margin="0,0,18,4" ToolTip="Shown in Ocean's viewer"/>
+            <CheckBox Content="Other files" IsChecked="{Binding ShareFiles}" Margin="0,0,18,4" ToolTip="Everything else in the folders (documents, archives, programs…): Ocean can't show these, others can download them"/>
         </WrapPanel>
         <TextBlock Text="Only what is ticked appears on the network. Files you add one by one are shared whatever they are." Style="{StaticResource Dim}" TextWrapping="Wrap" Margin="0,2,0,0"/>
 
