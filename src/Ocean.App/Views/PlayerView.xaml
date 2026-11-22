@@ -142,6 +142,8 @@
             <StackPanel>
                 <!-- seek bar with A-B repeat markers -->
                 <Grid x:Name="SeekHost" SizeChanged="SeekHost_SizeChanged" Margin="0,12,0,0">
+                    <!-- what is loaded here (read ahead of the playhead), as a browser shows it -->
+                    <Canvas x:Name="BufferBands" IsHitTestVisible="False"/>
                     <Canvas IsHitTestVisible="False">
                         <Rectangle x:Name="LoopBand" Height="6" Canvas.Top="7" RadiusX="3" RadiusY="3" Fill="#663B82F6" Visibility="Collapsed"/>
                     </Canvas>

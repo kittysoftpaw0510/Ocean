@@ -92,6 +92,12 @@ public static class LocalApi
             return Results.Ok();
         });
         g.MapGet("/prefetch", (Ocean.Service.Peers.Prefetcher prefetcher) => Results.Json(prefetcher.Recent(), Json.Options));
+        // the player's place in a video from another PC: read ahead from there (as a browser buffers); what is loaded
+        g.MapPost("/peers/{peerId}/buffer", async (string peerId, HttpContext ctx, Ocean.Service.Peers.ReadAhead ahead) =>
+        {
+            var req = await ctx.Request.ReadFromJsonAsync<BufferAskDto>(Json.Options);
+            return req is null || req.ItemId.Length == 0 ? Results.BadRequest() : Results.Json(ahead.Touch(peerId, req.ItemId, req.At), Json.Options);
+        });
         g.MapPost("/peers/{peerId}/visited", (string peerId, PeerService peers) => { peers.MarkVisited(peerId); return Results.Ok(); });
 
         g.MapPost("/peers/{peerId}/unlock", async (string peerId, HttpContext ctx, PeerService peers) =>

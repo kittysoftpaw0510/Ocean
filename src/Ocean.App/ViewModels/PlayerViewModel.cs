@@ -101,7 +101,11 @@ public partial class PlayerViewModel : ObservableObject
     [ObservableProperty] private bool _pipPinned = true;
     /// <summary>The player covers the main window (open and not in its small window).</summary>
     public bool ShowInWindow => IsOpen && !IsPip;
-    partial void OnIsOpenChanged(bool value) { if (!value) IsPip = false; OnPropertyChanged(nameof(ShowInWindow)); }
+    partial void OnIsOpenChanged(bool value)
+    {
+        if (!value) { IsPip = false; _bufferTick?.Stop(); Buffered = Array.Empty<(double, double)>(); BufferText = ""; }
+        OnPropertyChanged(nameof(ShowInWindow));
+    }
     partial void OnIsPipChanged(bool value) { if (value) IsFullscreen = false; OnPropertyChanged(nameof(ShowInWindow)); }
     [RelayCommand] private void TogglePip() { if (IsOpen) IsPip = !IsPip; }
     [RelayCommand] private void TogglePin() => PipPinned = !PipPinned;
@@ -287,7 +291,47 @@ public partial class PlayerViewModel : ObservableObject
         Url = null; Item = null;
     }
 
-    public PlayerViewModel(MainViewModel main) { _main = main; }
+    public PlayerViewModel(MainViewModel main)
+    {
+        _main = main;
+        _bufferTick = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _bufferTick.Tick += async (_, _) => await TellBufferAsync();
+    }
+
+    // ---- what is loaded ahead (as a browser shows on the seek bar): the service reads ahead from the playhead
+    private readonly System.Windows.Threading.DispatcherTimer _bufferTick;
+    private bool _bufferBusy;
+    /// <summary>The parts of the video loaded here, as fractions of it (start, end), for the seek bar.</summary>
+    [ObservableProperty] private IReadOnlyList<(double From, double To)> _buffered = Array.Empty<(double, double)>();
+    /// <summary>"Loaded 1:52 ahead" (empty when nothing is read ahead).</summary>
+    [ObservableProperty] private string _bufferText = "";
+
+    /// <summary>The item id of the stream playing (another PC's video through this PC's service), or null.</summary>
+    private string? StreamItemId()
+    {
+        if (Peer is null || Url is not { } url || !url.StartsWith("http", StringComparison.OrdinalIgnoreCase)) return null;
+        var i = url.IndexOf("/stream/", StringComparison.Ordinal);
+        if (i < 0) return null;
+        var rest = url[(i + 8)..];
+        var end = rest.IndexOf('/');
+        return Uri.UnescapeDataString(end < 0 ? rest : rest[..end]);
+    }
+
+    private async Task TellBufferAsync()
+    {
+        if (_bufferBusy) return;
+        if (!IsOpen || Peer is not { } peer || StreamItemId() is not { } id || CastRole != CastRoles.None) { Buffered = Array.Empty<(double, double)>(); BufferText = ""; return; }
+        _bufferBusy = true;
+        try
+        {
+            var b = await _main.Api.PostAsync<BufferDto>($"/api/peers/{peer.Id}/buffer", new BufferAskDto { ItemId = id, At = PositionSeconds });
+            if (b is null || b.Size <= 0 || !ReferenceEquals(Peer, peer)) return;
+            Buffered = b.Ranges.Select(r => (r[0] / (double)b.Size, (r[1] + 1) / (double)b.Size)).ToList();
+            BufferText = b.Local ? "On this PC" : b.AheadSeconds >= 1 ? $"Loaded {Core.Format.Duration(TimeSpan.FromSeconds(b.AheadSeconds))} ahead" : "";
+        }
+        catch { }
+        finally { _bufferBusy = false; }
+    }
 
     // ---- lighter copy ----------------------------------------------------------------------
     // After half a minute of watching the original, the owner is asked for a lighter copy; the banner follows it
@@ -578,8 +622,11 @@ public partial class PlayerViewModel : ObservableObject
         PositionSeconds = 0;
         DurationSeconds = item.DurationMs / 1000.0;
         ClearLoop(); // A-B points belong to one video
+        Buffered = Array.Empty<(double, double)>(); BufferText = "";
         IsOpen = true;
         Generation++;
+        _bufferTick.Start();
+        _ = TellBufferAsync();
     }
 
     /// <summary>

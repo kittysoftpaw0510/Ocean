@@ -273,6 +273,26 @@ public sealed class DecisionDto
 /// <summary>Paused: stopped by the user, what came so far is kept; Resume goes on from there.</summary>
 public enum DownloadStatus { Queued, Running, Done, Failed, Canceled, Paused }
 
+/// <summary>The player's place in a video from another PC (POST /api/peers/{id}/buffer): read ahead from there.</summary>
+public sealed class BufferAskDto
+{
+    public string ItemId { get; set; } = "";
+    /// <summary>The playhead, in seconds.</summary>
+    public double At { get; set; }
+}
+
+/// <summary>What of a video is loaded here (in the stream cache, or all of it when it is on this PC).</summary>
+public sealed class BufferDto
+{
+    public long Size { get; set; }
+    /// <summary>Byte runs [from, to] (inclusive), in order.</summary>
+    public List<long[]> Ranges { get; set; } = new();
+    /// <summary>How far ahead of the playhead it is loaded (seconds, from its average bit rate).</summary>
+    public double AheadSeconds { get; set; }
+    /// <summary>The whole file is on this PC.</summary>
+    public bool Local { get; set; }
+}
+
 /// <summary>What to get ready on another PC's page: the files in view (in order), or the one to play next.</summary>
 public sealed class PrefetchDto
 {

@@ -776,7 +776,14 @@ Downloads read through the stream cache (below), so whatever was already watched
 
 - **Viewer side.** The player's requests go to `PeerMedia`: the same video in my own shares (name + size)
   or a finished download of it plays from disk; otherwise bytes come through the **stream cache**
-  (filled ahead by the `Prefetcher`: the app posts the files in view on a node's page, in order, 700 ms after the
+  (read ahead of the player by `ReadAhead`: the app posts the playhead every second, `POST /api/peers/{id}/buffer`
+  {itemId, at} → the loaded byte runs, for the seek bar; from the playhead's byte (its average bit rate) the first
+  missing blocks within the window (120 s at its bit rate, 64 MB to 1 GB, at most a third of the cache) are fetched
+  8 MB at a time as watching; the player's own requests wait up to 3 s for a block being read ahead
+  (`StreamCache.AheadMark`) and otherwise fetch one block, so nothing comes twice; a new video replaces the session,
+  15 s without a post ends it. Measured at a 6 MB/s owner: 155 s ahead after 13 s, filled at the owner's limit,
+  the player's longest wait 4 ms;
+  also filled ahead by the `Prefetcher`: the app posts the files in view on a node's page, in order, 700 ms after the
   list settles, and an empty list when the page is left; `POST /api/peers/{id}/prefetch`, `next: true` for the one
   after what plays; two workers; per file the first ~6 s at its bit rate (2–8 MB), the whole file up to 25 MB (at
   most 8 per list, 24 files in all), and for an MP4 whose top-level boxes put `mdat` before `moov` the end from

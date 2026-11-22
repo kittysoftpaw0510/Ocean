@@ -81,6 +81,55 @@ public sealed class StreamCache
     /// <summary>A video is being streamed through the cache right now (watched here, or passed on as a bridge).</summary>
     public bool InUse { get { lock (_lock) return _entries.Values.Any(e => e.Refs > 0); } }
 
+    // ------------------------------------------------------------------ reading ahead (playback)
+
+    /// <summary>
+    /// A video being read ahead of the player (see <see cref="ReadAhead"/>): the blocks it is fetching right now. The
+    /// player's own requests wait a moment for those instead of fetching them a second time, and otherwise fetch one
+    /// block at a time (the read-ahead brings the rest).
+    /// </summary>
+    public sealed class AheadMark
+    {
+        public long FetchingFrom = -1, FetchingTo = -1;
+        public bool Fetching(long block) => block * BlockSize >= Interlocked.Read(ref FetchingFrom) && block * BlockSize <= Interlocked.Read(ref FetchingTo);
+    }
+
+    private readonly Dictionary<string, AheadMark> _aheads = new();
+
+    public void SetAhead(string peerId, ItemDto item, AheadMark? mark)
+    {
+        lock (_lock) { if (mark is null) _aheads.Remove(Key(peerId, item)); else _aheads[Key(peerId, item)] = mark; }
+    }
+
+    /// <summary>The parts of a video in the cache: byte runs (from, to, inclusive), in order.</summary>
+    public List<(long From, long To)> Cached(string peerId, ItemDto item)
+    {
+        var runs = new List<(long, long)>();
+        Entry? e;
+        lock (_lock) _entries.TryGetValue(Key(peerId, item), out e);
+        if (e is null) return runs;
+        var blocks = (int)((item.Size + BlockSize - 1) / BlockSize);
+        for (var b = 0; b < blocks; b++)
+        {
+            if (!e.Has(b)) continue;
+            var start = b;
+            while (b + 1 < blocks && e.Has(b + 1)) b++;
+            runs.Add(((long)start * BlockSize, e.BlockEnd(b)));
+        }
+        return runs;
+    }
+
+    /// <summary>The first byte from <paramref name="from"/> to <paramref name="to"/> that isn't in the cache (block start), or null.</summary>
+    public long? FirstMissing(string peerId, ItemDto item, long from, long to)
+    {
+        Entry? e;
+        lock (_lock) _entries.TryGetValue(Key(peerId, item), out e);
+        to = Math.Min(to, item.Size - 1);
+        for (var b = (int)(from / BlockSize); (long)b * BlockSize <= to; b++)
+            if (e is null || !e.Has(b)) return (long)b * BlockSize;
+        return null;
+    }
+
     // ------------------------------------------------------------------ external feeds (multicast)
 
     private readonly Dictionary<string, ExternalFeed> _feeds = new();
@@ -185,7 +234,8 @@ public sealed class StreamCache
     /// Throws <see cref="PeerStatusException"/> when the owner refuses (nothing written to dest in that case if the
     /// very first bytes had to come from it).
     /// </summary>
-    public async Task CopyAsync(string peerId, ItemDto item, long from, long to, Stream dest, bool fill, bool download, CancellationToken ct, bool prefetch = false)
+    /// <param name="ahead">The read-ahead itself (it doesn't wait for its own blocks).</param>
+    public async Task CopyAsync(string peerId, ItemDto item, long from, long to, Stream dest, bool fill, bool download, CancellationToken ct, bool prefetch = false, bool ahead = false)
     {
         var size = item.Size;
         if (size <= 0 || from > to || to >= size) throw new ArgumentOutOfRangeException(nameof(from));
@@ -229,6 +279,19 @@ public sealed class StreamCache
                     if (feed.ExpectedSoon(b))
                     {
                         for (var waited = 0; waited < 15 && !entry.Has(b) && !feed.Closed; waited++) await Task.Delay(100, ct); // 1.5 s at most
+                        if (entry.Has(b)) continue;
+                    }
+                    k = Math.Min(k, b + 1);
+                }
+                // being read ahead: a block it is fetching now comes in a moment (wait for it, 3 s at most); otherwise
+                // fetch this one block only, the read-ahead brings what follows
+                AheadMark? mark = null;
+                if (!ahead && entry is not null) lock (_lock) _aheads.TryGetValue(entry.Key, out mark);
+                if (mark is not null && entry is not null)
+                {
+                    if (mark.Fetching(b))
+                    {
+                        for (var waited = 0; waited < 60 && !entry.Has(b) && mark.Fetching(b); waited++) await Task.Delay(50, ct);
                         if (entry.Has(b)) continue;
                     }
                     k = Math.Min(k, b + 1);

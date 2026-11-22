@@ -99,6 +99,10 @@ public partial class PlayerView : UserControl
             case nameof(PlayerViewModel.IsMuted):
                 Media.IsMuted = _vm.IsMuted;
                 break;
+            case nameof(PlayerViewModel.Buffered):
+            case nameof(PlayerViewModel.BufferText):
+                UpdateBufferBands();
+                break;
             case nameof(PlayerViewModel.LoopA):
             case nameof(PlayerViewModel.LoopB):
             case nameof(PlayerViewModel.DurationSeconds):
@@ -255,7 +259,31 @@ public partial class PlayerView : UserControl
         Focus();
     }
 
-    private void SeekHost_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateLoopMarks();
+    private void SeekHost_SizeChanged(object sender, SizeChangedEventArgs e) { UpdateLoopMarks(); UpdateBufferBands(); }
+
+    private static readonly System.Windows.Media.Brush BufferBrush = Frozen(System.Windows.Media.Color.FromArgb(0x55, 0xFF, 0xFF, 0xFF));
+    private static System.Windows.Media.Brush Frozen(System.Windows.Media.Color c) { var b = new System.Windows.Media.SolidColorBrush(c); b.Freeze(); return b; }
+
+    /// <summary>The loaded parts of the video, a lighter band on the seek bar's track (under the played part).</summary>
+    private void UpdateBufferBands()
+    {
+        if (_vm is null) return;
+        BufferBands.Children.Clear();
+        var w = SeekHost.ActualWidth;
+        const double pad = 7;
+        var track = Math.Max(0, w - 2 * pad);
+        if (track <= 0) return;
+        foreach (var (from, to) in _vm.Buffered)
+        {
+            var x = pad + track * Math.Clamp(from, 0, 1);
+            var width = track * (Math.Clamp(to, 0, 1) - Math.Clamp(from, 0, 1));
+            if (width < 1) continue;
+            var band = new System.Windows.Shapes.Rectangle { Width = width, Height = 4, RadiusX = 2, RadiusY = 2, Fill = BufferBrush };
+            Canvas.SetLeft(band, x); Canvas.SetTop(band, 8);
+            BufferBands.Children.Add(band);
+        }
+        BufferBands.ToolTip = _vm.BufferText.Length > 0 ? _vm.BufferText : null;
+    }
 
     /// <summary>Places the A/B markers and the highlighted band over the seek bar.</summary>
     private void UpdateLoopMarks()
