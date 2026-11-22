@@ -421,15 +421,14 @@ public partial class SharesViewModel : ObservableObject
         PdfCount = _allItems.Count(i => i.IsPdf); FileCount = _allItems.Count(i => i.IsFile);
         HasKinds = new[] { VideoCount, AudioCount, ImageCount, PdfCount, FileCount }.Count(c => c > 0) > 1;
         if (!HasKinds && KindFilter is not null) { KindFilter = null; return; } // (this re-enters here)
-        FolderMode = f.Length == 0 && KindFilter is null;
+        // one kind of file: the folders stay as they are (the path doesn't change), showing only that kind
+        var shown = KindFilter is { } kind ? _allItems.Where(i => i.Kind == kind).ToList() : _allItems;
+        FolderMode = f.Length == 0;
         if (!FolderMode)
         {
-            // one kind of file, or a search: a flat list over all the share's folders
-            IEnumerable<LocalItemVm> q = _allItems;
-            if (KindFilter is { } kind) q = q.Where(i => i.Kind == kind);
-            if (f.Length > 0) q = q.Where(i => i.Name.Contains(f, StringComparison.CurrentCultureIgnoreCase) || i.Folder.Contains(f, StringComparison.CurrentCultureIgnoreCase));
-            FlatLabel = KindFilter is null ? "Search results" : $"All {KindText.Plural(KindFilter)} in this share" + (f.Length > 0 ? "  ·  search results" : "");
-            Items = SortItems(q);
+            // a search: a flat list over all the share's folders
+            FlatLabel = "Search results";
+            Items = SortItems(shown.Where(i => i.Name.Contains(f, StringComparison.CurrentCultureIgnoreCase) || i.Folder.Contains(f, StringComparison.CurrentCultureIgnoreCase)));
             Entries = Items.Cast<object>().ToList();
             Crumbs = new();
             OnSelectionChanged();
@@ -442,8 +441,9 @@ public partial class SharesViewModel : ObservableObject
         }
         var subFolders = SortFolders(Folders
             .Where(p => string.Equals(FolderPath.Parent(p), CurrentFolder, StringComparison.OrdinalIgnoreCase))
-            .Select(p => new LocalFolderVm(p, _allItems.Where(i => FolderPath.IsUnder(i.Dto.Folder, p)).ToList())));
-        Items = SortItems(_allItems.Where(i => string.Equals(i.Dto.Folder, CurrentFolder, StringComparison.OrdinalIgnoreCase)));
+            .Select(p => new LocalFolderVm(p, shown.Where(i => FolderPath.IsUnder(i.Dto.Folder, p)).ToList()))
+            .Where(d => KindFilter is null || d.Count > 0)); // (with one kind: only the folders that hold some)
+        Items = SortItems(shown.Where(i => string.Equals(i.Dto.Folder, CurrentFolder, StringComparison.OrdinalIgnoreCase)));
         Entries = subFolders.Cast<object>().Concat(Items).ToList();
         var crumbs = new List<Crumb> { new(Selected?.Name ?? "Share", "", CurrentFolder.Length == 0) };
         crumbs.AddRange(FolderPath.SelfAndAncestors(CurrentFolder).Select(p => new Crumb(FolderPath.Name(p), p, string.Equals(p, CurrentFolder, StringComparison.OrdinalIgnoreCase))));

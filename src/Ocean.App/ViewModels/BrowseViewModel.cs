@@ -276,7 +276,8 @@ public partial class BrowseViewModel : ObservableObject
     {
         var shareId = SelectedShare?.Id;
         var shareDto = shareId is null ? null : Catalog?.Shares.FirstOrDefault(s => s.Id == shareId);
-        FolderMode = shareDto is not null && string.IsNullOrWhiteSpace(Filter) && !NewOnly && TagFilter is null && KindFilter is null;
+        // (one kind of file keeps the folders: they show only that kind)
+        FolderMode = shareDto is not null && string.IsNullOrWhiteSpace(Filter) && !NewOnly && TagFilter is null;
         // which kinds there are (the filter shows only with more than one)
         VideoCount = _all.Count(i => i.IsVideo); AudioCount = _all.Count(i => i.IsAudio); ImageCount = _all.Count(i => i.IsImage); PdfCount = _all.Count(i => i.IsPdf);
         FileCount = _all.Count(i => i.IsFile);
@@ -286,7 +287,7 @@ public partial class BrowseViewModel : ObservableObject
         List<ItemVm> list;
         if (FolderMode)
         {
-            var inShare = _all.Where(i => i.Dto.ShareId == shareId).ToList();
+            var inShare = _all.Where(i => i.Dto.ShareId == shareId && (KindFilter is null || i.Kind == KindFilter)).ToList();
             var folders = shareDto!.Folders;
             if (CurrentFolder.Length > 0 && !folders.Contains(CurrentFolder, StringComparer.OrdinalIgnoreCase))
             {
@@ -295,7 +296,8 @@ public partial class BrowseViewModel : ObservableObject
             }
             var subFolders = folders
                 .Where(f => string.Equals(Core.Naming.FolderPath.Parent(f), CurrentFolder, StringComparison.OrdinalIgnoreCase))
-                .Select(f => new FolderVm(f, inShare.Where(i => Core.Naming.FolderPath.IsUnder(i.Dto.Folder, f)).ToList()));
+                .Select(f => new FolderVm(f, inShare.Where(i => Core.Naming.FolderPath.IsUnder(i.Dto.Folder, f)).ToList()))
+                .Where(d => KindFilter is null || d.Count > 0); // (with one kind: only the folders that hold some)
             list = SortItems(inShare.Where(i => string.Equals(i.Dto.Folder, CurrentFolder, StringComparison.OrdinalIgnoreCase)));
             var sortedFolders = SortFolders(subFolders);
             Entries = sortedFolders.Cast<object>().Concat(list).ToList();

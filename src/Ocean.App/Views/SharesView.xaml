@@ -382,14 +382,14 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-                    <TextBlock Text="{Binding FlatLabel}" Style="{StaticResource Muted}" Visibility="{Binding FolderMode, Converter={StaticResource InvBoolToVis}}"/>
+                    <TextBlock Text="{Binding FlatLabel}" Style="{StaticResource Muted}" VerticalAlignment="Center" Visibility="{Binding FolderMode, Converter={StaticResource InvBoolToVis}}"/>
+                    <!-- one kind of file alone, from all the share's folders (when it holds more than one kind) -->
+                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource KindFilterBar}" Margin="12,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Style="{StaticResource BtnPrimary}" Margin="0,0,6,0" Command="{Binding MoveToCommand}" Visibility="{Binding SelectedItemCount, Converter={StaticResource CountToVis}}">
                         <TextBlock Foreground="{StaticResource AccentText}"><Run Text="Move "/><Run Text="{Binding SelectedItemCount, Mode=OneWay}"/><Run Text=" to…"/></TextBlock>
                     </Button>
-                    <!-- one kind of file alone, from all the share's folders (when it holds more than one kind) -->
-                    <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource KindFilterBar}" Margin="0,0,8,0" VerticalAlignment="Center"/>
                     <Button x:Name="SortButton" Style="{StaticResource BtnGhost}" Margin="0,0,4,0" Click="Sort_Click" ToolTip="Sort the files and folders shown here">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="&#xE8CB;" Style="{StaticResource Icon}" Margin="0,0,8,0"/>
@@ -420,12 +420,8 @@
                             </ContextMenu>
                         </Button.ContextMenu>
                     </Button>
-                    <Button Style="{StaticResource BtnGhost}" Command="{Binding NewFolderCommand}" Margin="4,0,0,0" ToolTip="Create a folder here to organize videos (your files on disk are not moved)">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="&#xE8F4;" Style="{StaticResource Icon}" Margin="0,0,8,0"/>
-                            <TextBlock Text="New folder"/>
-                        </StackPanel>
-                    </Button>
+                    <Button Style="{StaticResource BtnIcon}" Content="&#xE8F4;" Command="{Binding NewFolderCommand}" Margin="2,0,0,0" AutomationProperties.Name="New folder"
+                            ToolTip="New folder: organize the files here (your files on disk are not moved)"/>
                 </StackPanel>
                 </c:FitBar>
                 <ProgressBar IsIndeterminate="True" Height="3" VerticalAlignment="Bottom" Margin="0,0,0,-6" Visibility="{Binding ItemsLoading, Converter={StaticResource BoolToVis}}"/>
