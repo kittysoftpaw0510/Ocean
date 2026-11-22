@@ -228,7 +228,10 @@ has two networking modes (`NetworkCompat`):
   opens them in the viewer (`ViewerViewModel.OpenText`, at most 8 MB): `TextFiles.Decode` takes a byte-order mark,
   else UTF-16 by its zero bytes, else strict UTF-8, else this PC's ANSI code page; zero bytes = not text.
 - **Find in the viewer.** A text: ordinal, case ignored; the matches in view are drawn over the TextBox
-  (`GetRectFromCharacterIndex`; a selection without focus would be WPF's pale grey). A PDF: Windows' PDF engine
+  (`GetRectFromCharacterIndex`; a selection without focus would be WPF's pale grey), as are the line numbers in
+  a gutter beside it (a wrapped line's other rows have none). What is in view is measured with
+  `GetCharacterIndexFromPoint`: the TextBox's `GetFirstVisibleLineIndex`/`GetCharacterIndexFromLineIndex` give
+  wrong positions for lines it hasn't laid out, and the marks then went missing. A PDF: Windows' PDF engine
   gives no text, so `PdfText` draws a page about 2200 px on its long side and reads it with `Windows.Media.Ocr`
   (on this PC, in the user's languages; none installed: it says so); words come with their boxes as fractions of
   the page, matched across words, part of a word in proportion to its letters. Pages are read once per document

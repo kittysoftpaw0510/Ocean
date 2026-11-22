@@ -43,12 +43,16 @@ public partial class ViewerView : UserControl
     }
     private readonly List<Slot> _slots = new();
     private double _pdfZoom = 1;
-    private bool _pdfFit = true;
+    /// <summary>How a PDF is sized: a zoom of its own (100 % when it opens), or fitted to the width / the whole page (kept while the window changes).</summary>
+    private enum PdfSize { Zoom, Width, Page }
+    private PdfSize _pdfSize = PdfSize.Zoom;
     private bool _renderDue, _rendering, _renderAgain;
     private int _pdfGeneration;
     // a text
     private double _textZoom = 1;
     private const double TextSize = 13.5;
+    /// <summary>Where each line of the text begins (for its number).</summary>
+    private int[] _lineStarts = { 0 };
     // finding words
     private sealed class Match { public int Page; public List<Rect> Rects = new(); public int Start, Length; }
     private List<Match> _matches = new();
@@ -68,7 +72,7 @@ public partial class ViewerView : UserControl
         Picture.MouseMove += OnPictureMove;
         Picture.MouseLeftButtonUp += (_, _) => { _dragFrom = null; Picture.ReleaseMouseCapture(); };
         PdfScroll.ScrollChanged += (_, _) => { RenderSoon(); UpdatePageText(); };
-        PdfScroll.SizeChanged += (_, e) => { if (_pdfFit && e.WidthChanged) FitPdf(); };
+        PdfScroll.SizeChanged += (_, e) => { if (_pdfSize != PdfSize.Zoom) FitPdf(); };
         PdfScroll.PreviewMouseWheel += OnPdfWheel;
         TextView.PreviewMouseWheel += OnTextWheel;
         TextView.AddHandler(ScrollViewer.ScrollChangedEvent, new ScrollChangedEventHandler((_, _) => DrawTextMarksSoon()));
@@ -107,7 +111,9 @@ public partial class ViewerView : UserControl
                 break;
             case nameof(ViewerViewModel.TextContent):
                 ClearFind();
+                _lineStarts = LineStarts(_vm.TextContent ?? "");
                 TextView.ScrollToHome();
+                DrawTextMarksSoon();
                 break;
             case nameof(ViewerViewModel.Wrap):
                 ApplyWrap();
@@ -139,6 +145,8 @@ public partial class ViewerView : UserControl
             case Key.OemPlus or Key.Add: Zoom(1.25); break;
             case Key.OemMinus or Key.Subtract: Zoom(0.8); break;
             case Key.D0 or Key.NumPad0: FitAll(); break;
+            case Key.W when _vm.IsPdf: _pdfSize = PdfSize.Width; FitPdf(); break;
+            case Key.P when _vm.IsPdf: _pdfSize = PdfSize.Page; FitPdf(); break;
             case Key.PageDown when _vm.IsPdf: PdfScroll.PageDown(); break;
             case Key.PageUp when _vm.IsPdf: PdfScroll.PageUp(); break;
             case Key.Home when _vm.IsPdf: PdfScroll.ScrollToTop(); break;
@@ -152,7 +160,45 @@ public partial class ViewerView : UserControl
 
     private void ZoomIn_Click(object sender, RoutedEventArgs e) { Zoom(1.25); Focus(); }
     private void ZoomOut_Click(object sender, RoutedEventArgs e) { Zoom(0.8); Focus(); }
-    private void Fit_Click(object sender, RoutedEventArgs e) { FitAll(); Focus(); }
+    /// <summary>The size menu: a PDF fits its width or its page, or is shown at 100 % or another size; a picture fits or is shown 100 %; a text its size.</summary>
+    private void ZoomMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (_vm is null) return;
+        var menu = new ContextMenu { PlacementTarget = ZoomText, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+        MenuItem Item(string header, string? key, bool on, Action act)
+        {
+            var mi = new MenuItem { Header = header, InputGestureText = key ?? "", IsCheckable = false, IsChecked = on };
+            mi.Click += (_, _) => { act(); Focus(); };
+            menu.Items.Add(mi);
+            return mi;
+        }
+        double now = _vm.IsPdf ? _pdfZoom : _vm.IsText ? _textZoom : PictureZoom.ScaleX / PixelExact();
+        if (_vm.IsPdf)
+        {
+            Item("Fit width", "W", _pdfSize == PdfSize.Width, () => { _pdfSize = PdfSize.Width; FitPdf(); });
+            Item("Fit page", "P", _pdfSize == PdfSize.Page, () => { _pdfSize = PdfSize.Page; FitPdf(); });
+            Item("Actual size (100 %)", "0", _pdfSize == PdfSize.Zoom && Math.Abs(now - 1) < 0.005, () => ZoomPdf(1));
+        }
+        else if (_vm.IsImage)
+        {
+            Item("Fit to the window", "0", _fit, () => { _fit = true; FitPicture(); });
+            Item("Actual size (100 %)", null, !_fit && Math.Abs(now - 1) < 0.005, () => ZoomPicture(PixelExact(), null));
+        }
+        else Item("Normal size (100 %)", "0", Math.Abs(now - 1) < 0.005, () => SetTextZoom(1));
+        menu.Items.Add(new Separator());
+        foreach (var z in new[] { 0.5, 0.75, 1.25, 1.5, 2.0 })
+        {
+            var size = z;
+            var on = Math.Abs(now - z) < 0.005 && !(_vm.IsPdf && _pdfSize != PdfSize.Zoom) && !(_vm.IsImage && _fit);
+            Item($"{z * 100:0} %", null, on, () =>
+            {
+                if (_vm.IsPdf) ZoomPdf(size);
+                else if (_vm.IsText) SetTextZoom(size);
+                else ZoomPicture(PixelExact() * size, null);
+            });
+        }
+        menu.IsOpen = true;
+    }
 
     private void Zoom(double by)
     {
@@ -161,9 +207,10 @@ public partial class ViewerView : UserControl
         else ZoomPicture(PictureZoom.ScaleX * by, null);
     }
 
+    /// <summary>"0": back to how it opened (a PDF at 100 %, a picture fitted, a text at its size).</summary>
     private void FitAll()
     {
-        if (_vm?.IsPdf == true) { _pdfFit = true; FitPdf(); }
+        if (_vm?.IsPdf == true) ZoomPdf(1);
         else if (_vm?.IsText == true) SetTextZoom(1);
         else { _fit = true; FitPicture(); }
     }
@@ -246,6 +293,7 @@ public partial class ViewerView : UserControl
     {
         if (_vm is null) return;
         TextView.TextWrapping = _vm.Wrap ? TextWrapping.Wrap : TextWrapping.NoWrap;
+        DrawTextMarksSoon();
         WrapButton.ToolTip = _vm.Wrap ? "Long lines wrap: click to keep each line on one line" : "Wrap long lines";
         WrapButton.Foreground = _vm.Wrap ? (Brush)FindResource("Accent") : new SolidColorBrush(Color.FromRgb(0xC8, 0xD2, 0xE0));
     }
@@ -255,6 +303,7 @@ public partial class ViewerView : UserControl
         _textZoom = Math.Clamp(z, 0.5, 4);
         TextView.FontSize = Math.Round(TextSize * _textZoom * 2) / 2;
         ZoomText.Content = $"{Math.Round(_textZoom * 100)} %";
+        DrawTextMarksSoon();
     }
 
     private void OnTextWheel(object sender, MouseWheelEventArgs e)
@@ -292,21 +341,31 @@ public partial class ViewerView : UserControl
             _slots.Add(slot);
             Pages.Children.Add(slot.Frame);
         }
-        _pdfFit = true;
-        Dispatcher.BeginInvoke(() => { FitPdf(); PdfScroll.ScrollToTop(); }, DispatcherPriority.Loaded);
+        // a PDF opens at its real size (100 %)
+        _pdfSize = PdfSize.Zoom;
+        Dispatcher.BeginInvoke(() => { SetPdfZoom(1); PdfScroll.ScrollToTop(); }, DispatcherPriority.Loaded);
     }
 
+    /// <summary>Fits the pages to the view's width, or a whole page into the view (the widest / tallest page).</summary>
     private void FitPdf()
     {
         if (_slots.Count == 0 || PdfScroll.ActualWidth <= 0) return;
-        var widest = _slots.Max(s => s.W);
-        SetPdfZoom(Math.Clamp((PdfScroll.ActualWidth - 48 - SystemParameters.VerticalScrollBarWidth) / widest, 0.1, 4));
+        var width = (PdfScroll.ActualWidth - 48 - SystemParameters.VerticalScrollBarWidth) / _slots.Max(s => s.W);
+        var page = Math.Min(width, (PdfScroll.ActualHeight - 16 - 24) / _slots.Max(s => s.H));
+        var at = MiddlePage();
+        SetPdfZoom(Math.Clamp(_pdfSize == PdfSize.Page ? page : width, 0.1, 6));
+        // (the page that was in view stays in view)
+        PdfScroll.UpdateLayout();
+        PdfScroll.ScrollToVerticalOffset(Math.Round(PageTop(at)));
     }
+
+    /// <summary>Where a page begins in the scrolled list.</summary>
+    private double PageTop(int index) => 16 + _slots.Take(index).Sum(s => s.Frame.Height + 14) - (_pdfSize == PdfSize.Page ? 8 : 0);
 
     private void ZoomPdf(double z)
     {
         if (_slots.Count == 0) return;
-        _pdfFit = false;
+        _pdfSize = PdfSize.Zoom;
         // the same place stays in view
         var ratio = PdfScroll.ExtentHeight > 0 ? (PdfScroll.VerticalOffset + PdfScroll.ViewportHeight / 2) / PdfScroll.ExtentHeight : 0;
         SetPdfZoom(Math.Clamp(z, 0.1, 6));
@@ -326,7 +385,7 @@ public partial class ViewerView : UserControl
             s.Frame.Width = s.PxW / dpi; s.Frame.Height = s.PxH / dpi;
             DrawMarks(s);
         }
-        ZoomText.Content = $"{Math.Round(z * 100)} %";
+        ZoomText.Content = _pdfSize switch { PdfSize.Width => $"Width · {Math.Round(z * 100)} %", PdfSize.Page => $"Page · {Math.Round(z * 100)} %", _ => $"{Math.Round(z * 100)} %" };
         RenderSoon();
     }
 
@@ -470,7 +529,6 @@ public partial class ViewerView : UserControl
         if (_vm is not null) _vm.SearchStatus = $"{_matches.IndexOf(m) + 1} of {_matches.Count}{(_findCts is null ? "" : "+")}";
         if (_vm?.IsText == true)
         {
-            TextView.Select(m.Start, m.Length);
             var line = TextView.GetLineIndexFromCharacterIndex(m.Start);
             if (line >= 0) TextView.ScrollToLine(Math.Max(0, line - 3));
             TextView.UpdateLayout();
@@ -589,23 +647,70 @@ public partial class ViewerView : UserControl
         Dispatcher.BeginInvoke(() => { _textMarksDue = false; DrawTextMarks(); }, DispatcherPriority.Render);
     }
 
-    /// <summary>The words found in the part of the text in view, marked over it (the current one stronger).</summary>
+    private static int[] LineStarts(string text)
+    {
+        var starts = new List<int> { 0 };
+        for (var i = 0; i < text.Length; i++) if (text[i] == '\n') starts.Add(i + 1);
+        if (starts.Count > 1 && starts[^1] == text.Length) starts.RemoveAt(starts.Count - 1); // (a last line end opens no line)
+        return starts.ToArray();
+    }
+
+    /// <summary>
+    /// The part of the text in view (character positions), measured on the screen: the text box's own line
+    /// numbers are wrong for lines it hasn't laid out yet.
+    /// </summary>
+    private (int From, int To) TextInView()
+    {
+        var len = TextView.Text.Length;
+        if (len == 0 || TextView.ActualHeight <= 0) return (0, 0);
+        var from = TextView.GetCharacterIndexFromPoint(new Point(20, 1), true);
+        var to = TextView.GetCharacterIndexFromPoint(new Point(Math.Max(20, TextView.ActualWidth - 20), TextView.ActualHeight - 1), true);
+        if (from < 0) from = 0;
+        if (to < 0) to = len;
+        // whole lines either side (a long wrapped line, the horizontal scroll)
+        var a = Array.BinarySearch(_lineStarts, from); a = a >= 0 ? a : Math.Max(0, ~a - 1);
+        var b = Array.BinarySearch(_lineStarts, to); b = b >= 0 ? b : Math.Max(0, ~b - 1);
+        return (_lineStarts[Math.Max(0, a - 1)], b + 2 < _lineStarts.Length ? _lineStarts[b + 2] : len);
+    }
+
+    /// <summary>The line numbers beside the lines in view, and the words found there marked over them (the current one stronger).</summary>
     private void DrawTextMarks()
     {
         TextMarks.Children.Clear();
-        if (_vm?.IsText != true || _matches.Count == 0 || TextView.Text.Length == 0) return;
-        int firstLine = TextView.GetFirstVisibleLineIndex(), lastLine = TextView.GetLastVisibleLineIndex();
-        if (firstLine < 0 || lastLine < 0) return;
-        int from = TextView.GetCharacterIndexFromLineIndex(firstLine);
-        int to = TextView.GetCharacterIndexFromLineIndex(lastLine) + TextView.GetLineLength(lastLine);
-        // (the matches are in text order: start at the first in view)
+        LineNumbers.Children.Clear();
+        if (_vm?.IsText != true || TextView.Text.Length == 0) return;
+        var (from, to) = TextInView();
+        double top = -40, bottom = TextView.ActualHeight + 40;
+        // the numbers: each line's, beside where it begins (a wrapped line's other rows have none)
+        var digits = Math.Max(2, _lineStarts.Length.ToString().Length);
+        var size = Math.Max(9, TextView.FontSize * 0.82);
+        LineNumbers.Width = Math.Ceiling(digits * size * 0.62 + 22);
+        var currentLine = _current is { } cur ? LineOf(cur.Start) : -1;
+        var dim = new SolidColorBrush(Color.FromRgb(0x4E, 0x5D, 0x73));
+        var lit = new SolidColorBrush(Color.FromRgb(0xC8, 0xD2, 0xE0));
+        var first = LineOf(from);
+        for (var line = first; line < _lineStarts.Length && _lineStarts[line] <= to; line++)
+        {
+            var r = TextView.GetRectFromCharacterIndex(_lineStarts[line]);
+            if (r.IsEmpty || r.Bottom < top || r.Top > bottom) continue;
+            var number = new TextBlock
+            {
+                Text = (line + 1).ToString(), FontFamily = TextView.FontFamily, FontSize = size, Width = LineNumbers.Width - 12,
+                TextAlignment = TextAlignment.Right, Foreground = line == currentLine ? lit : dim,
+            };
+            Canvas.SetLeft(number, 0);
+            Canvas.SetTop(number, r.Y + (r.Height - size * 1.32) / 2);
+            LineNumbers.Children.Add(number);
+        }
+        if (_matches.Count == 0) return;
+        // the marks: the matches in that part (they are in text order: start at the first one there)
         int lo = 0, hi = _matches.Count;
         while (lo < hi) { var mid = (lo + hi) / 2; if (_matches[mid].Start + _matches[mid].Length <= from) lo = mid + 1; else hi = mid; }
         for (var i = lo; i < _matches.Count && _matches[i].Start <= to && TextMarks.Children.Count < 400; i++)
         {
             var m = _matches[i];
             var current = ReferenceEquals(m, _current);
-            // one mark per line the match is on (a wrapped line can split it)
+            // one mark per row the match is on (a wrapped line can split it)
             Rect? run = null;
             for (var c = m.Start; c < m.Start + m.Length && c < TextView.Text.Length; c++)
             {
@@ -616,8 +721,14 @@ public partial class ViewerView : UserControl
                 if (run is { } prev && Math.Abs(prev.Y - r.Y) < 1) run = Rect.Union(prev, r);
                 else { if (run is { } done) AddTextMark(done, current); run = r; }
             }
-            if (run is { } last) AddTextMark(last, current);
+            if (run is { } last && last.Bottom >= top && last.Top <= bottom) AddTextMark(last, current);
         }
+    }
+
+    private int LineOf(int index)
+    {
+        var i = Array.BinarySearch(_lineStarts, index);
+        return i >= 0 ? i : Math.Max(0, ~i - 1);
     }
 
     private void AddTextMark(Rect r, bool current)
