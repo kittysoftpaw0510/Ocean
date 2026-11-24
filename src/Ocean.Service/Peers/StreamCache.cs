@@ -63,6 +63,7 @@ public sealed class StreamCache
     private readonly string _dir;
     private readonly object _lock = new();
     private readonly Dictionary<string, Entry> _entries = new(); // everything on disk (open or not)
+    private readonly Timer _expire;
 
     public StreamCache(PeerService peers, ConfigStore config, ILogger<StreamCache> log)
     {
@@ -71,6 +72,8 @@ public sealed class StreamCache
         Directory.CreateDirectory(_dir);
         LoadIndex();
         _config.Changed += _ => { if (UsedBytes > Capacity) Evict(); };
+        // at the start and every 6 hours: what nobody watched for two weeks goes
+        _expire = new Timer(_ => { try { Expire(); } catch { } }, null, TimeSpan.FromSeconds(30), TimeSpan.FromHours(6));
     }
 
     public long Capacity => Math.Max(0, _config.Current.StreamCacheGB) * 1024L * 1024 * 1024;
@@ -117,6 +120,45 @@ public sealed class StreamCache
             runs.Add(((long)start * BlockSize, e.BlockEnd(b)));
         }
         return runs;
+    }
+
+    /// <summary>
+    /// Lets go of blocks of a video (read ahead, never reached): they leave the map and their disk space is given back
+    /// (the sparse file's range is zeroed, which frees it).
+    /// </summary>
+    public long Drop(string peerId, ItemDto item, IEnumerable<int> blocks)
+    {
+        Entry? e;
+        lock (_lock) _entries.TryGetValue(Key(peerId, item), out e);
+        if (e is null) return 0;
+        var dropped = blocks.Where(e.Unmark).OrderBy(b => b).ToList();
+        if (dropped.Count == 0) return 0;
+        try
+        {
+            using var fs = new FileStream(e.DataPath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+            // runs of blocks, each zeroed at once
+            for (var i = 0; i < dropped.Count; )
+            {
+                var j = i;
+                while (j + 1 < dropped.Count && dropped[j + 1] == dropped[j] + 1) j++;
+                ZeroRange(fs.SafeFileHandle, (long)dropped[i] * BlockSize, e.BlockEnd(dropped[j]) + 1);
+                i = j + 1;
+            }
+        }
+        catch (Exception ex) { _log.LogDebug("stream cache: freeing {Key}: {Msg}", e.Key, ex.Message); }
+        Save(e);
+        return dropped.Sum(b => e.BlockEnd(b) - (long)b * BlockSize + 1);
+    }
+
+    /// <summary>Videos not watched for this long leave the cache, however much room is left: nobody keeps them that long.</summary>
+    public static readonly TimeSpan KeepUnused = TimeSpan.FromDays(14);
+
+    private void Expire()
+    {
+        List<Entry> old;
+        lock (_lock) old = _entries.Values.Where(e => e.Refs == 0 && DateTime.UtcNow - e.LastAccess > KeepUnused).ToList();
+        foreach (var e in old) Delete(e);
+        if (old.Count > 0) _log.LogInformation("stream cache: {Count} video(s) not watched for {Days} days removed", old.Count, KeepUnused.TotalDays);
     }
 
     /// <summary>The first byte from <paramref name="from"/> to <paramref name="to"/> that isn't in the cache (block start), or null.</summary>
@@ -235,7 +277,7 @@ public sealed class StreamCache
     /// very first bytes had to come from it).
     /// </summary>
     /// <param name="ahead">The read-ahead itself (it doesn't wait for its own blocks).</param>
-    public async Task CopyAsync(string peerId, ItemDto item, long from, long to, Stream dest, bool fill, bool download, CancellationToken ct, bool prefetch = false, bool ahead = false)
+    public async Task CopyAsync(string peerId, ItemDto item, long from, long to, Stream dest, bool fill, bool download, CancellationToken ct, bool ahead = false)
     {
         var size = item.Size;
         if (size <= 0 || from > to || to >= size) throw new ArgumentOutOfRangeException(nameof(from));
@@ -309,7 +351,7 @@ public sealed class StreamCache
                 {
                     try
                     {
-                        using var resp = await _peers.OpenStreamAsync(peerId, item.Id, $"bytes={p}-{fetchEnd}", ct, download, prefetch);
+                        using var resp = await _peers.OpenStreamAsync(peerId, item.Id, $"bytes={p}-{fetchEnd}", ct, download);
                         if (resp.StatusCode != HttpStatusCode.PartialContent
                             || resp.Content.Headers.ContentRange is not { From: { } start } || start != p)
                         {
@@ -508,6 +550,20 @@ public sealed class StreamCache
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool DeviceIoControl(SafeFileHandle device, uint code, IntPtr inBuf, uint inSize, IntPtr outBuf, uint outSize, out uint returned, IntPtr overlapped);
     private const uint FsctlSetSparse = 0x000900C4;
+    private const uint FsctlSetZeroData = 0x000980C8;
+
+    /// <summary>Zeroes [from, to) of a sparse file: NTFS frees the space.</summary>
+    private static void ZeroRange(SafeFileHandle file, long from, long to)
+    {
+        var buf = Marshal.AllocHGlobal(16);
+        try
+        {
+            Marshal.WriteInt64(buf, 0, from);
+            Marshal.WriteInt64(buf, 8, to);
+            DeviceIoControl(file, FsctlSetZeroData, buf, 16, IntPtr.Zero, 0, out _, IntPtr.Zero);
+        }
+        finally { Marshal.FreeHGlobal(buf); }
+    }
 
     private static void CreateSparse(string path, long size)
     {
@@ -547,6 +603,17 @@ public sealed class StreamCache
         public bool Has(int b) { lock (_have) return b >= 0 && b < _have.Length && _have[b]; }
 
         /// <summary>Marks a block present; returns how many are present now.</summary>
+        /// <summary>Takes a block off the map; true when it was there.</summary>
+        public bool Unmark(int b)
+        {
+            lock (_have)
+            {
+                if (b < 0 || b >= _have.Length || !_have[b]) return false;
+                _have[b] = false; _count--;
+                return true;
+            }
+        }
+
         public int Mark(int b)
         {
             lock (_have)

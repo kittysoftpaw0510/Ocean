@@ -779,21 +779,18 @@ Downloads read through the stream cache (below), so whatever was already watched
 - **Viewer side.** The player's requests go to `PeerMedia`: the same video in my own shares (name + size)
   or a finished download of it plays from disk; otherwise bytes come through the **stream cache**
   (read ahead of the player by `ReadAhead`: the app posts the playhead every second, `POST /api/peers/{id}/buffer`
-  {itemId, at} → the loaded byte runs, for the seek bar; from the playhead's byte (its average bit rate) the first
-  missing blocks within the window (120 s at its bit rate, 64 MB to 1 GB, at most a third of the cache) are fetched
-  8 MB at a time as watching; the player's own requests wait up to 3 s for a block being read ahead
+  {itemId, at} → the loaded byte runs, for the seek bar; from the playhead's byte (its average bit rate) the missing
+  blocks up to 30 s ahead (4–96 MB, at most a tenth of the cache) are fetched 4 MB at a time as watching, once less
+  than 20 s are left; the player's own requests wait up to 3 s for a block being read ahead
   (`StreamCache.AheadMark`) and otherwise fetch one block, so nothing comes twice; a new video replaces the session,
-  15 s without a post ends it. Measured at a 6 MB/s owner: 155 s ahead after 13 s, filled at the owner's limit,
-  the player's longest wait 4 ms;
-  also filled ahead by the `Prefetcher`: the app posts the files in view on a node's page, in order, 700 ms after the
-  list settles, and an empty list when the page is left; `POST /api/peers/{id}/prefetch`, `next: true` for the one
-  after what plays; two workers; per file the first ~6 s at its bit rate (2–8 MB), the whole file up to 25 MB (at
-  most 8 per list, 24 files in all), and for an MP4 whose top-level boxes put `mdat` before `moov` the end from
-  there (up to 16 MB). Asked with `X-Ocean-Purpose: prefetch`: the owner paces it like a download but takes no
-  download slot, doesn't count it as watching and doesn't list it as sending; an older owner takes it as watching)
-  (`cache/streams/`): one sparse file per video filled in 1 MB blocks + a block map, keyed by node, item,
-  size and mtime. Cached blocks are served from disk, missing runs are fetched from the owner and stored.
-  LRU eviction beyond the size in Settings (default 5 GB, 0 = off). A finished download drops the video's
+  15 s without a post ends it. Then the blocks it brought that the playhead never went through are let go
+  (`StreamCache.Drop`: off the map, `FSCTL_SET_ZERO_DATA` frees their space in the sparse file): only what was
+  played stays. Measured at a 6 MB/s owner: 20–30 s ahead, 16 MB of a 99 MB video after 20 s, the player's longest
+  wait 5 ms; on closing, 22 of 32 MB read ahead let go. Ocean 1.7.5–1.7.6 also fetched the start of the files in
+  view while browsing (`X-Ocean-Purpose: prefetch`, still served after viewers, without a slot); that went: it
+  fetched too much.)
+  LRU eviction beyond the size in Settings (default 5 GB, 0 = off); a video not watched for 14 days goes whatever the
+  room (checked at the start and every 6 h). A finished download drops the video's
   cached blocks.
 - **Owner side.** `UploadScheduler` paces every outgoing video byte. Requests marked
   `X-Ocean-Purpose: download` yield to streams: while anyone is watching, downloads together get a fifth

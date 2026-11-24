@@ -293,13 +293,6 @@ public sealed class BufferDto
     public bool Local { get; set; }
 }
 
-/// <summary>What to get ready on another PC's page: the files in view (in order), or the one to play next.</summary>
-public sealed class PrefetchDto
-{
-    public List<string>? ItemIds { get; set; }
-    public bool Next { get; set; }
-}
-
 /// <summary>Another PC started downloading from me ("uploadStarted" event): who, and the files it began with.</summary>
 public sealed class UploadStartedDto
 {

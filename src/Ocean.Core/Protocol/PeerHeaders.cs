@@ -7,8 +7,8 @@ public static class PeerHeaders
     public const string Purpose = "X-Ocean-Purpose";
     public const string Download = "download";
     /// <summary>
-    /// Getting a file ready before it is clicked (its start): after anyone watching, no download slot, not counted as
-    /// watching. (An older Ocean treats it as watching.)
+    /// Getting a file ready before it is clicked (Ocean 1.7.5 and 1.7.6 did, while browsing): served after anyone
+    /// watching, no download slot, not counted as watching.
     /// </summary>
     public const string Prefetch = "prefetch";
 

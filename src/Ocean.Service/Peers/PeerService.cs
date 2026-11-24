@@ -810,12 +810,11 @@ public sealed class PeerService : IDisposable
     // ------------------------------------------------------------------ media
 
     /// <summary>Opens a (range) stream from the peer. Caller disposes the response.</summary>
-    public async Task<HttpResponseMessage> OpenStreamAsync(string peerId, string itemId, string? range, CancellationToken ct, bool download = false, bool prefetch = false)
+    public async Task<HttpResponseMessage> OpenStreamAsync(string peerId, string itemId, string? range, CancellationToken ct, bool download = false)
     {
         var peer = OnlinePeer(peerId);
         var req = _client.Build(peer, HttpMethod.Get, "/p/stream/" + Uri.EscapeDataString(itemId), GrantsFor(peerId));
         if (download) req.Headers.TryAddWithoutValidation(PeerHeaders.Purpose, PeerHeaders.Download); // the owner lets viewers go first
-        else if (prefetch) req.Headers.TryAddWithoutValidation(PeerHeaders.Purpose, PeerHeaders.Prefetch);
         if (!string.IsNullOrEmpty(range)) req.Headers.TryAddWithoutValidation("Range", range);
         var resp = await _client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
         if (resp.StatusCode == HttpStatusCode.Forbidden) await HandleLockedAsync(peerId, resp);
