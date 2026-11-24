@@ -90,6 +90,13 @@ public static class LocalApi
             var req = await ctx.Request.ReadFromJsonAsync<BufferAskDto>(Json.Options);
             return req is null || req.ItemId.Length == 0 ? Results.BadRequest() : Results.Json(ahead.Touch(peerId, req.ItemId, req.At), Json.Options);
         });
+        // the player closed it: reading ahead stops, the video leaves the cache
+        g.MapPost("/peers/{peerId}/buffer/close", async (string peerId, HttpContext ctx, Ocean.Service.Peers.ReadAhead ahead) =>
+        {
+            var req = await ctx.Request.ReadFromJsonAsync<BufferAskDto>(Json.Options);
+            if (req is not null && req.ItemId.Length > 0) ahead.Close(peerId, req.ItemId);
+            return Results.Ok();
+        });
         g.MapPost("/peers/{peerId}/visited", (string peerId, PeerService peers) => { peers.MarkVisited(peerId); return Results.Ok(); });
 
         g.MapPost("/peers/{peerId}/unlock", async (string peerId, HttpContext ctx, PeerService peers) =>

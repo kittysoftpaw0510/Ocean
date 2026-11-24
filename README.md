@@ -20,10 +20,9 @@ and every byte between them travels over mutually authenticated, end-to-end encr
   in the folder shown and sort by *Type*. Ocean 1.6.4 and older are not told about these files.
 - **Loaded ahead while you watch**, as a browser does with a video on the web: about 30 s from where you are are
   fetched ahead and topped up as it plays (also while paused); a seek loads from the new place. The seek bar shows
-  what is loaded (light) beyond what was played, and the network can hiccup without the picture stopping. When
-  you close the video, what was loaded but not watched is deleted at once; what you watched stays in the stream
-  cache (for watching again or seeking back) until the cache is full (Settings, 5 GB by default) or nobody
-  watched it for 14 days.
+  what is loaded (light) beyond what was played, and the network can hiccup without the picture stopping. Nothing
+  is kept: when you close the video (or open another) its bytes are deleted at once, and anything left unused for
+  10 minutes goes too (Settings: *Video cache*, the room it may take while you watch; 0 = off).
 - **Find** (Ctrl+F) in a PDF or a text: Enter / Shift+Enter go through the matches, all marked, the current one
   stronger. A PDF's words are read by Windows' own text recognition, on this PC (no internet), page by page from
   the one in view, so scanned PDFs are searchable too. A PDF opens at its real size (100 %); the size button

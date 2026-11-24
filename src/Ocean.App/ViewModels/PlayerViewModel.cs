@@ -103,7 +103,7 @@ public partial class PlayerViewModel : ObservableObject
     public bool ShowInWindow => IsOpen && !IsPip;
     partial void OnIsOpenChanged(bool value)
     {
-        if (!value) { IsPip = false; _bufferTick?.Stop(); Buffered = Array.Empty<(double, double)>(); BufferText = ""; }
+        if (!value) { IsPip = false; _bufferTick?.Stop(); Buffered = Array.Empty<(double, double)>(); BufferText = ""; LetGo(); }
         OnPropertyChanged(nameof(ShowInWindow));
     }
     partial void OnIsPipChanged(bool value) { if (value) IsFullscreen = false; OnPropertyChanged(nameof(ShowInWindow)); }
@@ -317,6 +317,17 @@ public partial class PlayerViewModel : ObservableObject
         return Uri.UnescapeDataString(end < 0 ? rest : rest[..end]);
     }
 
+    // the video last told to the service (peer, item): when the player leaves it, it is let go of there
+    private (string Peer, string Item)? _told;
+
+    /// <summary>The player left the video it was showing (closed, or another one opened): the service lets its bytes go.</summary>
+    private void LetGo()
+    {
+        if (_told is not { } t) return;
+        _told = null;
+        _ = _main.Api.PostAsync($"/api/peers/{t.Peer}/buffer/close", new BufferAskDto { ItemId = t.Item }).ContinueWith(_ => { });
+    }
+
     private async Task TellBufferAsync()
     {
         if (_bufferBusy) return;
@@ -324,6 +335,8 @@ public partial class PlayerViewModel : ObservableObject
         _bufferBusy = true;
         try
         {
+            if (_told is { } t && (t.Peer != peer.Id || t.Item != id)) LetGo();
+            _told = (peer.Id, id);
             var b = await _main.Api.PostAsync<BufferDto>($"/api/peers/{peer.Id}/buffer", new BufferAskDto { ItemId = id, At = PositionSeconds });
             if (b is null || b.Size <= 0 || !ReferenceEquals(Peer, peer)) return;
             Buffered = b.Ranges.Select(r => (r[0] / (double)b.Size, (r[1] + 1) / (double)b.Size)).ToList();

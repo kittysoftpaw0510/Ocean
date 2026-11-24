@@ -34,8 +34,10 @@ public sealed class PeerStatusException : Exception
 }
 
 /// <summary>
-/// Disk cache of video bytes watched from other PCs, so watching again, seeking back, resuming, or downloading a
-/// video you just watched doesn't fetch the same bytes over the network twice.
+/// Disk cache of the video bytes being watched from other PCs (or passed on as a bridge, or received by multicast),
+/// so seeking back and reading ahead don't fetch the same bytes over the network twice. It holds a video only while
+/// it is in use: the player's closing lets it go at once (see <see cref="ReadAhead"/>), and anything nobody read for
+/// 10 minutes goes too (so also what an older Ocean, or a crash, left behind).
 /// <para>
 /// Each video is a sparse file filled in 1 MB blocks as they arrive, plus a small map of which blocks are present.
 /// A request is answered from cached blocks where possible; missing runs are fetched from the owner (and stored
@@ -72,8 +74,9 @@ public sealed class StreamCache
         Directory.CreateDirectory(_dir);
         LoadIndex();
         _config.Changed += _ => { if (UsedBytes > Capacity) Evict(); };
-        // at the start and every 6 hours: what nobody watched for two weeks goes
-        _expire = new Timer(_ => { try { Expire(); } catch { } }, null, TimeSpan.FromSeconds(30), TimeSpan.FromHours(6));
+        // at the start nothing is in use (everything left goes); then every minute what nobody read for 10 minutes
+        try { Expire(all: true); } catch { }
+        _expire = new Timer(_ => { try { Expire(all: false); } catch { } }, null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
     }
 
     public long Capacity => Math.Max(0, _config.Current.StreamCacheGB) * 1024L * 1024 * 1024;
@@ -122,43 +125,21 @@ public sealed class StreamCache
         return runs;
     }
 
-    /// <summary>
-    /// Lets go of blocks of a video (read ahead, never reached): they leave the map and their disk space is given back
-    /// (the sparse file's range is zeroed, which frees it).
-    /// </summary>
-    public long Drop(string peerId, ItemDto item, IEnumerable<int> blocks)
+    /// <summary>A video nobody read for this long leaves the cache (the player closed long ago, a bridge's viewers left...).</summary>
+    public static readonly TimeSpan KeepUnused = TimeSpan.FromMinutes(10);
+
+    /// <summary>A video is still open in the player (a long pause): it doesn't count as unused.</summary>
+    public void Keep(string peerId, ItemDto item)
     {
-        Entry? e;
-        lock (_lock) _entries.TryGetValue(Key(peerId, item), out e);
-        if (e is null) return 0;
-        var dropped = blocks.Where(e.Unmark).OrderBy(b => b).ToList();
-        if (dropped.Count == 0) return 0;
-        try
-        {
-            using var fs = new FileStream(e.DataPath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
-            // runs of blocks, each zeroed at once
-            for (var i = 0; i < dropped.Count; )
-            {
-                var j = i;
-                while (j + 1 < dropped.Count && dropped[j + 1] == dropped[j] + 1) j++;
-                ZeroRange(fs.SafeFileHandle, (long)dropped[i] * BlockSize, e.BlockEnd(dropped[j]) + 1);
-                i = j + 1;
-            }
-        }
-        catch (Exception ex) { _log.LogDebug("stream cache: freeing {Key}: {Msg}", e.Key, ex.Message); }
-        Save(e);
-        return dropped.Sum(b => e.BlockEnd(b) - (long)b * BlockSize + 1);
+        lock (_lock) if (_entries.TryGetValue(Key(peerId, item), out var e)) e.LastAccess = DateTime.UtcNow;
     }
 
-    /// <summary>Videos not watched for this long leave the cache, however much room is left: nobody keeps them that long.</summary>
-    public static readonly TimeSpan KeepUnused = TimeSpan.FromDays(14);
-
-    private void Expire()
+    private void Expire(bool all)
     {
         List<Entry> old;
-        lock (_lock) old = _entries.Values.Where(e => e.Refs == 0 && DateTime.UtcNow - e.LastAccess > KeepUnused).ToList();
+        lock (_lock) old = _entries.Values.Where(e => e.Refs == 0 && (all || DateTime.UtcNow - e.LastAccess > KeepUnused)).ToList();
         foreach (var e in old) Delete(e);
-        if (old.Count > 0) _log.LogInformation("stream cache: {Count} video(s) not watched for {Days} days removed", old.Count, KeepUnused.TotalDays);
+        if (old.Count > 0) _log.LogInformation("stream cache: {Count} video(s) no longer in use removed ({MB:0} MB)", old.Count, old.Sum(e => e.Bytes) / (1024.0 * 1024));
     }
 
     /// <summary>The first byte from <paramref name="from"/> to <paramref name="to"/> that isn't in the cache (block start), or null.</summary>
@@ -550,21 +531,6 @@ public sealed class StreamCache
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool DeviceIoControl(SafeFileHandle device, uint code, IntPtr inBuf, uint inSize, IntPtr outBuf, uint outSize, out uint returned, IntPtr overlapped);
     private const uint FsctlSetSparse = 0x000900C4;
-    private const uint FsctlSetZeroData = 0x000980C8;
-
-    /// <summary>Zeroes [from, to) of a sparse file: NTFS frees the space.</summary>
-    private static void ZeroRange(SafeFileHandle file, long from, long to)
-    {
-        var buf = Marshal.AllocHGlobal(16);
-        try
-        {
-            Marshal.WriteInt64(buf, 0, from);
-            Marshal.WriteInt64(buf, 8, to);
-            DeviceIoControl(file, FsctlSetZeroData, buf, 16, IntPtr.Zero, 0, out _, IntPtr.Zero);
-        }
-        finally { Marshal.FreeHGlobal(buf); }
-    }
-
     private static void CreateSparse(string path, long size)
     {
         using var fs = new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
@@ -603,17 +569,6 @@ public sealed class StreamCache
         public bool Has(int b) { lock (_have) return b >= 0 && b < _have.Length && _have[b]; }
 
         /// <summary>Marks a block present; returns how many are present now.</summary>
-        /// <summary>Takes a block off the map; true when it was there.</summary>
-        public bool Unmark(int b)
-        {
-            lock (_have)
-            {
-                if (b < 0 || b >= _have.Length || !_have[b]) return false;
-                _have[b] = false; _count--;
-                return true;
-            }
-        }
-
         public int Mark(int b)
         {
             lock (_have)

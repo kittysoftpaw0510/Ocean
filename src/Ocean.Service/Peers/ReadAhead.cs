@@ -8,9 +8,9 @@ namespace Ocean.Service.Peers;
 /// open, about 30 s from the playhead on are fetched into the stream cache (4 to 96 MB), topped up once less than 20 s
 /// are left (also while paused, up to that much). A seek starts again from there. The player then reads from the
 /// disk; its own requests wait for blocks being fetched instead of fetching them twice. The app tells where the
-/// playhead is about once a second (and gets back what is loaded, for the seek bar); when it stops telling (the
-/// player closed), reading ahead stops, and what was read ahead but never reached is let go at once (its disk space
-/// given back): only what was watched stays in the cache. Nothing is read ahead with the stream cache off.
+/// playhead is about once a second (and gets back what is loaded, for the seek bar). When the player closes (or
+/// opens another video, or stops telling for 15 s), reading ahead stops and the video leaves the cache at once: the
+/// cache only holds what is being watched. Nothing is read ahead with the stream cache off.
 /// </summary>
 public sealed class ReadAhead : IDisposable
 {
@@ -23,10 +23,6 @@ public sealed class ReadAhead : IDisposable
         public required string PeerId;
         public required ItemDto Item;
         public long At;
-        /// <summary>The blocks the playhead went through (played): those stay in the cache, the rest read ahead goes.</summary>
-        public readonly HashSet<int> Played = new();
-        /// <summary>The blocks this read-ahead brought (they weren't in the cache before).</summary>
-        public readonly HashSet<int> Brought = new();
         public DateTime Touched = DateTime.UtcNow;
         public readonly StreamCache.AheadMark Mark = new();
         public readonly CancellationTokenSource Cts = new();
@@ -60,17 +56,11 @@ public sealed class ReadAhead : IDisposable
             {
                 if (_s is { } cur && cur.PeerId == peerId && cur.Item.Id == item.Id && cur.Item.Size == item.Size && !cur.Cts.IsCancellationRequested) s = cur;
                 else { old = _s; _s = s = new Session { PeerId = peerId, Item = item }; }
-                // played: from where it was to where it is when it moved on as playing does (forward, not a jump)
-                var bs = StreamCache.BlockSize;
-                lock (s.Played)
-                {
-                    var from = at >= s.At && at - s.At <= Window(item) ? s.At : at;
-                    for (var b = (int)(from / bs); (long)b * bs <= at; b++) s.Played.Add(b);
-                }
                 s.At = at; s.Touched = DateTime.UtcNow;
             }
             if (old is not null) Stop(old);
             Start(s); // (once per session)
+            _cache.Keep(peerId, item); // (while it is open, a long pause doesn't let it expire)
         }
         var ranges = _cache.Cached(peerId, item).Select(r => new[] { r.From, r.To }).ToList();
         var ahead = ranges.FirstOrDefault(r => r[0] <= at && r[1] >= at) is { } run ? run[1] - at + 1 : 0;
@@ -90,6 +80,22 @@ public sealed class ReadAhead : IDisposable
     }
 
     private readonly HashSet<Session> _running = new();
+
+    /// <summary>The player closed this video (or opened another): reading ahead stops and the video leaves the cache now.</summary>
+    public void Close(string peerId, string itemId)
+    {
+        Session? s;
+        lock (_lock) { s = _s is { } cur && cur.PeerId == peerId && cur.Item.Id == itemId ? cur : null; if (s is not null) _s = null; }
+        if (s is not null) Stop(s);
+        else if (_peers.FindItem(peerId, itemId) is { } item) Forget(peerId, item);
+    }
+
+    private void Forget(string peerId, ItemDto item)
+    {
+        var bytes = _cache.Cached(peerId, item).Sum(r => r.To - r.From + 1);
+        _cache.Forget(peerId, item.Id); // (still read by something, a download or a bridge: when that ends)
+        if (bytes > 0) _log.LogInformation("{Name} left the cache ({MB:0} MB)", item.Name, bytes / (1024.0 * 1024));
+    }
 
     private void Start(Session s)
     {
@@ -135,7 +141,6 @@ public sealed class ReadAhead : IDisposable
                 {
                     await _cache.CopyAsync(s.PeerId, item, from, to, Stream.Null, fill: true, download: false, ct, ahead: true);
                     fetched += to - from + 1;
-                    lock (s.Brought) for (var b = (int)(from / StreamCache.BlockSize); (long)b * StreamCache.BlockSize <= to; b++) s.Brought.Add(b);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
                 catch (PeerStatusException ex) when (ex.Status is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.Gone)
@@ -156,14 +161,9 @@ public sealed class ReadAhead : IDisposable
             _cache.SetAhead(s.PeerId, item, null);
             lock (_lock) { _running.Remove(s); if (ReferenceEquals(_s, s)) _s = null; }
             s.Cts.Cancel();
-            // what was read ahead but never reached goes (the block the playhead is in, and the next, stay)
-            List<int> unwatched;
-            var here = (int)(Interlocked.Read(ref s.At) / StreamCache.BlockSize);
-            HashSet<int> played;
-            lock (s.Played) played = new HashSet<int>(s.Played) { here, here + 1 };
-            lock (s.Brought) unwatched = s.Brought.Where(b => !played.Contains(b)).ToList();
-            var freed = _cache.Drop(s.PeerId, item, unwatched);
-            _log.LogInformation("reading ahead of {Name} ended ({MB:0} MB read ahead; {Freed:0} MB never reached let go)", item.Name, fetched / (1024.0 * 1024), freed / (1024.0 * 1024));
+            _log.LogInformation("reading ahead of {Name} ended ({MB:0} MB read ahead)", item.Name, fetched / (1024.0 * 1024));
+            // watched: the video leaves the cache (nothing of it is kept on this PC)
+            Forget(s.PeerId, item);
         }
     }
 

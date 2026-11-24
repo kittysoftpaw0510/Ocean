@@ -315,9 +315,9 @@
                                 <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="Video cache" Style="{StaticResource RowTitle}"/>
-                                        <TextBlock Style="{StaticResource InfoTip}" ToolTip="Keeps what you watched from other PCs, so watching again, seeking back, or downloading it afterwards doesn't use the network again. The oldest videos make room. 0 turns it off." AutomationProperties.HelpText="Keeps what you watched from other PCs, so watching again, seeking back, or downloading it afterwards doesn't use the network again. The oldest videos make room. 0 turns it off."/>
+                                        <TextBlock Style="{StaticResource InfoTip}" ToolTip="Holds the video you are watching from another PC: about 30 s ahead of where you are, and what you passed, so seeking back is instant. When you close the video it is deleted; nothing is kept. 0 turns it off (no loading ahead either)." AutomationProperties.HelpText="Holds the video you are watching from another PC: about 30 s ahead of where you are, and what you passed, so seeking back is instant. When you close the video it is deleted; nothing is kept. 0 turns it off (no loading ahead either)."/>
                                     </StackPanel>
-                                    <TextBlock Text="Makes watching again and seeking back instant. 0 = off." Style="{StaticResource RowHint}"/>
+                                    <TextBlock Text="Room for the video you're watching (deleted when you close it). 0 = off." Style="{StaticResource RowHint}"/>
                                     <TextBlock Text="{Binding StreamCacheUsedText}" Style="{StaticResource RowHint}" Margin="0,4,0,0"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">

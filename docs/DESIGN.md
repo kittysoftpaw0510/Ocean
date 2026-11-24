@@ -783,14 +783,15 @@ Downloads read through the stream cache (below), so whatever was already watched
   blocks up to 30 s ahead (4–96 MB, at most a tenth of the cache) are fetched 4 MB at a time as watching, once less
   than 20 s are left; the player's own requests wait up to 3 s for a block being read ahead
   (`StreamCache.AheadMark`) and otherwise fetch one block, so nothing comes twice; a new video replaces the session,
-  15 s without a post ends it. Then the blocks it brought that the playhead never went through are let go
-  (`StreamCache.Drop`: off the map, `FSCTL_SET_ZERO_DATA` frees their space in the sparse file): only what was
-  played stays. Measured at a 6 MB/s owner: 20–30 s ahead, 16 MB of a 99 MB video after 20 s, the player's longest
-  wait 5 ms; on closing, 22 of 32 MB read ahead let go. Ocean 1.7.5–1.7.6 also fetched the start of the files in
+  15 s without a post, or `POST /api/peers/{id}/buffer/close` from the player (closed, or another video), ends it,
+  and the video leaves the cache at once (`StreamCache.Forget`; still read by a download or a bridge: when that
+  ends). Measured at a 6 MB/s owner: 20–30 s ahead, 16 MB of a 99 MB video after 20 s, the player's longest
+  wait 5 ms; gone 0.3 s after the player closed. Ocean 1.7.5–1.7.6 also fetched the start of the files in
   view while browsing (`X-Ocean-Purpose: prefetch`, still served after viewers, without a slot); that went: it
   fetched too much.)
-  LRU eviction beyond the size in Settings (default 5 GB, 0 = off); a video not watched for 14 days goes whatever the
-  room (checked at the start and every 6 h). A finished download drops the video's
+  LRU eviction beyond the size in Settings (default 5 GB, 0 = off). It holds a video only while it is in use: what
+  nobody read for 10 minutes goes (checked every minute; a paused player keeps its video), and at the start
+  everything goes (nothing is in use yet). A finished download drops the video's
   cached blocks.
 - **Owner side.** `UploadScheduler` paces every outgoing video byte. Requests marked
   `X-Ocean-Purpose: download` yield to streams: while anyone is watching, downloads together get a fifth
